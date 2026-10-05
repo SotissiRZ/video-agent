@@ -133,7 +133,7 @@ function renderSteps(job) {
   $('steps').innerHTML = Object.entries(STEP_LABELS).map(([id, label]) => {
     const s = job.steps?.[id];
     const status = s ? s.status : 'pending';
-    return `<li class="${status}"><span>${label}</span><small title="${escapeHtml(s?.message || '')}">${s ? escapeHtml(s.message || '') : ''}</small></li>`;
+    return `<li class="st-${status}"><span>${label}</span><small title="${escapeHtml(s?.message || '')}">${s ? escapeHtml(s.message || '') : ''}</small></li>`;
   }).join('');
 }
 

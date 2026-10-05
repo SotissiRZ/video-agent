@@ -78,13 +78,16 @@ label.inline input { width: auto; }
 .empty .big { font-size: 48px; }
 .progress { height: 10px; background: var(--panel2); border-radius: 999px; overflow: hidden; margin: 10px 0; }
 #bar { height: 100%; width: 0; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: width .3s; }
-.steps { list-style: none; padding: 0; margin: 10px 0; display: grid; gap: 5px; font-size: 13px; }
-.steps li { display: flex; gap: 8px; color: var(--muted); align-items: baseline; }
-.steps li::before { width: 14px; text-align: center; }
-.steps li.completed { color: var(--text); } .steps li.completed::before { content: '✔'; color: var(--ok); }
-.steps li.started::before, .steps li.progress::before { content: '●'; color: var(--accent); }
-.steps li.pending::before { content: '○'; } .steps li.skipped::before { content: '–'; } .steps li.failed::before { content: '✖'; color: var(--err); }
-.steps li span { flex-shrink: 0; } .steps li small { color: var(--muted); margin-left: auto; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 65%; }
+.steps { list-style: none; padding: 0; margin: 10px 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; font-size: 13px; }
+.steps li { display: flex; gap: 8px; color: var(--muted); align-items: baseline; min-width: 0; }
+.steps li::before { width: 14px; flex-shrink: 0; text-align: center; }
+.steps li.st-completed { color: var(--text); } .steps li.st-completed::before { content: '✔'; color: var(--ok); }
+.steps li.st-started::before, .steps li.st-progress::before { content: '●'; color: var(--accent); }
+.steps li.st-started, .steps li.st-progress { color: var(--text); font-weight: 600; }
+.steps li.st-pending::before { content: '○'; } .steps li.st-skipped::before { content: '–'; } .steps li.st-failed::before { content: '✖'; color: var(--err); }
+.steps li span { flex-shrink: 0; }
+/* Details: one line, cut with an ellipsis (full text in the tooltip). */
+.steps li small { flex: 1 1 0; min-width: 0; color: var(--muted); font-weight: 400; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 video { width: 100%; max-height: 70vh; background: black; border-radius: 12px; margin: 10px 0; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .warnings { color: var(--warn); font-size: 12px; padding-left: 18px; }
