@@ -71,6 +71,8 @@ const EnvSchema = z.object({
   /** auto (all configured) | none | comma-separated list in priority order. */
   VIDEO_AGENT_STOCK_PROVIDERS: z.preprocess(emptyToUndefined, z.string().regex(/^[a-z,\s-]+$/).default('auto')),
   VIDEO_AGENT_STOCK_VIDEOS: bool(true),
+  /** Visuals per scene: long scenes show up to this many photos/clips in a row (1 = one per scene). */
+  VIDEO_AGENT_SHOTS_PER_SCENE: int(3, 1, 4),
   /** Order in which media sources are tried for each scene. */
   VIDEO_AGENT_MEDIA_SOURCES: z.preprocess(
     emptyToUndefined,

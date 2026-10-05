@@ -40,7 +40,12 @@ export interface MediaDirectorOptions {
   maxGeneratedClips: number;
   /** Language of the planned visual keywords (LLM keywords are English). */
   keywordLanguage: string;
+  /** Up to this many visuals in a long scene (stock and local assets only). */
+  shotsPerScene?: number;
 }
+
+/** Shots for a scene of this length: one every ~2.5 s, at most `max`. */
+export const shotsFor = (sceneSec: number, max: number): number => Math.max(1, Math.min(max, Math.floor(sceneSec / 2.5)));
 
 export interface MediaDirectorDeps {
   library?: AssetLibrary;
@@ -130,6 +135,9 @@ export class MediaDirector {
   private readonly disabledProviders = new Set<string>();
   private generatedImages = 0;
   private domain: Domain = BUSINESS;
+  private downloads = 0;
+  /** Search results per provider/kind/query: extra shots reuse them instead of new API calls. */
+  private readonly searches = new Map<string, Promise<StockResult[]>>();
   private sceneIndex = 0;
   private generatedClips = 0;
   readonly credits: MediaCredit[] = [];
@@ -167,6 +175,17 @@ export class MediaDirector {
       const preferVideo = this.options.stockVideos && (scene.kind === 'image' || i % 2 === 0);
       const media = await this.findMedia(scene, planned[i], brief, paths, preferVideo, warnings, signal);
       if (media) scene.media = media;
+      // Long scenes: several shots in a row (2–4 s each), from the same searches.
+      const wanted = shotsFor(scene.durationInFrames / sb.format.fps, this.options.shotsPerScene ?? 1);
+      if (media && wanted > 1 && /^(stock|asset)/.test(media.origin)) {
+        const shots: Media[] = [];
+        for (let k = 1; k < wanted; k++) {
+          const extra = media.origin === 'asset' ? this.fromAssets(scene, planned[i], brief, paths) : await this.fromStock(scene, planned[i], brief, paths, false, warnings, signal);
+          if (!extra) break;
+          shots.push(extra);
+        }
+        if (shots.length) scene.shots = shots;
+      }
     }
 
     if (this.credits.length) {
@@ -219,17 +238,20 @@ export class MediaDirector {
         for (const provider of providers) {
           if (!provider.supports.includes(kind) || this.disabledProviders.has(provider.id)) continue;
           let results: StockResult[];
+          const key = `${provider.id}|${kind}|${language}|${query}`;
           try {
-            results = await provider.search({ query, kind, orientation, language, minShortSide, perPage: 12, signal });
+            if (!this.searches.has(key)) this.searches.set(key, provider.search({ query, kind, orientation, language, minShortSide, perPage: 12, signal }));
+            results = await this.searches.get(key)!;
           } catch (err) {
             if (signal?.aborted) throw err;
+            this.searches.delete(key);
             this.handleProviderError(provider.id, err, warnings);
             continue;
           }
           const result = results.find((r) => !this.used.has(r.id));
           if (!result) continue;
           try {
-            const file = path.join(paths.publicDir, 'media', `${scene.id}-${provider.id}.${result.extension}`);
+            const file = path.join(paths.publicDir, 'media', `${scene.id}-${provider.id}-${++this.downloads}.${result.extension}`);
             fs.writeFileSync(file, await httpBuffer(result.downloadUrl, { provider: provider.id, signal, timeoutMs: 180_000 }));
             this.used.add(result.id);
             await provider.trackUse?.(result, signal);

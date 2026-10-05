@@ -258,6 +258,7 @@ export class VideoAgent {
         maxGeneratedClips: this.config.env.VIDEO_AGENT_MAX_GENERATED_CLIPS,
         // LLM scripts produce English visual keywords; procedural ones are in the brief's language.
         keywordLanguage: scriptSource === 'procedural' ? brief.language : 'en',
+        shotsPerScene: this.config.env.VIDEO_AGENT_SHOTS_PER_SCENE,
       },
     );
     storyboard = await step(
@@ -276,7 +277,8 @@ export class VideoAgent {
         if (!media.length) return `aucun visuel trouvé${sb.brand.logo ? ' (logo seul)' : ''} — fonds animés procéduraux`;
         const bySource = new Map<string, number>();
         for (const s of media) bySource.set(s.media!.origin, (bySource.get(s.media!.origin) ?? 0) + 1);
-        return `${media.length}/${sb.scenes.length} scènes illustrées (${[...bySource].map(([k, v]) => `${k}×${v}`).join(', ')})${sb.brand.logo ? ' + logo' : ''}`;
+        const extra = sb.scenes.reduce((n, s) => n + (s.shots?.length ?? 0), 0);
+        return `${media.length}/${sb.scenes.length} scènes illustrées (${[...bySource].map(([k, v]) => `${k}×${v}`).join(', ')})${extra ? ` + ${extra} plans` : ''}${sb.brand.logo ? ' + logo' : ''}`;
       },
     );
     const credits = director.credits;

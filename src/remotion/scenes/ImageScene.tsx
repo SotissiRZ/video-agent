@@ -2,7 +2,7 @@ import React from 'react';
 import { AbsoluteFill, interpolate, useCurrentFrame, useVideoConfig } from 'remotion';
 import { AnimatedText } from '../components/AnimatedText';
 import { Background } from '../components/Background';
-import { MediaLayer } from '../components/MediaLayer';
+import { MediaStack } from '../components/MediaLayer';
 import { bodyFontSize, fitFontSize, useLayout, withAlpha } from '../utils';
 import { FadeUp, type SceneProps } from './SceneShell';
 
@@ -19,7 +19,7 @@ export const ImageScene: React.FC<SceneProps> = ({ scene, storyboard, index }) =
   return (
     <AbsoluteFill style={{ backgroundColor: palette.background }}>
       {scene.media ? (
-        <MediaLayer media={scene.media} kenBurns={scene.animation.kenBurns} />
+        <MediaStack media={[scene.media, ...(scene.shots ?? [])]} kenBurns={scene.animation.kenBurns} />
       ) : (
         <>
           <Background spec={scene.background} theme={theme} seed={index + 7} />

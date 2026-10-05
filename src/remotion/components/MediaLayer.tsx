@@ -1,5 +1,5 @@
 import React from 'react';
-import { AbsoluteFill, Img, interpolate, Loop, OffthreadVideo, useCurrentFrame, useVideoConfig } from 'remotion';
+import { AbsoluteFill, Img, interpolate, Loop, OffthreadVideo, Sequence, useCurrentFrame, useVideoConfig } from 'remotion';
 import type { Media } from '../contract/storyboard';
 import { resolveSrc, seeded } from '../utils';
 
@@ -52,4 +52,41 @@ export const MediaLayer: React.FC<Props> = ({ media, kenBurns, style }) => {
     content = <Img src={src} style={common} />;
   }
   return <AbsoluteFill style={{ overflow: 'hidden', ...style }}>{content}</AbsoluteFill>;
+};
+
+/** Shortest shot when a scene shows several visuals (frames are dropped below this). */
+export const MIN_SHOT_SECONDS = 1.6;
+const CROSSFADE = 10;
+
+/** Visible shots of a scene: as many as fit with at least MIN_SHOT_SECONDS each. */
+export const visibleShots = (media: Media[], durationInFrames: number, fps: number): Media[] =>
+  media.slice(0, Math.max(1, Math.min(media.length, Math.floor(durationInFrames / (MIN_SHOT_SECONDS * fps)))));
+
+/**
+ * A scene's visuals one after another (2–4 s shots), each with its own camera move,
+ * the next one fading in over the previous.
+ */
+export const MediaStack: React.FC<{ media: Media[]; kenBurns: number; style?: React.CSSProperties }> = ({ media, kenBurns, style }) => {
+  const { durationInFrames, fps } = useVideoConfig();
+  const frame = useCurrentFrame();
+  const shots = visibleShots(media, durationInFrames, fps);
+  if (shots.length === 1) return <MediaLayer media={shots[0]!} kenBurns={kenBurns} style={style} />;
+  const length = Math.ceil(durationInFrames / shots.length);
+  return (
+    <AbsoluteFill style={style}>
+      {shots.map((shot, i) => {
+        const from = i * length;
+        // Each shot stays until the next one has fully faded in.
+        const until = i === shots.length - 1 ? durationInFrames - from : length + CROSSFADE;
+        const opacity = i === 0 ? 1 : interpolate(frame - from, [0, CROSSFADE], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+        return (
+          <Sequence key={`${shot.src}-${i}`} from={from} durationInFrames={until} layout="none">
+            <AbsoluteFill style={{ opacity }}>
+              <MediaLayer media={shot} kenBurns={kenBurns} />
+            </AbsoluteFill>
+          </Sequence>
+        );
+      })}
+    </AbsoluteFill>
+  );
 };

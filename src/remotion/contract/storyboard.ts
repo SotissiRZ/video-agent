@@ -79,6 +79,8 @@ export const SceneSchema = z.object({
   /** Text spoken by the voice-over (and used for subtitles). */
   narration: z.string().default(''),
   media: MediaSchema.optional(),
+  /** Further shots shown after `media`, sharing the scene time (cross-fades). */
+  shots: z.array(MediaSchema).max(4).optional(),
   background: BackgroundSchema.default({}),
   layout: z.enum(['center', 'left']).default('center'),
   animation: AnimationSchema.default({}),
