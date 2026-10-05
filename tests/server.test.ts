@@ -3,13 +3,20 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createLogger } from '../src/core/logger';
 import { startServer } from '../src/server/server';
-import { fakeRenderer, testConfig } from './helpers';
+import { fakeRenderer, testConfig, tmpDir } from './helpers';
+import { ScheduleStore } from '../src/publish/scheduler';
 
 let server: http.Server;
 let base: string;
 
 beforeAll(async () => {
-  const started = await startServer(testConfig(), { port: 0, host: '127.0.0.1', webRoot: path.resolve('web'), deps: { renderer: fakeRenderer, logger: createLogger('silent'), llm: null, voice: null } });
+  const started = await startServer(testConfig(), { port: 0, host: '127.0.0.1', webRoot: path.resolve('web'), deps: { renderer: fakeRenderer, logger: createLogger('silent'), llm: null, voice: null, stock: [] },
+    scheduler: false,
+    publishDeps: {
+      scheduleStore: new ScheduleStore(path.join(tmpDir(), 'schedule.json')),
+      publisherFactory: (id) => ({ id, label: id, constraints: { maxCaption: 2200, maxHashtags: 30, minDurationSec: 1, maxDurationSec: 600, vertical: true, nativeScheduling: false }, publish: async () => ({ platform: id, status: 'published', url: `https://${id}.test/ok` }) }),
+    },
+  });
   server = started.server;
   base = started.url;
 });
@@ -55,5 +62,25 @@ describe('web server', () => {
     const storyboard = await getJson(`/api/jobs/${job.id}/files/storyboard.json`);
     expect(storyboard.format).toMatchObject({ width: 1080, height: 1080, fps: 24 });
     expect((await getJson('/api/jobs')).some((j: { id: string }) => j.id === job.id)).toBe(true);
+
+    // Publication: captions, edits, publish, local scheduling.
+    const platforms = await getJson('/api/platforms');
+    expect(platforms.map((p: { id: string }) => p.id)).toEqual(['tiktok', 'instagram', 'facebook', 'youtube', 'linkedin']);
+    const captions = await getJson(`/api/jobs/${job.id}/captions?platforms=tiktok,instagram`);
+    expect(captions.tiktok.hashtags.length).toBeGreaterThan(0);
+    const bad = await fetch(`${base}/api/jobs/${job.id}/publish`, { method: 'POST', body: JSON.stringify({ platforms: ['myspace'] }) });
+    expect(bad.status).toBe(400);
+    const pub = await fetch(`${base}/api/jobs/${job.id}/publish`, {
+      method: 'POST',
+      body: JSON.stringify({ platforms: ['tiktok'], captions: { tiktok: { title: 'T', caption: 'Texte modifié', hashtags: ['#Kora'] } } }),
+    });
+    const { outcomes } = await pub.json();
+    expect(outcomes[0]).toMatchObject({ platform: 'tiktok', ok: true, url: 'https://tiktok.test/ok', text: 'Texte modifié\n\n#Kora' });
+    const later = new Date(Date.now() + 86400_000).toISOString();
+    const scheduled = await (await fetch(`${base}/api/jobs/${job.id}/publish`, { method: 'POST', body: JSON.stringify({ platforms: ['instagram'], at: later }) })).json();
+    expect(scheduled.outcomes[0].status).toBe('scheduled-local');
+    const queue = await getJson('/api/schedule');
+    expect(queue).toHaveLength(1);
+    expect((await (await fetch(`${base}/api/schedule/${queue[0].id}`, { method: 'DELETE' })).json()).cancelled).toBe(true);
   });
 });

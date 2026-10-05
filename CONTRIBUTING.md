@@ -34,7 +34,7 @@ Voir la section [Architecture](README.md#2-architecture) du README. Les règles 
 
 ## Tests
 
-- `npm test` : rapide, sans réseau ni navigateur. Utilisez les doubles de `tests/helpers.ts` (`FakeLLM`, `fakeRenderer`, `testConfig`).
+- `npm test` : rapide, sans réseau ni navigateur. Les appels HTTP des fournisseurs et des plateformes sont simulés avec `tests/fetch-mock.ts` : vérifiez la séquence exacte des requêtes (URL, en-têtes, corps). Utilisez les doubles de `tests/helpers.ts` (`FakeLLM`, `fakeRenderer`, `testConfig`).
 - `npm run test:render` : rendu Remotion réel, à lancer si vous touchez `src/remotion/` ou `src/render/`.
 - Ajoutez un test pour chaque correction de bug et chaque nouveau template, provider ou type de scène.
 - Avant de toucher au rendu, vérifiez visuellement : `npm run studio` ou `video-agent render`.

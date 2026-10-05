@@ -10,7 +10,9 @@ Il produit `output/<job>/video.mp4` (1080×1920, 30 s, 30 fps), avec animations,
 
 - **Fonctionne sans aucune clé API** (mode local/procédural) sur Windows, macOS et Linux.
 - **Multi-fournisseurs, tous optionnels** : Claude, OpenAI, Groq, tout serveur compatible OpenAI (Ollama, LM Studio…), images (OpenAI, Replicate), voix (ElevenLabs, OpenAI, voix système), clips vidéo (Replicate).
-- **CLI + interface web locale** avec progression en direct et prévisualisation.
+- **Vrais visuels** : vos photos (`assets/`), banques gratuites de photos et vidéos (Pexels, Pixabay, Unsplash), images IA (OpenAI, Replicate, Stability AI), avec crédits automatiques.
+- **Publication automatique** sur TikTok, Instagram, Facebook, YouTube et LinkedIn : légendes et hashtags par plateforme, publication immédiate ou programmée.
+- **CLI + interface web locale** avec progression en direct et prévisualisation, **ou Docker** (`docker compose up`).
 
 ![Images de la vidéo de démonstration Sirago](docs/demo/storyboard-frames.jpg)
 
@@ -32,6 +34,9 @@ Il produit `output/<job>/video.mp4` (1080×1920, 30 s, 30 fps), avec animations,
 10. [Ajouter un template](#10-ajouter-un-template)
 11. [Génération d'une vidéo : ce qui se passe](#11-génération-dune-vidéo--ce-qui-se-passe)
 12. [Résolution des problèmes courants](#12-résolution-des-problèmes-courants)
+13. [Docker](#13-docker)
+14. [Visuels : photos, vidéos et images IA](#14-visuels--photos-vidéos-et-images-ia)
+15. [Publication sur les réseaux sociaux](#15-publication-sur-les-réseaux-sociaux)
 
 ---
 
@@ -93,6 +98,9 @@ Il produit `output/<job>/video.mp4` (1080×1920, 30 s, 30 fps), avec animations,
 | `src/subtitles/` | Découpage équilibré, calage et export SRT/VTT |
 | `src/audio/` | WAV, synthétiseur de musique procédurale |
 | `src/assets/` | Bibliothèque locale (`assets/`), tags, logo, musique |
+| `src/media/` | `MediaDirector` : choix d'un visuel par scène (assets → banques → IA), crédits |
+| `src/providers/stock/` | Pexels, Pixabay, Unsplash (photos et clips libres de droits) |
+| `src/publish/` | Publication : légendes, contraintes, connecteurs TikTok/Instagram/Facebook/YouTube/LinkedIn, jetons OAuth, planificateur |
 | `src/remotion/` | **Moteur vidéo** : compositions React/Remotion. Code compatible navigateur uniquement |
 | `src/render/` | Bundle et rendu Remotion, détection du navigateur |
 | `src/config/` | Variables d'environnement validées par zod |
@@ -356,6 +364,11 @@ Contenu de `output/<job>/` :
 | Linux : `error while loading shared libraries` au rendu | Installez les bibliothèques listées dans les [Prérequis](#3-prérequis). |
 | Rendu lent | Réduisez la résolution ou les fps, augmentez `VIDEO_AGENT_RENDER_CONCURRENCY` (≈ nombre de cœurs), utilisez `--no-render` pour itérer sur le storyboard. |
 | `LLM concept failed, using procedural concept` | Clé invalide, quota atteint ou réponse non conforme. La vidéo est quand même produite. Vérifiez avec `video-agent providers`. |
+| Aucune photo/vidéo réelle dans la vidéo | Ajoutez au moins une clé gratuite (`PEXELS_API_KEY`…) ou des fichiers dans `assets/`. `video-agent doctor` affiche les sources actives, `credits.md` celles utilisées. |
+| Publication : `HTTP 401` | Jeton expiré ou révoqué : relancez `video-agent auth <plateforme> --save`. |
+| Publication : `HTTP 403` | Permission ou scope manquant, ou app non approuvée pour cette action (voir le tableau du § 15). |
+| Vidéo YouTube restée privée | Normal tant que le projet Google Cloud n'a pas passé l'audit YouTube API. |
+| Publication programmée non envoyée | Le planificateur doit tourner : `video-agent web`, le service Docker `web` ou `video-agent scheduler`. Vérifiez avec `video-agent schedule`. |
 | Pas de voix-off | Aucun fournisseur de voix configuré. Ajoutez `ELEVENLABS_API_KEY` ou `OPENAI_API_KEY`, ou `VIDEO_AGENT_VOICE_PROVIDER=system` (installez `espeak-ng` sous Linux). |
 | Polices différentes de l'aperçu | Les polices (Montserrat, Inter) sont embarquées. Vérifiez qu'aucune erreur `could not load font` n'apparaît avec `VIDEO_AGENT_LOG_LEVEL=debug`. |
 | Port 3210 occupé | `video-agent web --port 8080` ou `VIDEO_AGENT_PORT`. |
@@ -363,6 +376,99 @@ Contenu de `output/<job>/` :
 | PowerShell refuse le script | `powershell -ExecutionPolicy Bypass -File scripts\install.ps1` |
 
 Pour tout autre problème : `VIDEO_AGENT_LOG_LEVEL=debug` affiche le détail de chaque étape et la pile d'erreur.
+
+---
+
+## 13. Docker
+
+L'architecture conteneurisée contient tout le nécessaire : Node.js, Chrome headless, le FFmpeg de Remotion, les polices et `espeak-ng`. Rien d'autre n'est à installer sur la machine hôte que Docker Desktop (Windows/macOS) ou Docker Engine (Linux).
+
+```
+┌──────────────────────── docker compose ────────────────────────┐
+│  web  (toujours actif)                cli  (à la demande)      │
+│  ├─ interface web + API  :3210        ├─ génération / rendu    │
+│  ├─ file de rendu                     ├─ publish / captions    │
+│  └─ planificateur de publications     └─ auth (port 8765)      │
+│                 même image : video-agent:latest                 │
+└───────────────┬───────────────┬───────────────┬────────────────┘
+          ./output        ./assets       ./.video-agent      ./.env
+       (vidéos, jobs)   (vos médias)   (jetons OAuth)   (configuration)
+```
+
+```bash
+cp .env.example .env                 # obligatoire avant le premier lancement, puis complétez vos clés
+docker compose build                 # construit l'image (télécharge Chrome Headless Shell)
+docker compose up -d web             # http://localhost:3210
+
+# Commandes ponctuelles (même image, mêmes volumes)
+docker compose run --rm cli "Crée une vidéo verticale de 30 secondes pour promouvoir Sirago…"
+docker compose run --rm cli publish output/<job> --to tiktok,instagram --yes
+docker compose run --rm cli doctor
+docker compose run --rm --service-ports cli auth youtube --save   # --service-ports : expose le port 8765 du retour OAuth
+
+docker compose logs -f web           # journaux (dont le planificateur)
+docker compose down                  # arrêt
+```
+
+- **Windows** : utilisez PowerShell dans le dossier du projet, avec les mêmes commandes. `copy .env.example .env` remplace `cp`.
+- **`.env` doit exister** avant `docker compose up`. Sinon, Docker crée un *dossier* `.env` à sa place.
+- **Navigateur** : si `remotion.media` est inaccessible (proxy d'entreprise), construisez avec le Chromium de Debian : `VIDEO_AGENT_DOCKER_BROWSER=debian docker compose build`.
+- **Sécurité** : l'interface n'est exposée que sur `127.0.0.1` de l'hôte. Pour un serveur, placez un reverse proxy authentifié devant.
+- **Ressources** : `shm_size: 1gb` est requis par Chrome. Réglez `VIDEO_AGENT_RENDER_CONCURRENCY` selon les cœurs alloués à Docker.
+- **Planificateur** : il tourne dans le service `web`, qui doit rester démarré (`restart: unless-stopped`) pour que les publications programmées partent à l'heure.
+
+## 14. Visuels : photos, vidéos et images IA
+
+Pour chaque scène, l'agent cherche un visuel dans l'ordre de `VIDEO_AGENT_MEDIA_SOURCES` (par défaut `assets,stock,ai`) :
+
+1. **`assets`** : vos fichiers dans `assets/` (logo, photos, clips), sélectionnés selon les mots de leur nom. C'est le meilleur choix pour une vraie marque : vos produits, vos clients, votre ville.
+2. **`stock`** : banques gratuites, avec des clés gratuites à créer en quelques minutes :
+   - [Pexels](https://www.pexels.com/api/) (photos et vidéos) → `PEXELS_API_KEY`
+   - [Pixabay](https://pixabay.com/api/docs/) (photos et vidéos) → `PIXABAY_API_KEY`
+   - [Unsplash](https://unsplash.com/developers) (photos) → `UNSPLASH_ACCESS_KEY`
+
+   Les requêtes vont du plus précis au plus général : mots-clés de la scène, puis public et lieu, puis une idée générique liée au rôle de la scène. Les clips vidéo et les photos sont alternés. Un média n'est jamais réutilisé dans la même vidéo.
+3. **`ai`** : génération d'images si rien n'a été trouvé : Replicate (FLUX), Stability AI ou OpenAI. Le nombre d'images est limité par `VIDEO_AGENT_MAX_GENERATED_IMAGES`. Les clips IA (Replicate) s'activent avec `--ai-video`.
+4. **Sinon** : fond animé procédural, comme dans le mode hors-ligne.
+
+`VIDEO_AGENT_MEDIA_COVERAGE=all` met un visuel dans chaque scène, avec un voile sombre pour garder le texte lisible. `visual` le limite aux scènes « image ». Options CLI : `--media all|visual|none`, `--no-stock`, `--no-images`.
+
+**Crédits** : `credits.md` liste l'auteur et la source de chaque média. Avec `VIDEO_AGENT_CAPTION_CREDITS=true`, ils sont ajoutés aux descriptions YouTube, Facebook et LinkedIn, comme le demandent les conditions d'Unsplash.
+
+## 15. Publication sur les réseaux sociaux
+
+```bash
+video-agent platforms                                   # ce qui est configuré
+video-agent captions output/<job>                       # génère captions.json (modifiable) et l'affiche
+video-agent publish output/<job> --to tiktok,instagram,facebook,youtube,linkedin
+video-agent publish output/<job> --to all --at "2026-10-06 18:30"   # programmation
+video-agent publish output/<job> --to youtube --dry-run             # vérifier sans publier
+
+# Tout en une commande : générer, puis publier
+video-agent "Crée une vidéo verticale de 30 s pour Sirago…" --publish tiktok,instagram,youtube --yes
+```
+
+- **Légendes** : un texte, des hashtags et un titre par plateforme, rédigés par le LLM avec le ton de chaque réseau, ou construits à partir du concept en mode hors-ligne. Ils sont enregistrés dans `output/<job>/captions.json`, que vous pouvez modifier avant de publier. Dans l'interface web, ils sont modifiables directement avant l'envoi.
+- **Vérifications** : avant tout envoi, l'agent contrôle le format (MP4), la durée, le poids et l'orientation. Il signale par exemple une vidéo horizontale destinée à TikTok.
+- **Programmation** : YouTube et Facebook gèrent la programmation eux-mêmes. Pour TikTok, Instagram et LinkedIn, la publication est mise en file dans `output/schedule.json` et envoyée à l'heure par le planificateur local (`video-agent web`, le service Docker `web` ou `video-agent scheduler`).
+- **Historique** : chaque tentative est consignée dans `output/<job>/publish.json`.
+- **Confirmation** : la CLI demande confirmation avant de publier (`--yes` pour l'automatisation).
+
+### Configurer chaque plateforme
+
+Les identifiants vont dans `.env`. L'assistant `video-agent auth <plateforme> --save` réalise la connexion OAuth et écrit les jetons obtenus. Les jetons qui se renouvellent sont conservés dans `.video-agent/tokens.json`.
+
+| Plateforme | À créer | Variables | Particularités |
+|---|---|---|---|
+| **YouTube** | Projet [Google Cloud](https://console.cloud.google.com/) → activer *YouTube Data API v3* → écran de consentement OAuth → identifiant OAuth de type **Application de bureau** | `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, puis `video-agent auth youtube --save` | Tant que le projet n'a pas passé l'audit de Google, les vidéos envoyées par l'API restent **privées**. Une vidéo verticale de 3 min maximum devient un Short. |
+| **TikTok** | App sur [developers.tiktok.com](https://developers.tiktok.com/) avec *Login Kit* et *Content Posting API*, et redirect URI `http://localhost:8765/callback` | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, puis `video-agent auth tiktok --save` | `TIKTOK_MODE=draft` (défaut) : la vidéo arrive dans votre boîte de réception TikTok, à publier en 2 clics. `direct` : publication directe, mais forcée en privé tant que l'app n'est pas auditée par TikTok. |
+| **Facebook** | App [Meta for Developers](https://developers.facebook.com/) (type Business), Page Facebook dont vous êtes admin | `META_APP_ID`, `META_APP_SECRET`, puis `video-agent auth meta --token <jeton> --save` | Générez le jeton dans le *Graph API Explorer* avec `pages_manage_posts`, `pages_read_engagement`, `pages_show_list`, `instagram_basic`, `instagram_content_publish`. L'assistant le convertit en jeton de Page permanent. Une vidéo verticale de 90 s maximum est publiée en Reel. |
+| **Instagram** | Compte Instagram **professionnel** (Business ou Créateur) **lié à la Page Facebook** | `INSTAGRAM_USER_ID`, rempli par `auth meta` | Publié en Reel, envoi direct du fichier, sans URL publique. |
+| **LinkedIn** | App sur [developer.linkedin.com](https://developer.linkedin.com/) avec les produits *Sign In with LinkedIn (OpenID)* et *Share on LinkedIn* (profil), ou *Community Management API* (page entreprise), et redirect URI `http://localhost:8765/callback` | `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET`, puis `video-agent auth linkedin --save` (ajoutez `--organization <id>` pour une page entreprise) | Le jeton d'accès dure 60 jours ; relancez `auth linkedin` à l'expiration si votre app n'a pas de refresh token. |
+
+Si le retour automatique sur `localhost` n'est pas possible (machine distante, redirect URI imposée), utilisez `--manual` pour coller l'URL de retour, ou `--redirect-uri <uri>`.
+
+> ⚠️ Les plateformes imposent leurs propres règles : vérification ou audit des applications, quotas d'envoi, droits sur la musique et les images. Les médias des banques intégrées et la musique synthétisée sont libres de droits. Si vous utilisez votre propre musique, assurez-vous d'en avoir les droits.
 
 ---
 

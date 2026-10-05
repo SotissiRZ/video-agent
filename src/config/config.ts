@@ -11,7 +11,7 @@ import { OUTPUT_FORMATS } from '../core/formats';
 import type { LogLevel } from '../core/logger';
 
 export const LLM_PROVIDER_IDS = ['auto', 'anthropic', 'openai', 'groq', 'openai-compatible', 'local'] as const;
-export const IMAGE_PROVIDER_IDS = ['auto', 'none', 'openai', 'replicate'] as const;
+export const IMAGE_PROVIDER_IDS = ['auto', 'none', 'openai', 'replicate', 'stability'] as const;
 export const VOICE_PROVIDER_IDS = ['auto', 'none', 'openai', 'elevenlabs', 'system'] as const;
 export const VIDEO_PROVIDER_IDS = ['none', 'replicate'] as const;
 export const MUSIC_MODES = ['auto', 'procedural', 'assets', 'none'] as const;
@@ -48,11 +48,28 @@ const EnvSchema = z.object({
   VIDEO_AGENT_LLM_TEMPERATURE: z.preprocess((v) => (emptyToUndefined(v) === undefined ? 0.7 : Number(v)), z.number().min(0).max(2)),
 
   // --- Images ----------------------------------------------------------
-  VIDEO_AGENT_IMAGE_PROVIDER: enumWithDefault(IMAGE_PROVIDER_IDS, 'none'),
+  VIDEO_AGENT_IMAGE_PROVIDER: enumWithDefault(IMAGE_PROVIDER_IDS, 'auto'),
   OPENAI_IMAGE_MODEL: z.preprocess(emptyToUndefined, z.string().default('gpt-image-1')),
   REPLICATE_API_TOKEN: optionalString,
   REPLICATE_IMAGE_MODEL: z.preprocess(emptyToUndefined, z.string().default('black-forest-labs/flux-schnell')),
   VIDEO_AGENT_MAX_GENERATED_IMAGES: int(4, 0, 50),
+  STABILITY_API_KEY: optionalString,
+  STABILITY_MODEL: enumWithDefault(['core', 'ultra', 'sd3'] as const, 'core'),
+
+  // --- Stock media & media strategy -----------------------------------
+  PEXELS_API_KEY: optionalString,
+  PIXABAY_API_KEY: optionalString,
+  UNSPLASH_ACCESS_KEY: optionalString,
+  /** auto (all configured) | none | comma-separated list in priority order. */
+  VIDEO_AGENT_STOCK_PROVIDERS: z.preprocess(emptyToUndefined, z.string().regex(/^[a-z,\s-]+$/).default('auto')),
+  VIDEO_AGENT_STOCK_VIDEOS: bool(true),
+  /** Order in which media sources are tried for each scene. */
+  VIDEO_AGENT_MEDIA_SOURCES: z.preprocess(
+    emptyToUndefined,
+    z.string().default('assets,stock,ai').transform((v) => v.split(',').map((x) => x.trim()).filter(Boolean)).pipe(z.array(z.enum(['assets', 'stock', 'ai'])).min(1)),
+  ),
+  /** all = every scene gets a photo/clip when possible; visual = only visual scenes; none. */
+  VIDEO_AGENT_MEDIA_COVERAGE: enumWithDefault(['all', 'visual', 'none'] as const, 'all'),
 
   // --- Voice -----------------------------------------------------------
   VIDEO_AGENT_VOICE_PROVIDER: enumWithDefault(VOICE_PROVIDER_IDS, 'auto'),
@@ -91,6 +108,43 @@ const EnvSchema = z.object({
   // --- Web server ----------------------------------------------------------
   VIDEO_AGENT_HOST: z.preprocess(emptyToUndefined, z.string().default('127.0.0.1')),
   VIDEO_AGENT_PORT: int(3210, 1, 65535),
+
+  // --- Social publishing ---------------------------------------------------
+  YOUTUBE_CLIENT_ID: optionalString,
+  YOUTUBE_CLIENT_SECRET: optionalString,
+  YOUTUBE_REFRESH_TOKEN: optionalString,
+  YOUTUBE_PRIVACY: enumWithDefault(['public', 'unlisted', 'private'] as const, 'public'),
+  YOUTUBE_CATEGORY_ID: z.preprocess(emptyToUndefined, z.string().default('22')),
+
+  TIKTOK_CLIENT_KEY: optionalString,
+  TIKTOK_CLIENT_SECRET: optionalString,
+  TIKTOK_REFRESH_TOKEN: optionalString,
+  TIKTOK_ACCESS_TOKEN: optionalString,
+  TIKTOK_MODE: enumWithDefault(['draft', 'direct'] as const, 'draft'),
+  TIKTOK_PRIVACY: enumWithDefault(['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS', 'FOLLOWER_OF_CREATOR', 'SELF_ONLY'] as const, 'PUBLIC_TO_EVERYONE'),
+
+  META_APP_ID: optionalString,
+  META_APP_SECRET: optionalString,
+  META_GRAPH_VERSION: z.preprocess(emptyToUndefined, z.string().regex(/^v\d+\.\d+$/).default('v23.0')),
+  FACEBOOK_PAGE_ID: optionalString,
+  FACEBOOK_PAGE_ACCESS_TOKEN: optionalString,
+  INSTAGRAM_USER_ID: optionalString,
+  INSTAGRAM_ACCESS_TOKEN: optionalString,
+
+  LINKEDIN_CLIENT_ID: optionalString,
+  LINKEDIN_CLIENT_SECRET: optionalString,
+  LINKEDIN_ACCESS_TOKEN: optionalString,
+  LINKEDIN_REFRESH_TOKEN: optionalString,
+  LINKEDIN_AUTHOR_URN: z.preprocess(emptyToUndefined, z.string().regex(/^urn:li:(person|organization):.+$/).optional()),
+  LINKEDIN_API_VERSION: z.preprocess(emptyToUndefined, z.string().regex(/^\d{6}$/).optional()),
+  LINKEDIN_VISIBILITY: enumWithDefault(['PUBLIC', 'CONNECTIONS'] as const, 'PUBLIC'),
+
+  /** Platforms used by --publish when no list is given (comma separated). */
+  VIDEO_AGENT_PUBLISH_PLATFORMS: z.preprocess(emptyToUndefined, z.string().default('')),
+  /** Credit stock photographers in YouTube/Facebook/LinkedIn descriptions. */
+  VIDEO_AGENT_CAPTION_CREDITS: bool(true),
+  /** Run the local publication scheduler inside "video-agent web". */
+  VIDEO_AGENT_SCHEDULER: bool(true),
 
   VIDEO_AGENT_LOG_LEVEL: enumWithDefault(['debug', 'info', 'warn', 'error', 'silent'] as const, 'info'),
 });
@@ -170,5 +224,14 @@ export const describeSecrets = (env: Env): Record<string, boolean> => ({
   GROQ_API_KEY: Boolean(env.GROQ_API_KEY),
   OPENAI_COMPATIBLE_BASE_URL: Boolean(env.OPENAI_COMPATIBLE_BASE_URL),
   REPLICATE_API_TOKEN: Boolean(env.REPLICATE_API_TOKEN),
+  STABILITY_API_KEY: Boolean(env.STABILITY_API_KEY),
+  PEXELS_API_KEY: Boolean(env.PEXELS_API_KEY),
+  PIXABAY_API_KEY: Boolean(env.PIXABAY_API_KEY),
+  UNSPLASH_ACCESS_KEY: Boolean(env.UNSPLASH_ACCESS_KEY),
   ELEVENLABS_API_KEY: Boolean(env.ELEVENLABS_API_KEY),
+  YOUTUBE_REFRESH_TOKEN: Boolean(env.YOUTUBE_REFRESH_TOKEN),
+  TIKTOK_REFRESH_TOKEN: Boolean(env.TIKTOK_REFRESH_TOKEN || env.TIKTOK_ACCESS_TOKEN),
+  FACEBOOK_PAGE_ACCESS_TOKEN: Boolean(env.FACEBOOK_PAGE_ACCESS_TOKEN),
+  INSTAGRAM_ACCESS_TOKEN: Boolean(env.INSTAGRAM_ACCESS_TOKEN || env.FACEBOOK_PAGE_ACCESS_TOKEN),
+  LINKEDIN_ACCESS_TOKEN: Boolean(env.LINKEDIN_ACCESS_TOKEN || env.LINKEDIN_REFRESH_TOKEN),
 });

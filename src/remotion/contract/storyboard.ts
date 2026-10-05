@@ -36,6 +36,8 @@ export const MediaSchema = z.object({
   origin: z.string().default('asset'),
   /** Known clip length (videos only). When set, the clip loops to fill the scene. */
   durationInFrames: z.number().int().positive().optional(),
+  /** Attribution for stock media (photographer / videographer and source page). */
+  credit: z.object({ author: z.string(), source: z.string(), url: z.string().optional() }).optional(),
 });
 export type Media = z.infer<typeof MediaSchema>;
 

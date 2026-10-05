@@ -1,0 +1,147 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { ensureJobDirs, jobPaths } from '../src/agent/job';
+import { createLogger } from '../src/core/logger';
+import { buildStockQueries, MediaDirector, wantsMedia } from '../src/media/director';
+import { PexelsProvider } from '../src/providers/stock/pexels';
+import { PixabayProvider } from '../src/providers/stock/pixabay';
+import { resolveStockProviders } from '../src/providers/stock/registry';
+import { pickRendition, type StockProvider, type StockQuery, type StockResult } from '../src/providers/stock/types';
+import { UnsplashProvider } from '../src/providers/stock/unsplash';
+import { StoryboardSchema } from '../src/remotion/contract/storyboard';
+import { getStyle } from '../src/remotion/contract/styles';
+import { computeTotalDuration } from '../src/remotion/contract/timeline';
+import type { VideoBrief } from '../src/core/types';
+import { json, mockFetch } from './fetch-mock';
+import { testConfig, tmpDir } from './helpers';
+
+let restore: (() => void) | undefined;
+afterEach(() => restore?.());
+
+const brief = { brand: 'Sirago', audience: 'chauffeurs', location: 'Burkina Faso', keywords: ['sirago', 'chauffeurs'], width: 1080, height: 1920, fps: 30, language: 'fr' } as unknown as VideoBrief;
+
+describe('stock providers', () => {
+  it('picks the smallest rendition that is large enough', () => {
+    const files = [{ width: 640, height: 360 }, { width: 1920, height: 1080 }, { width: 3840, height: 2160 }];
+    expect(pickRendition(files, 1080)).toEqual({ width: 1920, height: 1080 });
+    expect(pickRendition([{ width: 640, height: 360 }], 1080)).toEqual({ width: 640, height: 360 });
+  });
+
+  it('parses Pexels photos and videos', async () => {
+    const m = mockFetch([
+      ['GET', /api\.pexels\.com\/v1\/search/, () => json({ photos: [{ id: 1, width: 4000, height: 6000, url: 'https://pexels.com/p/1', photographer: 'Awa', src: { original: 'o.jpg', large2x: 'l2.jpg', large: 'l.jpg', portrait: 'p.jpg', landscape: 'ls.jpg' } }] })],
+      ['GET', /api\.pexels\.com\/videos\/search/, () => json({ videos: [{ id: 9, width: 1080, height: 1920, url: 'https://pexels.com/v/9', duration: 12, user: { name: 'Issa' }, video_files: [{ link: 'sd.mp4', width: 540, height: 960, file_type: 'video/mp4', quality: 'sd' }, { link: 'hd.mp4', width: 1080, height: 1920, file_type: 'video/mp4', quality: 'hd' }] }] })],
+    ]);
+    restore = m.restore;
+    const p = new PexelsProvider('key');
+    const q: StockQuery = { query: 'chauffeurs', kind: 'photo', orientation: 'portrait', language: 'fr', minShortSide: 1080 };
+    const photos = await p.search(q);
+    expect(photos[0]).toMatchObject({ id: 'pexels-photo-1', downloadUrl: 'l2.jpg', author: 'Awa', kind: 'photo' });
+    expect(m.calls[0]!.url).toContain('locale=fr-FR');
+    expect(m.calls[0]!.headers.authorization).toBe('key');
+    const videos = await p.search({ ...q, kind: 'video' });
+    expect(videos[0]).toMatchObject({ downloadUrl: 'hd.mp4', durationSec: 12, author: 'Issa' });
+  });
+
+  it('parses Pixabay and Unsplash, and tracks Unsplash downloads', async () => {
+    const m = mockFetch([
+      ['GET', /pixabay\.com\/api\/\?/, () => json({ hits: [{ id: 5, pageURL: 'https://pixabay.com/5', user: 'Moussa', imageWidth: 2000, imageHeight: 3000, largeImageURL: 'px.jpg' }] })],
+      ['GET', /api\.unsplash\.com\/search\/photos/, () => json({ results: [{ id: 'abc', width: 3000, height: 4500, urls: { raw: 'https://images.unsplash.com/x?ixid=1', full: '', regular: '' }, links: { html: 'https://unsplash.com/photos/abc', download_location: 'https://api.unsplash.com/photos/abc/download' }, user: { name: 'Fatou' } }] })],
+      ['GET', /api\.unsplash\.com\/photos\/abc\/download/, () => json({ url: 'x' })],
+    ]);
+    restore = m.restore;
+    const pix = await new PixabayProvider('k').search({ query: 'moto', kind: 'photo', orientation: 'portrait', language: 'fr', minShortSide: 1080 });
+    expect(pix[0]).toMatchObject({ downloadUrl: 'px.jpg', author: 'Moussa', height: 1280 });
+    expect(m.calls[0]!.url).toContain('orientation=vertical');
+    const unsplash = new UnsplashProvider('u');
+    const [photo] = await unsplash.search({ query: 'taxi', kind: 'photo', orientation: 'portrait', language: 'en', minShortSide: 1080 });
+    expect(photo!.downloadUrl).toContain('w=1944');
+    expect(m.calls[1]!.headers.authorization).toBe('Client-ID u');
+    await unsplash.trackUse(photo!);
+    expect(m.calls.at(-1)!.url).toBe('https://api.unsplash.com/photos/abc/download');
+    expect(await unsplash.search({ query: 'x', kind: 'video', orientation: 'portrait', language: 'en', minShortSide: 1 })).toEqual([]);
+  });
+
+  it('auto-enables the libraries that have a key', () => {
+    expect(resolveStockProviders(testConfig())).toEqual([]);
+    expect(resolveStockProviders(testConfig({ PEXELS_API_KEY: 'p', UNSPLASH_ACCESS_KEY: 'u' })).map((p) => p.id)).toEqual(['pexels', 'unsplash']);
+    expect(resolveStockProviders(testConfig({ PEXELS_API_KEY: 'p', VIDEO_AGENT_STOCK_PROVIDERS: 'none' }))).toEqual([]);
+    expect(() => resolveStockProviders(testConfig({ VIDEO_AGENT_STOCK_PROVIDERS: 'pixabay' }))).toThrow(/not configured/);
+  });
+});
+
+describe('media director', () => {
+  it('builds queries from specific to generic, without the brand', () => {
+    const queries = buildStockQueries({ role: 'hook' }, { visualKeywords: ['Sirago', 'moto taxi', 'driver', 'hook'] }, brief, 'en');
+    expect(queries[0]).toEqual({ query: 'moto taxi driver', language: 'en' });
+    expect(queries.some((q) => q.query.toLowerCase().includes('sirago'))).toBe(false);
+    expect(queries).toContainEqual({ query: 'chauffeurs Burkina Faso', language: 'en' });
+    expect(queries.at(-1)).toEqual({ query: 'people city street', language: 'en' });
+  });
+
+  const makeStoryboard = () => {
+    const scenes = StoryboardSchema.shape.scenes.parse(
+      ['hook', 'benefits', 'proof', 'cta'].map((role, i) => ({ id: `0${i + 1}-${role}`, kind: role === 'proof' ? 'image' : 'title', role, durationInFrames: 90, headline: role })),
+    );
+    return StoryboardSchema.parse({
+      meta: { title: 't', template: 'advertisement', style: 'modern' },
+      format: { width: 1080, height: 1920, fps: 30, durationInFrames: computeTotalDuration(scenes) },
+      theme: getStyle('modern').theme,
+      scenes,
+    });
+  };
+
+  it('fills every scene with distinct stock media, records credits and survives provider failures', async () => {
+    let n = 0;
+    const fake: StockProvider = {
+      id: 'fake',
+      supports: ['photo', 'video'],
+      async search(q): Promise<StockResult[]> {
+        n++;
+        return [1, 2, 3, 4, 5].map((i) => ({ provider: 'fake', id: `${q.kind}-${i}`, kind: q.kind, downloadUrl: `https://cdn.test/${q.kind}-${i}`, width: 1080, height: 1920, durationSec: q.kind === 'video' ? 10 : undefined, author: `A${i}`, pageUrl: `https://fake/${i}`, extension: q.kind === 'video' ? 'mp4' : 'jpg' }));
+      },
+    };
+    const broken: StockProvider = { id: 'broken', supports: ['photo'], search: async () => { throw new Error('boom'); } };
+    const m = mockFetch([['GET', /cdn\.test/, () => new Response('bytes')]]);
+    restore = m.restore;
+    const paths = jobPaths(path.join(tmpDir(), 'job'));
+    ensureJobDirs(paths);
+    const warnings: string[] = [];
+    const director = new MediaDirector(
+      { stock: [broken, fake], image: null, video: null, logger: createLogger('silent') },
+      { sources: ['assets', 'stock', 'ai'], coverage: 'all', stockVideos: true, maxGeneratedImages: 0, maxGeneratedClips: 0, keywordLanguage: 'fr' },
+    );
+    const sb = await director.run(makeStoryboard(), [], brief, paths, warnings, () => undefined);
+    const media = sb.scenes.map((s) => s.media!);
+    expect(media.every(Boolean)).toBe(true);
+    expect(new Set(media.map((m) => m.src)).size).toBe(4);
+    expect(media[0]).toMatchObject({ type: 'video', origin: 'stock:fake', durationInFrames: 299, credit: { author: 'A1', source: 'fake' } });
+    expect(media[1]!.type).toBe('image');
+    expect(fs.existsSync(path.join(paths.publicDir, media[0]!.src))).toBe(true);
+    expect(fs.readFileSync(path.join(paths.dir, 'credits.md'), 'utf8')).toContain('A1');
+    expect(director.credits).toHaveLength(4);
+    expect(warnings.some((w) => w.includes('broken'))).toBe(true);
+    expect(n).toBeGreaterThan(0);
+  });
+
+  it('falls back to AI images, respects coverage and disables a provider after a 401', async () => {
+    const { ProviderError } = await import('../src/core/errors');
+    let calls = 0;
+    const unauthorized: StockProvider = { id: 'nokey', supports: ['photo'], search: async () => { calls++; throw new ProviderError('nokey', 'HTTP 401: bad key'); } };
+    const paths = jobPaths(path.join(tmpDir(), 'job'));
+    ensureJobDirs(paths);
+    const image = { id: 'fake-ai', generate: async ({ outFileBase }: { outFileBase: string }) => (fs.writeFileSync(`${outFileBase}.png`, 'png'), { file: `${outFileBase}.png` }) };
+    const warnings: string[] = [];
+    const director = new MediaDirector(
+      { stock: [unauthorized], image, video: null, logger: createLogger('silent') },
+      { sources: ['stock', 'ai'], coverage: 'visual', stockVideos: false, maxGeneratedImages: 5, maxGeneratedClips: 0, keywordLanguage: 'fr' },
+    );
+    const sb = await director.run(makeStoryboard(), [], brief, paths, warnings, () => undefined);
+    expect(sb.scenes.filter((s) => s.media).map((s) => s.role)).toEqual(['proof']);
+    expect(sb.scenes[2]!.media).toMatchObject({ origin: 'ai:fake-ai', type: 'image' });
+    expect(calls).toBe(1);
+    expect(warnings.join()).toMatch(/nokey disabled/);
+    expect(wantsMedia(sb.scenes[0]!, 'none')).toBe(false);
+  });
+});

@@ -29,6 +29,7 @@ export interface JobRecord {
   warnings: string[];
   error?: string;
   providers?: Record<string, string>;
+  credits?: number;
 }
 
 export class JobManager extends EventEmitter {
@@ -155,6 +156,7 @@ export class JobManager extends EventEmitter {
       job.title = result.concept.title;
       job.warnings = result.warnings;
       job.providers = result.providers;
+      job.credits = result.credits.length;
       job.overall = 1;
     } catch (err) {
       job.status = controller.signal.aborted ? 'cancelled' : 'failed';
@@ -189,4 +191,5 @@ export const publicJob = (job: JobRecord) => ({
   downloadUrl: job.videoFile ? `/api/jobs/${job.id}/video?download=1` : undefined,
   posterUrl: job.posterFile ? `/api/jobs/${job.id}/poster` : undefined,
   videoName: job.videoFile ? path.basename(job.videoFile) : undefined,
+  credits: job.credits ?? 0,
 });
