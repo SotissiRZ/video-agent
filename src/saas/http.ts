@@ -53,7 +53,7 @@ export const redirect = (res: http.ServerResponse, location: string) => {
   res.end();
 };
 
-export const readRaw = (req: http.IncomingMessage, limit = 64 * 1024): Promise<string> =>
+export const readBuffer = (req: http.IncomingMessage, limit = 64 * 1024): Promise<Buffer> =>
   new Promise((resolve, reject) => {
     let size = 0;
     const chunks: Buffer[] = [];
@@ -64,9 +64,11 @@ export const readRaw = (req: http.IncomingMessage, limit = 64 * 1024): Promise<s
         req.destroy();
       } else chunks.push(c);
     });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
+
+export const readRaw = async (req: http.IncomingMessage, limit = 64 * 1024): Promise<string> => (await readBuffer(req, limit)).toString('utf8');
 
 export const readJson = async (req: http.IncomingMessage, limit?: number): Promise<unknown> => {
   const raw = await readRaw(req, limit);

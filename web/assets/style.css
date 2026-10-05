@@ -311,6 +311,14 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .settings-card .setting .top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; font-weight: 600; color: var(--text-2); }
 .settings-card .setting .top a { margin-left: auto; font-size: 12px; font-weight: 500; display: inline-flex; align-items: center; gap: 4px; }
 
+/* ---- Brand kit ---- */
+.color-list { display: flex; gap: 10px; flex-wrap: wrap; }
+.color-item { display: flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 10px; padding: 4px 6px 4px 4px; background: var(--surface); }
+.color-item input[type=color] { width: 30px; height: 30px; border: 0; padding: 0; background: none; cursor: pointer; }
+.color-item input[type=text] { width: 86px; border: 0; background: transparent; color: var(--text); font: 13px ui-monospace, Menlo, Consolas, monospace; }
+.logo-preview { height: 160px; border: 1px dashed var(--border-strong); border-radius: 12px; display: grid; place-items: center; color: var(--muted); background: repeating-conic-gradient(var(--surface-2) 0% 25%, var(--surface) 0% 50%) 50% / 18px 18px; }
+.logo-preview img { max-height: 130px; max-width: 90%; object-fit: contain; }
+
 /* ---- Auth ---------------------------------------------------------------------------- */
 .auth { min-height: 100vh; display: grid; grid-template-rows: auto 1fr; background: var(--bg); background-image: var(--hero-glow); }
 .auth-top { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; }

@@ -35,6 +35,10 @@ export interface VideoOptions {
   maxDurationSec?: number;
   /** Small badge shown in a corner of the video (e.g. free plan: "Made with Video Agent"). */
   badge?: string;
+  /** Brand kit: name used when the prompt names no brand, colours (#RRGGBB), logo file (absolute path). */
+  brandName?: string;
+  brandColors?: string[];
+  brandLogo?: string;
 }
 
 export interface VideoRequest {

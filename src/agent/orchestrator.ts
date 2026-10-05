@@ -155,10 +155,15 @@ export class VideoAgent {
         // A detailed script ("SCÈNE 1 — … (0–5 s)") sets the duration from its timings.
         const structured = parseStructuredPrompt(request.prompt);
         const timedOptions = structured?.totalSec && !options.durationSec ? { ...options, durationSec: Math.round(structured.totalSec) } : options;
-        const { brief, notes } = buildBrief(parsed, timedOptions, this.config);
+        const built = buildBrief(parsed, timedOptions, this.config);
+        const { notes } = built;
+        // Brand kit: its name applies when the prompt does not name a brand.
+        const brief = !built.brief.brand && options.brandName ? { ...built.brief, brand: options.brandName } : built.brief;
         notes.forEach((n) => this.logger.debug(n));
         const baseStyle = getStyle(brief.styleId);
-        const colors = parseHexColors(request.prompt);
+        // Colours written in the prompt win over the brand kit.
+        const promptColors = parseHexColors(request.prompt);
+        const colors = promptColors.length ? promptColors : (options.brandColors ?? []);
         const style = colors.length ? { ...baseStyle, theme: applyBrandColors(baseStyle.theme, colors) } : baseStyle;
         return { brief, template: getTemplate(brief.templateId)!, style, structured };
       },
@@ -258,7 +263,14 @@ export class VideoAgent {
     storyboard = await step(
       'assets',
       'Sélection des visuels',
-      (progress) => director.run(storyboard, planned, brief, paths, warnings, progress, signal),
+      async (progress) => {
+        const sb = await director.run(storyboard, planned, brief, paths, warnings, progress, signal);
+        // Brand kit logo (uploaded by the customer) wins over the shared assets library.
+        if (options.brandLogo && fs.existsSync(options.brandLogo)) {
+          return { ...sb, brand: { ...sb.brand, logo: importAsset(options.brandLogo, paths.publicDir, 'brand'), showWatermark: true } };
+        }
+        return sb;
+      },
       (sb) => {
         const media = sb.scenes.filter((s) => s.media);
         if (!media.length) return `aucun visuel trouvé${sb.brand.logo ? ' (logo seul)' : ''} — fonds animés procéduraux`;

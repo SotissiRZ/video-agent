@@ -195,6 +195,19 @@ const EnvSchema = z.object({
   PLAN_CREATOR_PRICE: z.preprocess(emptyToUndefined, z.string().default('19 €')),
   PLAN_PRO_PRICE: z.preprocess(emptyToUndefined, z.string().default('49 €')),
 
+  /** Outgoing e-mail (password reset, verification): smtp(s)://user:password@host:port. Empty = links written to the logs. */
+  SMTP_URL: optionalString,
+  /** Sender, e.g. "Video Agent <no-reply@example.com>". */
+  MAIL_FROM: z.preprocess(emptyToUndefined, z.string().default('Video Agent <no-reply@localhost>')),
+  /** Videos can be created only once the e-mail address is confirmed. */
+  REQUIRE_EMAIL_VERIFICATION: bool(false),
+  /** Delete videos older than this many days (0 = keep forever). */
+  VIDEO_AGENT_RETENTION_DAYS: int(0, 0, 3650),
+  /** Legal pages (terms, privacy, legal notice). */
+  COMPANY_NAME: z.preprocess(emptyToUndefined, z.string().default('Video Agent')),
+  COMPANY_ADDRESS: z.preprocess(emptyToUndefined, z.string().default('')),
+  CONTACT_EMAIL: z.preprocess(emptyToUndefined, z.string().default('')),
+
   VIDEO_AGENT_LOG_LEVEL: enumWithDefault(['debug', 'info', 'warn', 'error', 'silent'] as const, 'info'),
 });
 

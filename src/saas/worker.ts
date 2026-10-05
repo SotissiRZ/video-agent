@@ -16,6 +16,7 @@ import type { PlatformId, Publisher } from '../publish/types';
 import { createConnectionPublisher, getConnection, providerFor, saveConnection, type ConnectionData } from './connections';
 import type { Vault } from './crypto';
 import type { Db } from './db';
+import { getBrandKit } from './brand';
 import { claimNextJob, failStaleJobs, type JobRow } from './jobs';
 import { getPlan } from './plans';
 import { claimDuePublication, finishPublication, type PublicationRow } from './publications';
@@ -121,8 +122,11 @@ export class Worker {
       })();
     }, 1000);
 
+    // Brand kit (unless the customer unticked it for this video).
+    const kit = (job.options as { brandKit?: boolean }).brandKit === false ? undefined : await getBrandKit(db, job.user_id);
     const options: VideoOptions = {
       ...job.options,
+      ...(kit ? { brandName: kit.name || undefined, brandColors: kit.colors.length ? kit.colors : undefined, brandLogo: kit.logoFile ?? undefined } : {}),
       outDir: job.dir,
       maxDurationSec: plan.maxDurationSec,
       badge: plan.badge ? BADGE_TEXT : undefined,

@@ -19,7 +19,8 @@ import { ensureCaptions, loadJob, publishJob, saveCaptions } from '../publish/se
 import { PLATFORM_IDS, type Captions, type PlatformId } from '../publish/types';
 import { STYLES } from '../remotion/contract/styles';
 import { listTemplates } from '../templates/registry';
-import { AuthError, changePassword, createSession, destroySession, getUser, login, parseCookies, RateLimiter, SESSION_COOKIE, sessionCookie, signup, userForSession, type User } from './auth';
+import { AuthError, changePassword, consumeEmailToken, createEmailToken, createSession, destroySession, findUserByEmail, getUser, login, markEmailVerified, parseCookies, RateLimiter, resetPassword, SESSION_COOKIE, sessionCookie, signup, userForSession, type User } from './auth';
+import { buildEmail, createMailer, type Mailer } from './mail';
 import { billingEnabled, createCheckout, createPortal, handleStripeEvent, stripeClient, verifyStripeSignature, type StripeFetch } from './billing';
 import {
   defaultExchanger,
@@ -37,7 +38,8 @@ import {
 } from './connections';
 import { resolveAppSecret, verifyPassword, Vault } from './crypto';
 import { connectDatabase, type Db } from './db';
-import { clientIp, HttpError, json, readJson, readRaw, redirect, sendFile, SECURITY_HEADERS } from './http';
+import { clientIp, HttpError, json, readBuffer, readJson, readRaw, redirect, sendFile, SECURITY_HEADERS } from './http';
+import { deleteLogo, getBrandKit, MAX_LOGO_BYTES, publicBrandKit, saveBrandKit, saveLogo } from './brand';
 import { createJob, deleteJob, getJob, JOB_ID, listJobs, publicJob, queuePosition, requestCancel, userJobsDir, type JobRow } from './jobs';
 import { checkQuota, getPlan, getUsage, listPlans, PLAN_IDS } from './plans';
 import { cancelPublication, createPublication, listPublications, publicPublication } from './publications';
@@ -60,6 +62,8 @@ export const CreateJobSchema = z.object({
   offline: z.boolean().optional(),
   stock: z.boolean().optional(),
   mediaCoverage: z.enum(['all', 'visual', 'none']).optional(),
+  /** Apply the customer's brand kit (default: yes when one exists). */
+  brandKit: z.boolean().optional(),
 });
 
 const CaptionSchema = z.object({ title: z.string().max(300), caption: z.string().max(6000), hashtags: z.array(z.string().max(100)).max(30) });
@@ -96,6 +100,7 @@ export interface SaasOptions {
   /** Test seams. */
   stripe?: StripeFetch;
   exchanger?: CodeExchanger;
+  mailer?: Mailer;
   workerOptions?: Partial<ConstructorParameters<typeof Worker>[0]>;
 }
 
@@ -106,7 +111,7 @@ export interface SaasApp {
   close: () => Promise<void>;
 }
 
-const userView = (user: User) => ({ id: user.id, email: user.email, name: user.name, role: user.role, locale: user.locale, plan: user.plan, subscriptionStatus: user.subscription_status ?? undefined, currentPeriodEnd: user.current_period_end ? new Date(user.current_period_end).toISOString() : undefined });
+const userView = (user: User) => ({ id: user.id, email: user.email, emailVerified: Boolean(user.email_verified_at), name: user.name, role: user.role, locale: user.locale, plan: user.plan, subscriptionStatus: user.subscription_status ?? undefined, currentPeriodEnd: user.current_period_end ? new Date(user.current_period_end).toISOString() : undefined });
 
 export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptions): Promise<SaasApp> => {
   let config = initialConfig;
@@ -120,6 +125,15 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
   const exchanger = () => options.exchanger ?? defaultExchanger(config);
   const loginLimiter = new RateLimiter(10, 15 * 60_000);
   const signupLimiter = new RateLimiter(20, 60 * 60_000);
+  const mailLimiter = new RateLimiter(5, 60 * 60_000);
+  const mailer = options.mailer ?? createMailer(config, logger);
+  /** E-mails are sent in the background: a slow SMTP server must not delay the response. */
+  const sendMail = (kind: 'verify' | 'reset', user: Pick<User, 'id' | 'email' | 'locale'>, link: string) =>
+    void mailer.send(buildEmail(kind, user.locale, link, config.env.COMPANY_NAME, user.email)).catch((err) => logger.warn(`e-mail ${kind} to ${user.email} failed: ${errorMessage(err)}`));
+  const sendVerification = async (req: http.IncomingMessage, user: User) => {
+    const token = await createEmailToken(db, user.id, 'verify');
+    sendMail('verify', user, `${baseUrl(req)}/api/auth/verify?token=${encodeURIComponent(token)}`);
+  };
 
   const runWorker = options.embeddedWorker ?? (config.env.VIDEO_AGENT_EMBEDDED_WORKER === 'auto' ? db.kind === 'pglite' : config.env.VIDEO_AGENT_EMBEDDED_WORKER === 'true');
   const worker = runWorker ? new Worker({ db, vault, config: () => config, logger, deps: options.deps, ...options.workerOptions }) : undefined;
@@ -158,7 +172,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
   const accountSummary = async (user: User) => {
     const plan = getPlan(config, user.plan);
     const usage = await getUsage(db, user.id);
-    return { user: userView(user), plan, usage, billing: billingEnabled(config) };
+    return { user: userView(user), plan, usage, billing: billingEnabled(config), requireVerification: config.env.REQUIRE_EMAIL_VERIFICATION, mail: mailer.kind };
   };
 
   const capabilities = () => {
@@ -231,7 +245,34 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       if (id === 'signup' && method === 'POST') {
         if (!signupLimiter.take(ip)) throw new AuthError('too_many_attempts', 'Trop de tentatives, réessayez plus tard');
         const body = parse(SignupSchema, await readJson(req));
-        return startSession(req, res, await signup(db, config, body));
+        const user = await signup(db, config, body);
+        await sendVerification(req, user).catch((err) => logger.warn(`verification e-mail: ${errorMessage(err)}`));
+        return startSession(req, res, user);
+      }
+      // Always the same answer: the form must not reveal which addresses have an account.
+      if (id === 'forgot' && method === 'POST') {
+        const body = parse(z.object({ email: z.string().max(254) }), await readJson(req));
+        if (!mailLimiter.take(`${ip}|forgot`)) throw new AuthError('too_many_attempts', 'Trop de demandes, réessayez plus tard');
+        const user = await findUserByEmail(db, body.email);
+        if (user) {
+          const token = await createEmailToken(db, user.id, 'reset');
+          sendMail('reset', user, `${baseUrl(req)}/app#reset?token=${encodeURIComponent(token)}`);
+        }
+        return json(res, 200, { ok: true });
+      }
+      if (id === 'reset' && method === 'POST') {
+        const body = parse(z.object({ token: z.string().max(200), password: z.string().max(200) }), await readJson(req));
+        const userId = await resetPassword(db, body.token, body.password);
+        return startSession(req, res, (await getUser(db, userId))!);
+      }
+      // Link from the verification e-mail (top-level navigation).
+      if (id === 'verify' && method === 'GET') {
+        try {
+          await markEmailVerified(db, await consumeEmailToken(db, url.searchParams.get('token') ?? '', 'verify'));
+          return redirect(res, '/app#create?verified=1');
+        } catch {
+          return redirect(res, '/app#account?verified=0');
+        }
       }
       if (id === 'login' && method === 'POST') {
         const body = parse(LoginSchema, await readJson(req));
@@ -266,6 +307,12 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         const body = parse(ProfileSchema, await readJson(req));
         await db.query('UPDATE users SET name = coalesce($2, name), locale = coalesce($3, locale) WHERE id = $1', [user.id, body.name?.trim() ?? null, body.locale ?? null]);
         return json(res, 200, await accountSummary((await getUser(db, user.id))!));
+      }
+      if (id === 'verify' && method === 'POST') {
+        if (user.email_verified_at) return json(res, 200, { ok: true, alreadyVerified: true });
+        if (!mailLimiter.take(`${user.id}|verify`)) throw new AuthError('too_many_attempts', 'Trop de demandes, réessayez plus tard');
+        await sendVerification(req, user);
+        return json(res, 200, { ok: true });
       }
       if (id === 'password' && method === 'POST') {
         const body = parse(PasswordSchema, await readJson(req));
@@ -302,6 +349,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     if (resource === 'jobs') {
       if (!id && method === 'GET') return json(res, 200, (await listJobs(db, user.id)).map(publicJob));
       if (!id && method === 'POST') {
+        if (config.env.REQUIRE_EMAIL_VERIFICATION && !user.email_verified_at) throw new HttpError(403, 'Confirmez votre adresse e-mail pour créer des vidéos', 'email_unverified');
         const body = parse(CreateJobSchema, await readJson(req));
         const plan = getPlan(config, user.plan);
         const quota = checkQuota(plan, await getUsage(db, user.id), body.durationSec);
@@ -351,6 +399,28 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         const publication = await createPublication(db, user.id, job.id, body.platforms, at);
         worker?.poke();
         return json(res, 202, publicPublication(publication));
+      }
+    }
+
+    if (resource === 'brand') {
+      if (!id && method === 'GET') return json(res, 200, publicBrandKit(await getBrandKit(db, user.id)));
+      if (!id && method === 'PUT') {
+        const body = parse(z.object({ name: z.string().max(80).optional(), colors: z.array(z.string().max(9)).max(4).optional() }), await readJson(req));
+        await saveBrandKit(db, user.id, body);
+        return json(res, 200, publicBrandKit(await getBrandKit(db, user.id)));
+      }
+      if (id === 'logo' && method === 'PUT') {
+        await saveLogo(db, config, user.id, await readBuffer(req, MAX_LOGO_BYTES + 1));
+        return json(res, 200, publicBrandKit(await getBrandKit(db, user.id)));
+      }
+      if (id === 'logo' && method === 'DELETE') {
+        await deleteLogo(db, user.id);
+        return json(res, 200, publicBrandKit(await getBrandKit(db, user.id)));
+      }
+      if (id === 'logo' && method === 'GET') {
+        const kit = await getBrandKit(db, user.id);
+        if (!kit?.logoFile) throw new HttpError(404, 'not found', 'not_found');
+        return sendFile(req, res, kit.logoFile, { cache: 'private, max-age=300' });
       }
     }
 

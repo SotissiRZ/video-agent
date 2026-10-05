@@ -152,6 +152,25 @@ export const MIGRATIONS: string[] = [
     received_at timestamptz NOT NULL DEFAULT now()
   );
   `,
+  // 2 — e-mail verification, password reset, brand kits
+  `
+  ALTER TABLE users ADD COLUMN email_verified_at timestamptz;
+  CREATE TABLE email_tokens (
+    id text PRIMARY KEY,
+    user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind text NOT NULL,
+    expires_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  );
+  CREATE INDEX email_tokens_user ON email_tokens(user_id, kind);
+  CREATE TABLE brand_kits (
+    user_id text PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    name text NOT NULL DEFAULT '',
+    colors jsonb NOT NULL DEFAULT '[]',
+    logo_file text,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  );
+  `,
 ];
 
 /** Apply pending migrations (serialized with an advisory lock: several containers may start together). */

@@ -6,9 +6,9 @@ import { renderPlans } from './plans.js';
 const STEPS = ['analyze', 'concept', 'script', 'storyboard', 'scenes', 'assets', 'animations', 'subtitles', 'audio', 'project', 'render', 'output'];
 const PLATFORMS = { youtube: 'YouTube', tiktok: 'TikTok', instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn' };
 const PROVIDER_INFO = { youtube: { name: 'YouTube', icon: 'youtube' }, tiktok: { name: 'TikTok', icon: 'tiktok' }, linkedin: { name: 'LinkedIn', icon: 'linkedin' }, meta: { name: 'Facebook + Instagram', icon: 'meta' } };
-const PAGES = ['create', 'library', 'schedule', 'connections', 'billing', 'account', 'admin'];
+const PAGES = ['create', 'library', 'schedule', 'connections', 'brand', 'billing', 'account', 'admin'];
 
-const state = { me: null, publicConfig: null, options: null, connections: null, job: null, source: null, publishJobId: null };
+const state = { me: null, publicConfig: null, options: null, connections: null, job: null, source: null, publishJobId: null, brand: null };
 
 // ---- Routing ------------------------------------------------------------------------------
 const route = () => {
@@ -22,15 +22,20 @@ const go = (hash) => {
 
 const onRoute = () => {
   const { page, params } = route();
-  if (!state.me) return showAuth(page === 'signup' ? 'signup' : 'login');
-  if (page === 'login' || page === 'signup') return go('create');
+  if (!state.me) return showAuth(['login', 'signup', 'forgot', 'reset'].includes(page) ? page : 'login');
+  if (['login', 'signup', 'forgot', 'reset'].includes(page)) return go('create');
+  if (params.get('verified')) {
+    toast(t(params.get('verified') === '1' ? 'verify.done' : 'verify.failed'), params.get('verified') === '1' ? 'success' : 'error');
+    history.replaceState(null, '', `#${page}`);
+    refreshMe().catch(() => undefined);
+  }
   const name = PAGES.includes(page) && (page !== 'admin' || state.me.user.role === 'admin') ? page : 'create';
   document.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === `page-${name}`));
   document.querySelectorAll('.nav a[data-page]').forEach((a) => a.classList.toggle('active', a.dataset.page === name));
   $('topTitle').textContent = t(name === 'schedule' ? 'nav.schedule' : `nav.${name}`);
   $('newVideoBtn').hidden = name === 'create';
   $('appView').classList.remove('menu-open');
-  ({ create: () => openJobFromParams(params), library: loadLibrary, schedule: loadSchedule, connections: () => loadConnections(params), billing: () => loadBilling(params), account: loadAccount, admin: loadAdmin })[name]?.();
+  ({ create: () => openJobFromParams(params), library: loadLibrary, schedule: loadSchedule, connections: () => loadConnections(params), brand: loadBrand, billing: () => loadBilling(params), account: loadAccount, admin: loadAdmin })[name]?.();
 };
 window.addEventListener('hashchange', onRoute);
 
@@ -38,13 +43,13 @@ window.addEventListener('hashchange', onRoute);
 const showAuth = (mode) => {
   $('appView').hidden = true;
   $('authView').hidden = false;
-  $('loginForm').hidden = mode !== 'login';
-  $('signupForm').hidden = mode !== 'signup';
+  ['login', 'signup', 'forgot', 'reset'].forEach((m) => ($(`${m}Form`).hidden = mode !== m));
+  $('forgotForm').querySelector('[data-done]').hidden = true;
   const cfg = state.publicConfig;
   $('firstUserNote').hidden = !cfg?.firstUser;
   $('signupClosed').hidden = cfg?.signupOpen !== false;
   $('signupForm').querySelector('button[type=submit]').disabled = cfg?.signupOpen === false;
-  document.title = `${t(mode === 'login' ? 'auth.login' : 'auth.signup')} · Video Agent`;
+  document.title = `${t({ login: 'auth.login', signup: 'auth.signup', forgot: 'auth.forgot.title', reset: 'auth.reset.title' }[mode])} · Video Agent`;
 };
 
 const bindAuthForm = (form, path, extra = () => ({})) =>
@@ -67,6 +72,21 @@ const bindAuthForm = (form, path, extra = () => ({})) =>
   });
 bindAuthForm($('loginForm'), '/api/auth/login');
 bindAuthForm($('signupForm'), '/api/auth/signup', () => ({ locale: getLang() }));
+bindAuthForm($('resetForm'), '/api/auth/reset', () => ({ token: route().params.get('token') ?? '' }));
+
+$('forgotForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const error = form.querySelector('[data-error]');
+  error.hidden = true;
+  try {
+    await post('/api/auth/forgot', { email: form.email.value });
+    form.querySelector('[data-done]').hidden = false;
+  } catch (err) {
+    error.textContent = errorText(err);
+    error.hidden = false;
+  }
+});
 
 $('logout').addEventListener('click', async () => {
   await post('/api/auth/logout').catch(() => undefined);
@@ -86,6 +106,7 @@ const startApp = async () => {
   renderShell();
   await loadOptions();
   loadConnectionsData().catch(() => undefined);
+  loadBrandData().catch(() => undefined);
   refreshPendingCount();
   onRoute();
 };
@@ -97,6 +118,8 @@ const refreshMe = async () => {
 
 const renderShell = () => {
   const { user, plan, usage } = state.me;
+  $('verifyBanner').hidden = user.emailVerified;
+  $('verifyText').textContent = t(state.me.requireVerification ? 'verify.required' : 'verify.banner', { email: user.email });
   $('adminLink').hidden = user.role !== 'admin';
   $('userName').textContent = user.name || user.email.split('@')[0];
   $('userEmail').textContent = user.email;
@@ -110,6 +133,15 @@ const renderShell = () => {
   $('planNote').hidden = !plan.badge;
   $('planNoteText').textContent = t('create.badgeNote', { d: formatDuration(plan.maxDurationSec) });
 };
+
+$('resendVerify').addEventListener('click', async () => {
+  try {
+    await post('/api/me/verify');
+    toast(t('verify.sent'), 'success');
+  } catch (err) {
+    toast(errorText(err), 'error');
+  }
+});
 
 $('menuBtn').addEventListener('click', () => $('appView').classList.toggle('menu-open'));
 $('appView').addEventListener('click', (e) => {
@@ -185,6 +217,7 @@ $('createForm').addEventListener('submit', async (e) => {
   if (format) body.format = format;
   if ($('duration').value) body.durationSec = Number($('duration').value);
   if ($('mediaCoverage').value) body.mediaCoverage = $('mediaCoverage').value;
+  if (!$('brandKitToggle').hidden) body.brandKit = $('brandKit').checked;
   const res = /^(\d{2,4})x(\d{2,4})$/.exec($('resolution').value.trim());
   if (res) Object.assign(body, { width: Number(res[1]), height: Number(res[2]) });
   $('submit').disabled = true;
@@ -552,6 +585,87 @@ $('providerCards').addEventListener('change', async (e) => {
   }
 });
 
+// ---- Brand kit -------------------------------------------------------------------------------
+const hasBrand = (kit) => Boolean(kit && (kit.name || kit.colors.length || kit.logoUrl));
+
+const loadBrandData = async () => {
+  state.brand = await api('/api/brand');
+  $('brandKitToggle').hidden = !hasBrand(state.brand);
+  return state.brand;
+};
+
+const colorRow = (value) => `<div class="color-item"><input type="color" value="${escapeHtml(value)}" data-color-picker /><input type="text" value="${escapeHtml(value)}" maxlength="7" data-color-text /><button type="button" class="btn btn-ghost btn-icon btn-sm" data-color-remove title="${escapeHtml(t('common.delete'))}">${icon('x', 14)}</button></div>`;
+
+const renderBrandColors = (colors) => {
+  $('brandColors').innerHTML =
+    colors.map(colorRow).join('') + (colors.length < 4 ? `<button type="button" class="btn btn-secondary btn-sm" data-color-add>${icon('plus', 14)}</button>` : '');
+};
+const brandColorValues = () => [...$('brandColors').querySelectorAll('[data-color-text]')].map((i) => i.value.trim().toUpperCase()).filter(Boolean);
+
+const loadBrand = async () => {
+  const kit = await loadBrandData().catch(() => ({ name: '', colors: [] }));
+  $('brandForm').name.value = kit.name ?? '';
+  renderBrandColors(kit.colors ?? []);
+  renderLogo(kit.logoUrl);
+};
+
+const renderLogo = (url) => {
+  $('logoPreview').innerHTML = url ? `<img src="${escapeHtml(url)}" alt="" />` : icon('image', 28);
+  $('logoRemove').hidden = !url;
+};
+
+$('brandColors').addEventListener('input', (e) => {
+  const item = e.target.closest('.color-item');
+  if (!item) return;
+  if (e.target.matches('[data-color-picker]')) item.querySelector('[data-color-text]').value = e.target.value.toUpperCase();
+  if (e.target.matches('[data-color-text]') && /^#[0-9a-f]{6}$/i.test(e.target.value)) item.querySelector('[data-color-picker]').value = e.target.value;
+});
+$('brandColors').addEventListener('click', (e) => {
+  if (e.target.closest('[data-color-add]')) renderBrandColors([...brandColorValues(), state.brand?.colors?.length ? '#FFFFFF' : '#0B1C8C']);
+  const remove = e.target.closest('[data-color-remove]');
+  if (remove) {
+    remove.closest('.color-item').remove();
+    renderBrandColors(brandColorValues());
+  }
+});
+$('brandForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    state.brand = await api('/api/brand', { method: 'PUT', body: JSON.stringify({ name: $('brandForm').name.value, colors: brandColorValues() }) });
+    $('brandKitToggle').hidden = !hasBrand(state.brand);
+    toast(t('brand.saved'), 'success');
+  } catch (err) {
+    toast(errorText(err), 'error');
+  }
+});
+$('logoInput').addEventListener('change', async () => {
+  const file = $('logoInput').files[0];
+  if (!file) return;
+  try {
+    // Raw upload: the server checks the real image type and size.
+    const res = await fetch('/api/brand/logo', { method: 'PUT', body: file, headers: { 'content-type': file.type || 'application/octet-stream' }, credentials: 'same-origin' });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new ApiError(res.status, body);
+    state.brand = body;
+    renderLogo(body.logoUrl);
+    $('brandKitToggle').hidden = !hasBrand(state.brand);
+    toast(t('brand.saved'), 'success');
+  } catch (err) {
+    toast(errorText(err), 'error');
+  } finally {
+    $('logoInput').value = '';
+  }
+});
+$('logoRemove').addEventListener('click', async () => {
+  try {
+    state.brand = await api('/api/brand/logo', { method: 'DELETE' });
+    renderLogo(undefined);
+    $('brandKitToggle').hidden = !hasBrand(state.brand);
+  } catch (err) {
+    toast(errorText(err), 'error');
+  }
+});
+
 // ---- Billing ----------------------------------------------------------------------------------
 const loadBilling = async (params) => {
   if (params?.get('checkout') === 'success') toast(t('billing.success'), 'success');
@@ -747,7 +861,7 @@ $('adminSettings').addEventListener('click', async (e) => {
 
 // ---- Language changes re-render dynamic content ----------------------------------------------------
 onLanguageChange((lang) => {
-  if (!state.me) return showAuth(route().page === 'signup' ? 'signup' : 'login');
+  if (!state.me) return showAuth(['login', 'signup', 'forgot', 'reset'].includes(route().page) ? route().page : 'login');
   renderShell();
   renderOptions();
   if (state.job) showJob(state.job);
@@ -755,7 +869,7 @@ onLanguageChange((lang) => {
   if (state.job?.status === 'completed') resetPublish(state.job.id);
   const page = route().page;
   $('topTitle').textContent = t(`nav.${PAGES.includes(page) ? page : 'create'}`);
-  ({ library: loadLibrary, schedule: loadSchedule, connections: loadConnections, billing: loadBilling, account: loadAccount, admin: loadAdmin })[page]?.();
+  ({ library: loadLibrary, schedule: loadSchedule, connections: loadConnections, brand: loadBrand, billing: loadBilling, account: loadAccount, admin: loadAdmin })[page]?.();
   if (lang !== state.me.user.locale) api('/api/me', { method: 'PATCH', body: JSON.stringify({ locale: lang }) }).then((me) => (state.me = me)).catch(() => undefined);
 });
 
