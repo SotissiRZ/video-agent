@@ -14,6 +14,7 @@ import type { JobPaths } from '../agent/job';
 import { errorMessage, ProviderError } from '../core/errors';
 import type { Logger } from '../core/logger';
 import type { PlannedScene, VideoBrief } from '../core/types';
+import { BUSINESS, detectDomain, type Domain } from './domains';
 import { normalize } from '../prompt/parser';
 import { httpBuffer } from '../providers/http';
 import type { ImageProvider } from '../providers/image/types';
@@ -51,37 +52,44 @@ export interface MediaDirectorDeps {
 
 /** Generic English visual ideas per narrative role, used when keywords give nothing. */
 export const ROLE_VISUAL_HINTS: Record<string, string> = {
-  hook: 'people city street',
-  problem: 'stressed person',
-  solution: 'smartphone app',
-  benefits: 'happy customer',
-  proof: 'success team',
-  intro: 'modern city',
-  overview: 'workspace',
+  hook: 'city street people',
+  problem: 'stressed professional',
+  solution: 'person using smartphone',
+  benefits: 'satisfied customer',
+  proof: 'business team success',
+  intro: 'modern city skyline',
+  overview: 'modern workspace',
   features: 'technology product',
   highlight: 'product detail',
-  how: 'hands smartphone',
+  how: 'hands using smartphone',
   steps: 'hands working laptop',
-  tip: 'idea lightbulb',
-  recap: 'thumbs up',
-  teaser: 'celebration',
-  reveal: 'celebration crowd',
-  details: 'event',
-  point: 'young people',
-  list: 'lifestyle',
+  tip: 'idea notebook desk',
+  recap: 'team thumbs up office',
+  teaser: 'event stage lights',
+  reveal: 'event stage audience',
+  details: 'event venue',
+  point: 'professional working',
+  list: 'modern lifestyle adults',
   setting: 'landscape sunrise',
-  challenge: 'struggle effort',
-  'turning-point': 'hope',
-  resolution: 'success smile',
-  message: 'community',
-  outro: 'sunset',
-  cta: 'smiling people phone',
+  challenge: 'determined worker',
+  'turning-point': 'new beginning sunrise',
+  resolution: 'confident entrepreneur',
+  message: 'community adults',
+  outro: 'sunset city',
+  cta: 'adult using smartphone',
 };
 
 const ROLE_WORDS = new Set(Object.keys(ROLE_VISUAL_HINTS));
 
 /** Build search queries from the most specific to the most generic. */
-export const buildStockQueries = (scene: Pick<Scene, 'role'>, plan: Pick<PlannedScene, 'visualKeywords'> | undefined, brief: Pick<VideoBrief, 'brand' | 'audience' | 'location' | 'keywords'>, keywordLanguage: string): Array<{ query: string; language: string }> => {
+export const buildStockQueries = (
+  scene: Pick<Scene, 'role'>,
+  plan: Pick<PlannedScene, 'visualKeywords'> | undefined,
+  brief: Pick<VideoBrief, 'brand' | 'audience' | 'location' | 'keywords'>,
+  keywordLanguage: string,
+  /** Industry searches for this scene (see detectDomain), in English. */
+  domainQueries: string[] = [],
+): Array<{ query: string; language: string }> => {
   const brandWords = new Set(normalize(brief.brand).split(/\s+/).filter(Boolean));
   const clean = (words: string[]) => {
     const seen = new Set<string>();
@@ -98,13 +106,20 @@ export const buildStockQueries = (scene: Pick<Scene, 'role'>, plan: Pick<Planned
     const query = words.join(' ').trim();
     if (query && !queries.some((q) => q.query === query)) queries.push({ query, language });
   };
-  push(planned.slice(0, 3), keywordLanguage);
-  push(planned.slice(0, 2), keywordLanguage);
-  push(context, keywordLanguage === 'en' ? 'en' : keywordLanguage);
-  push(planned.slice(0, 1), keywordLanguage);
+  if (keywordLanguage === 'en') {
+    // LLM keywords are specific to the scene: they come first, the industry searches back them up.
+    push(planned.slice(0, 3), 'en');
+    push(planned.slice(0, 2), 'en');
+    domainQueries.forEach((q) => push(q.split(' '), 'en'));
+  } else {
+    // Offline keywords are the prompt's own words: the industry searches are more reliable.
+    domainQueries.forEach((q) => push(q.split(' '), 'en'));
+    push(planned.slice(0, 2), keywordLanguage);
+  }
+  push(context, keywordLanguage);
   const hint = ROLE_VISUAL_HINTS[scene.role];
   if (hint) push(hint.split(' '), 'en');
-  return queries.slice(0, 5);
+  return queries.slice(0, 6);
 };
 
 export const wantsMedia = (scene: Scene, coverage: MediaCoverage): boolean =>
@@ -114,6 +129,8 @@ export class MediaDirector {
   private readonly used = new Set<string>();
   private readonly disabledProviders = new Set<string>();
   private generatedImages = 0;
+  private domain: Domain = BUSINESS;
+  private sceneIndex = 0;
   private generatedClips = 0;
   readonly credits: MediaCredit[] = [];
 
@@ -132,6 +149,8 @@ export class MediaDirector {
     signal?: AbortSignal,
   ): Promise<Storyboard> {
     const sb: Storyboard = { ...storyboard, brand: { ...storyboard.brand }, scenes: storyboard.scenes.map((s) => ({ ...s })) };
+    this.domain = detectDomain([brief.prompt, brief.topic, ...brief.keywords].join(' '));
+    this.deps.logger.debug(`media domain: ${this.domain.id}`);
     const { library } = this.deps;
     if (library && brief.brand) {
       const logo = library.findLogo(brief.brand);
@@ -141,6 +160,7 @@ export class MediaDirector {
     for (let i = 0; i < sb.scenes.length; i++) {
       if (signal?.aborted) throw signal.reason;
       const scene = sb.scenes[i]!;
+      this.sceneIndex = i;
       if (!wantsMedia(scene, this.options.coverage)) continue;
       progress(i / sb.scenes.length, `Visuel ${i + 1}/${sb.scenes.length}`);
       // Alternate clips and photos: lively but lighter to download and render.
@@ -188,7 +208,10 @@ export class MediaDirector {
     const kinds: StockKind[] = preferVideo ? ['video', 'photo'] : ['photo', 'video'];
     const orientation = orientationFor(brief.width, brief.height);
     const minShortSide = Math.min(brief.width, brief.height);
-    const queries = buildStockQueries(scene, plan, brief, this.options.keywordLanguage);
+    // Two industry searches per scene, rotating so that scenes get different pictures.
+    const n = this.domain.queries.length;
+    const domainQueries = [this.domain.queries[(this.sceneIndex * 2) % n]!, this.domain.queries[(this.sceneIndex * 2 + 1) % n]!];
+    const queries = buildStockQueries(scene, plan, brief, this.options.keywordLanguage, domainQueries);
 
     for (const { query, language } of queries) {
       for (const kind of kinds) {

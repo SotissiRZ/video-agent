@@ -43,7 +43,10 @@ import { getStyle } from '../remotion/contract/styles';
 import { applyAnimations } from '../storyboard/animations';
 import { buildStoryboard } from '../storyboard/builder';
 import { refineScenes } from '../storyboard/scenes';
-import { fitScenesToVoiceover, matchTargetDuration, recomputeDuration } from '../storyboard/timing';
+import { matchTargetDuration, paceScenesToVoiceover, recomputeDuration } from '../storyboard/timing';
+import { trimWavSilence, wavDurationSec } from '../audio/wav';
+import { parseStructuredPrompt, plannedFromStructured, type StructuredScript } from '../prompt/structured';
+import { applyBrandColors, parseHexColors } from '../storyboard/brand-colors';
 import { validateStoryboard } from '../storyboard/validator';
 import { buildSubtitleCues, toSrt, toVtt } from '../subtitles/subtitles';
 import { getTemplate } from '../templates/registry';
@@ -143,21 +146,28 @@ export class VideoAgent {
     };
 
     // ---- 1. Analyse ------------------------------------------------------------
-    const { brief, template, style } = await step(
+    const { brief, template, style, structured } = await step(
       'analyze',
       'Analyse de la demande',
       () => {
         if (!request.prompt?.trim()) throw new Error('The prompt is empty.');
         const parsed = parsePrompt(request.prompt);
-        const { brief, notes } = buildBrief(parsed, options, this.config);
+        // A detailed script ("SCÈNE 1 — … (0–5 s)") sets the duration from its timings.
+        const structured = parseStructuredPrompt(request.prompt);
+        const timedOptions = structured?.totalSec && !options.durationSec ? { ...options, durationSec: Math.round(structured.totalSec) } : options;
+        const { brief, notes } = buildBrief(parsed, timedOptions, this.config);
         notes.forEach((n) => this.logger.debug(n));
-        return { brief, template: getTemplate(brief.templateId)!, style: getStyle(brief.styleId) };
+        const baseStyle = getStyle(brief.styleId);
+        const colors = parseHexColors(request.prompt);
+        const style = colors.length ? { ...baseStyle, theme: applyBrandColors(baseStyle.theme, colors) } : baseStyle;
+        return { brief, template: getTemplate(brief.templateId)!, style, structured };
       },
       ({ brief }) =>
         `${brief.templateId} · ${brief.width}×${brief.height} · ${brief.durationSec}s · ${brief.fps} fps · style ${brief.styleId} · ${brief.language}` +
         (brief.brand ? ` · marque ${brief.brand}` : '') +
         (brief.audience ? ` · cible ${brief.audience}` : ''),
     );
+    const script: StructuredScript | undefined = structured;
 
     const llm = options.offline ? null : this.deps.llm !== undefined ? this.deps.llm : resolveLLM(this.config, options.llmProvider);
     const planner = new Planner(llm, this.logger);
@@ -170,6 +180,21 @@ export class VideoAgent {
       'concept',
       `Concept (${planner.source})`,
       async () => {
+        if (script) {
+          // The user's script already sets the concept: keep their words.
+          const final = script.finalTexts.filter((t) => t !== brief.brand);
+          const value = {
+            title: brief.brand || script.scenes[0]!.texts[0] || brief.topic,
+            idea: script.scenes.map((s) => s.title).join(' · '),
+            angle: '',
+            tone: '',
+            keyMessage: final[0] ?? script.scenes[0]!.texts[1] ?? '',
+            callToAction: final[1] ?? '',
+            tagline: final[0] ?? '',
+          };
+          writeJson(paths.conceptFile, { ...value, source: 'script' });
+          return value;
+        }
         const r = await planner.concept(brief, template, signal);
         if (r.warning) warnings.push(r.warning);
         writeJson(paths.conceptFile, { ...r.value, source: r.source });
@@ -183,8 +208,12 @@ export class VideoAgent {
     let scriptSource = 'procedural';
     const planned = await step(
       'script',
-      `Script de ${slots.length} scènes (${planner.source})`,
+      script ? `Script fourni : ${script.scenes.length} scènes` : `Script de ${slots.length} scènes (${planner.source})`,
       async () => {
+        if (script) {
+          scriptSource = 'script';
+          return plannedFromStructured(script, { brand: brief.brand, totalSec: brief.durationSec, language: brief.language });
+        }
         const r = await planner.script(brief, template, concept, slots, signal);
         if (r.warning) warnings.push(r.warning);
         scriptSource = r.source;
@@ -269,7 +298,10 @@ export class VideoAgent {
         let sb = storyboard;
         if (voiceProvider) {
           sb = await this.generateVoiceover(sb, brief, paths, voiceProvider, warnings, progress, signal);
-          sb = fitScenesToVoiceover(sb);
+          // The narration sets the pace: no long silences between sentences.
+          // A script with a range ("45 à 60 s") aims at its lower bound, filled exactly.
+          const targetSec = script?.minSec && script.minSec <= brief.durationSec ? script.minSec : brief.durationSec;
+          if (sb.scenes.some((s) => s.voiceover)) sb = paceScenesToVoiceover(sb, { targetFrames: Math.round(targetSec * sb.format.fps), minFill: script ? 1 : undefined });
         }
         if (brief.music) {
           const music = this.prepareMusic(sb, brief, paths, style.theme.motion, style.id === 'elegant');
@@ -408,7 +440,13 @@ export class VideoAgent {
       progress(i / scenes.length, `Voix-off ${i + 1}/${scenes.length}`);
       const outFile = path.join(paths.publicDir, 'voice', `${scene.id}.wav`);
       try {
-        const { durationSec } = await provider.synthesize({ text, language: brief.language, outFile, signal });
+        let { durationSec } = await provider.synthesize({ text, language: brief.language, outFile, signal });
+        // TTS engines pad sentences with silence: trim it so the voice starts right on cue.
+        if (fs.existsSync(outFile)) {
+          const trimmed = trimWavSilence(fs.readFileSync(outFile));
+          fs.writeFileSync(outFile, trimmed);
+          durationSec = wavDurationSec(trimmed);
+        }
         scenes[i] = { ...scene, voiceover: { src: `voice/${scene.id}.wav`, durationInFrames: Math.max(1, Math.ceil(durationSec * fps)), volume: 1 } };
       } catch (err) {
         if (signal?.aborted) throw err;

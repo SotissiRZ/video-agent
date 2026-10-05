@@ -30,9 +30,10 @@ export const proceduralScript = (brief: VideoBrief, template: TemplateDefinition
       items: c.items ?? [],
       statValue: c.stat?.value ?? '',
       statLabel: c.stat?.label ?? '',
-      narration: c.narration,
+      // Subjects such as "notre plateforme" can start a sentence.
+      narration: c.narration.charAt(0).toUpperCase() + c.narration.slice(1),
       visualKeywords: [...(c.visualKeywords ?? []), slot.role, ...brief.keywords].filter(Boolean),
-      visualPrompt: [c.headline.replace(/\*/g, ''), brief.audience, brief.location, 'cinematic photo, natural light'].filter(Boolean).join(', '),
+      visualPrompt: [brief.topic, c.headline.replace(/\*/g, ''), brief.audience, brief.location, 'cinematic photo, natural light'].filter(Boolean).join(', '),
       weight: slot.weight,
     };
   });

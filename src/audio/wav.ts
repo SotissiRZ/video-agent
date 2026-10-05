@@ -63,3 +63,57 @@ export const wavDurationSec = (buffer: Buffer): number => {
   }
   throw new Error('WAV without data chunk');
 };
+
+interface PcmInfo {
+  channels: number;
+  sampleRate: number;
+  bitsPerSample: number;
+  dataOffset: number;
+  dataSize: number;
+}
+
+const readPcmInfo = (buffer: Buffer): PcmInfo | undefined => {
+  if (buffer.toString('ascii', 0, 4) !== 'RIFF' || buffer.toString('ascii', 8, 12) !== 'WAVE') return undefined;
+  let offset = 12;
+  let fmt: Omit<PcmInfo, 'dataOffset' | 'dataSize'> | undefined;
+  while (offset + 8 <= buffer.length) {
+    const id = buffer.toString('ascii', offset, offset + 4);
+    let size = buffer.readUInt32LE(offset + 4);
+    if (id === 'fmt ') {
+      if (buffer.readUInt16LE(offset + 8) !== 1) return undefined; // PCM only
+      fmt = { channels: buffer.readUInt16LE(offset + 10), sampleRate: buffer.readUInt32LE(offset + 12), bitsPerSample: buffer.readUInt16LE(offset + 22) };
+    }
+    if (id === 'data') {
+      if (size === 0 || size === 0xffffffff || offset + 8 + size > buffer.length) size = buffer.length - offset - 8;
+      return fmt ? { ...fmt, dataOffset: offset + 8, dataSize: size } : undefined;
+    }
+    offset += 8 + size + (size % 2);
+  }
+  return undefined;
+};
+
+/**
+ * Remove the silence TTS engines add before and after speech, keeping a short margin.
+ * Returns the original buffer for anything other than 16-bit PCM.
+ */
+export const trimWavSilence = (buffer: Buffer, opts: { threshold?: number; keepSec?: number } = {}): Buffer => {
+  const info = readPcmInfo(buffer);
+  if (!info || info.bitsPerSample !== 16) return buffer;
+  const frameBytes = 2 * info.channels;
+  const frames = Math.floor(info.dataSize / frameBytes);
+  const limit = Math.round((opts.threshold ?? 0.012) * 0x7fff);
+  const loud = (f: number) => {
+    for (let c = 0; c < info.channels; c++) if (Math.abs(buffer.readInt16LE(info.dataOffset + f * frameBytes + c * 2)) > limit) return true;
+    return false;
+  };
+  let first = 0;
+  while (first < frames && !loud(first)) first++;
+  if (first >= frames) return buffer;
+  let last = frames - 1;
+  while (last > first && !loud(last)) last--;
+  const keep = Math.round((opts.keepSec ?? 0.05) * info.sampleRate);
+  const start = Math.max(0, first - keep);
+  const end = Math.min(frames, last + 1 + keep);
+  const pcm = buffer.subarray(info.dataOffset + start * frameBytes, info.dataOffset + end * frameBytes);
+  return pcm16ToWav(Buffer.from(pcm), info.sampleRate, info.channels);
+};

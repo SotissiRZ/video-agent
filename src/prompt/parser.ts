@@ -94,6 +94,14 @@ const NOT_BRANDS = new Set(
     'cree', 'creer', 'create', 'make', 'fais', 'faire', 'genere', 'generer', 'generate', 'produis', 'realise', 'video', 'une', 'un',
     'tiktok', 'instagram', 'youtube', 'facebook', 'linkedin', 'whatsapp', 'reels', 'shorts', 'je', 'nous', 'i', 'we', 'please', 'merci',
     'pour', 'for', 'avec', 'with', 'le', 'la', 'les', 'the', 'a', 'an', 'mon', 'ma', 'notre', 'our', 'my',
+    // Acronyms and generic business words written in capitals, not brand names ("plateforme SaaS pour les PME").
+    'saas', 'paas', 'pme', 'pmes', 'tpe', 'tpes', 'eti', 'sme', 'smes', 'ia', 'ai', 'api', 'apis', 'crm', 'erp', 'b2b', 'b2c', 'it', 'iot', 'cloud',
+    'data', 'web', 'web3', 'tech', 'fintech', 'edtech', 'healthtech', 'ecommerce', 'e-commerce', 'rh', 'hr', 'seo', 'rgpd', 'gdpr', 'ceo', 'cto',
+    'pdg', 'dg', 'ux', 'ui', 'mvp', 'roi', 'kpi', 'ong', 'ngo', 'vtc', 'gps', 'nft', 'blockchain', 'bitcoin', 'android', 'ios', 'windows', 'mac',
+    'internet', 'startup', 'start-up', 'bac', 'master', 'covid',
+    'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+    'janvier', 'fevrier', 'mars', 'avril', 'mai', 'juin', 'juillet', 'aout', 'septembre', 'octobre', 'novembre', 'decembre',
+    'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december', 'noel', 'christmas',
   ].map(normalize),
 );
 
@@ -127,6 +135,8 @@ export const parseBrand = (text: string, location?: string): string | undefined 
   while ((m = afterVerb.exec(text))) {
     const candidate = m[1]!.replace(/[.,;:!?]+$/, '');
     if (location && candidate === location) continue;
+    // "AI API", "SaaS": generic words, not a brand.
+    if (candidate.split(/\s+/).every((w) => NOT_BRANDS.has(normalize(w)))) continue;
     if (!NOT_BRANDS.has(normalize(candidate))) return candidate;
   }
   // Any capitalised word that is not the first word of a sentence nor part of the location.
@@ -169,15 +179,26 @@ const STYLE_HINTS: Record<string, string[]> = {
   corporate: ['corporate', 'professionnel', 'professionnelle', 'professional', 'institutionnel', 'institutionnelle', 'b2b', 'serieux', 'serieuse'],
   elegant: ['elegant', 'elegante', 'luxe', 'luxury', 'premium', 'chic', 'haut de gamme', 'sombre', 'dark', 'cinematique', 'cinematic'],
   playful: ['ludique', 'playful', 'fun', 'amusant', 'amusante', 'enfants', 'kids', 'cartoon', 'joyeux', 'joyeuse'],
-  tech: ['tech', 'technologique', 'futuriste', 'futuristic', 'saas', 'logiciel', 'software', 'digital', 'numerique', 'neon'],
+  tech: ['tech', 'technologie', 'technology', 'technologique', 'futuriste', 'futuristic', 'saas', 'logiciel', 'software', 'digital', 'numerique', 'neon'],
   warm: ['chaleureux', 'chaleureuse', 'warm', 'humain', 'humaine', 'convivial', 'conviviale', 'familial', 'authentique', 'authentic'],
 };
 
-export const parseStyleHints = (text: string): string[] => {
+const hintsIn = (text: string): string[] => {
   const t = ` ${normalize(text)} `;
   return Object.entries(STYLE_HINTS)
     .filter(([, words]) => words.some((w) => t.includes(` ${w} `) || t.includes(` ${w},`) || t.includes(` ${w}.`)))
     .map(([id]) => id);
+};
+
+/** Styles mentioned in the prompt; an explicit "Style (visuel) : …" phrase comes first. */
+export const parseStyleHints = (text: string): string[] => {
+  const all = hintsIn(text);
+  const explicit = /\bstyle(?:\s+visuel)?\s*:\s*([^.\n]+)/i.exec(text);
+  if (!explicit) return all;
+  // Inside the phrase, the first words weigh most ("technologie moderne, élégant…" → tech).
+  const first = hintsIn(explicit[1]!.split(',')[0]!);
+  const phrase = hintsIn(explicit[1]!);
+  return [...new Set([...first, ...phrase, ...all])];
 };
 
 const toggle = (t: string, positive: RegExp, negative: RegExp): boolean | undefined =>
@@ -216,6 +237,7 @@ export const parseTopic = (text: string, brand?: string): string => {
     // Cut the relative clause and the audience/location tail: keep the subject itself.
     .replace(/\s+(?:qui|que|dont|who|that|which)\s+.*$/i, '')
     .replace(/\s+(?:aupr[eè]s|targeting)\s+.*$/i, '')
+    .replace(/\s+(?:pour|for)\s+(?:les|des|the)\s+.*$/i, '')
     .replace(/\s+(?:au|aux|en|à|in|for)\s+(?=[A-ZÀ-Þ0-9]).*$/u, '')
     .trim();
   return topic.length > 80 ? `${topic.slice(0, 77).trim()}…` : topic;

@@ -5,8 +5,11 @@
  */
 import type { Scene } from './storyboard';
 
-/** Delay between the start of a scene (after its incoming transition) and its voice-over. */
+/** Small delay added to the voice-over start (see voiceStartFrame). */
 export const VOICE_OFFSET_FRAMES = 3;
+
+/** Frames between the first visible frame of a scene and its voice-over: halfway through the incoming transition. */
+export const voiceLeadIn = (incomingTransition: number): number => Math.round(incomingTransition / 2) + VOICE_OFFSET_FRAMES;
 
 /** Effective length of the transition after scene `index` (0 for the last scene or 'none'). */
 export const transitionLength = (scenes: Pick<Scene, 'transitionOut' | 'durationInFrames'>[], index: number): number => {
@@ -55,3 +58,6 @@ export const computeTotalDuration = (scenes: Pick<Scene, 'id' | 'transitionOut' 
   const last = timeline[timeline.length - 1];
   return last ? last.from + last.durationInFrames : 0;
 };
+
+/** First frame of a scene's voice-over: the new scene is already mostly on screen. */
+export const voiceStartFrame = (window: SceneWindow): number => window.from + voiceLeadIn(window.soloFrom - window.from);

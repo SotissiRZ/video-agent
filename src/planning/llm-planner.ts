@@ -67,7 +67,9 @@ export const llmScript = async (
   const plan = slots
     .map((slot, i) => {
       const seconds = (brief.durationSec * slot.weight) / totalWeight;
-      return `${i + 1}. role="${slot.role}" kind="${slot.kind}" ~${seconds.toFixed(1)}s, narration max ${Math.max(4, Math.floor(seconds * 2.3))} words — ${slot.purpose}${slot.repetition ? ` (continuation #${slot.repetition + 1}, new content)` : ''}`;
+      // Spoken at ~2.4 words/s: a narration close to this length fills the scene without silence.
+      const words = Math.max(5, Math.floor(seconds * 2.4));
+      return `${i + 1}. role="${slot.role}" kind="${slot.kind}" ~${seconds.toFixed(1)}s, narration ${Math.max(4, Math.round(words * 0.75))}-${words} words — ${slot.purpose}${slot.repetition ? ` (continuation #${slot.repetition + 1}, new content)` : ''}`;
     })
     .join('\n');
 
@@ -98,7 +100,8 @@ Scene kinds and the fields they use:
 - image: headline, body (caption); visualPrompt describes the picture to generate
 - quote: headline (the quote), subheadline (who says it)
 - cta: headline, subheadline (button label, max 3 words), body (optional)
-Every scene also needs: narration, visualKeywords (3-6 English keywords to search stock assets), visualPrompt (English, one sentence).
+Every scene also needs: narration (use the word range given: the voice-over must fill the scene), visualKeywords (3-6 concrete English stock-photo search terms showing this scene in the brief's industry: objects, places, professionals at work, e.g. "cybersecurity analyst monitors" for a security product; never children, toys or games unless the brief is about them), visualPrompt (English, one sentence, same industry).
+Stay strictly on the subject of the brief in every scene.
 Keep the role names exactly as given. Return {"scenes": [...]}.`,
         },
       ],

@@ -3,7 +3,8 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ensureJobDirs, jobPaths } from '../src/agent/job';
 import { createLogger } from '../src/core/logger';
-import { buildStockQueries, MediaDirector, wantsMedia } from '../src/media/director';
+import { detectDomain } from '../src/media/domains';
+import { buildStockQueries, ROLE_VISUAL_HINTS, MediaDirector, wantsMedia } from '../src/media/director';
 import { PexelsProvider } from '../src/providers/stock/pexels';
 import { PixabayProvider } from '../src/providers/stock/pixabay';
 import { resolveStockProviders } from '../src/providers/stock/registry';
@@ -77,7 +78,22 @@ describe('media director', () => {
     expect(queries[0]).toEqual({ query: 'moto taxi driver', language: 'en' });
     expect(queries.some((q) => q.query.toLowerCase().includes('sirago'))).toBe(false);
     expect(queries).toContainEqual({ query: 'chauffeurs Burkina Faso', language: 'en' });
-    expect(queries.at(-1)).toEqual({ query: 'people city street', language: 'en' });
+    expect(queries.at(-1)).toEqual({ query: 'city street people', language: 'en' });
+  });
+
+  it('uses industry searches: first offline, after the LLM keywords otherwise', () => {
+    const domain = detectDomain('Crée une vidéo pour présenter notre plateforme SaaS de cybersécurité pour les PME');
+    expect(domain.id).toBe('cybersecurity');
+    expect(detectDomain('vidéo tech sur l’IA générative').id).toBe('tech');
+    expect(detectDomain('ouverture du restaurant Chez Awa').id).toBe('food');
+    expect(detectDomain('prix transparent pour les parents').id).toBe('business');
+    const offline = buildStockQueries({ role: 'point' }, { visualKeywords: ['plateforme', 'saas'] }, { brand: '', audience: '', location: '', keywords: [] }, 'fr', domain.queries.slice(0, 2));
+    expect(offline[0]).toEqual({ query: domain.queries[0], language: 'en' });
+    const llm = buildStockQueries({ role: 'point' }, { visualKeywords: ['security analyst', 'monitors'] }, { brand: '', audience: '', location: '', keywords: [] }, 'en', domain.queries.slice(0, 2));
+    expect(llm[0]!.query).toBe('security analyst monitors');
+    expect(llm.map((q) => q.query)).toContain(domain.queries[0]);
+    // No generic hint that brings children's pictures.
+    expect(Object.values(ROLE_VISUAL_HINTS).join(' ')).not.toMatch(/young people|celebration|kids|children/);
   });
 
   const makeStoryboard = () => {
