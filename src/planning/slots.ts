@@ -5,6 +5,9 @@ export interface SceneSlot extends SceneBlueprint {
   repetition: number;
 }
 
+/** A repeatable scene appears at most this many times (beyond, scenes get longer instead). */
+export const MAX_REPETITIONS = 3;
+
 /** Comfortable on-screen time per scene, in seconds. */
 export const MIN_SCENE_SEC = 2.5;
 export const TARGET_SCENE_SEC = 4.5;
@@ -38,7 +41,9 @@ export const selectSlots = (template: TemplateDefinition, durationSec: number): 
   const repeatables = template.scenes.filter((s) => s.repeatable && chosen.has(s));
   let guard = 0;
   while (repeatables.length && durationSec / slots.length > MAX_SCENE_SEC * 0.8 && guard++ < 40) {
-    const blueprint = repeatables[guard % repeatables.length]!;
+    const available = repeatables.filter((r) => slots.filter((s) => s.role === r.role).length < MAX_REPETITIONS);
+    if (!available.length) break;
+    const blueprint = available[guard % available.length]!;
     const count = slots.filter((s) => s.role === blueprint.role).length;
     const lastIndex = slots.map((s) => s.role).lastIndexOf(blueprint.role);
     slots = [...slots.slice(0, lastIndex + 1), { ...blueprint, repetition: count }, ...slots.slice(lastIndex + 1)];

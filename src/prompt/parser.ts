@@ -121,7 +121,7 @@ export const parseBrand = (text: string, location?: string): string | undefined 
   const quoted = /["«“]\s*([^"»”]{2,40}?)\s*["»”]/.exec(text);
   if (quoted) return quoted[1]!.trim();
   // After an intent verb: "promouvoir Sirago", "présenter Acme Pay", "launch of Zeta".
-  const verbs = '(?:promouvoir|promotion\\s+de|pub(?:licit[ée])?\\s+(?:pour|de)|pr[ée]senter|pr[ée]sentation\\s+de|lancer|lancement\\s+de|annoncer|faire\\s+conna[iî]tre|vanter|valoriser|promote|present|presenting|introduce|introducing|launch|launching|announce|advertise|advertising|showcase|for|pour|about|sur|de)';
+  const verbs = '(?:promouvoir|promotion\\s+de|pub(?:licit[ée])?\\s+(?:pour|de)|pr[ée]senter|pr[ée]sentation\\s+de|lancer|lancement\\s+de|annoncer|faire\\s+conna[iî]tre|vanter|valoriser|promote|present|presenting|introduce|introducing|launch|launching|announce|advertise|advertising|showcase|for|pour|about|sur)';
   const afterVerb = new RegExp(`${verbs}\\s+(?:l'|le\\s+|la\\s+|les\\s+|the\\s+|our\\s+|notre\\s+|nos\\s+|l’)?(?:(?:application|app|marque|brand|produit|product|service|plateforme|platform|startup|entreprise|company|solution|logiciel|software)\\s+)?(${CAP_GROUP})`, 'g');
   let m: RegExpExecArray | null;
   while ((m = afterVerb.exec(text))) {
@@ -136,6 +136,8 @@ export const parseBrand = (text: string, location?: string): string | undefined 
     const prev = words[i - 1]!;
     if (/[.!?]$/.test(prev)) continue;
     if (!/^[A-ZÀ-ÖØ-Þ][\w'-]+$/u.test(w)) continue;
+    // "une couturière de Bamako", "made in Lagos": a place or a person, not a brand.
+    if (/^(de|d'|d’|du|des|à|a|au|aux|en|in|of|from|chez)$/i.test(prev)) continue;
     if (location && location.split(/\s+/).includes(w)) continue;
     if (NOT_BRANDS.has(normalize(w))) continue;
     return w;
@@ -204,10 +206,15 @@ export const extractKeywords = (text: string): string[] => {
 export const parseTopic = (text: string, brand?: string): string => {
   if (brand) return brand;
   const t = text.replace(/\s+/g, ' ').trim();
-  const m = /(?:pour|sur|about|on|expliquant|explaining|pr[ée]sentant|presenting|montrant|showing|promouvoir|promote|pr[ée]senter|present|annoncer|announce|raconter|tell)\s+(.+?)(?:[.,;!?]|$)/i.exec(t);
+  // Story subjects first ("l'histoire d'une couturière…", "the story of…"), then intent verbs.
+  const story = /(?:l['’]histoire|histoire|le parcours|parcours|the story|story|journey)\s+(?:d['’]|de |du |des |of )\s*(.+?)(?:[.,;!?]|$)/i.exec(t);
+  const m = story ?? /(?:pour|sur|about|on|expliquant|explaining|pr[ée]sentant|presenting|montrant|showing|promouvoir|promote|pr[ée]senter|present|annoncer|announce|raconter|tell)\s+(.+?)(?:[.,;!?]|$)/i.exec(t);
   const topic = (m ? m[1]! : t)
-    .replace(/\b(?:de|of)\s+\d+\s*(?:secondes?|seconds?|s|min(?:utes?)?)\b/gi, '')
-    .replace(/\s+(?:aupr[eè]s|au|aux|en|à|in|for|targeting)\s+.*$/i, '')
+    .replace(/\b(?:de|of|en|in)\s+\d+\s*(?:secondes?|seconds?|s|min(?:utes?)?)\b/gi, '')
+    // Cut the relative clause and the audience/location tail: keep the subject itself.
+    .replace(/\s+(?:qui|que|dont|who|that|which)\s+.*$/i, '')
+    .replace(/\s+(?:aupr[eè]s|targeting)\s+.*$/i, '')
+    .replace(/\s+(?:au|aux|en|à|in|for)\s+(?=[A-ZÀ-Þ0-9]).*$/u, '')
     .trim();
   return topic.length > 80 ? `${topic.slice(0, 77).trim()}…` : topic;
 };

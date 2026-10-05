@@ -3,6 +3,8 @@ import { ConfigError } from '../../core/errors';
 import { OpenAIImageProvider } from './openai';
 import { ReplicateImageProvider } from './replicate';
 import { StabilityImageProvider } from './stability';
+import { CloudflareImageProvider } from './cloudflare';
+import { HuggingFaceImageProvider } from './huggingface';
 import type { ImageProvider } from './types';
 
 type Factory = (config: AppConfig) => ImageProvider | null;
@@ -20,14 +22,19 @@ registerImageProvider('stability', ({ env }) =>
   env.STABILITY_API_KEY ? new StabilityImageProvider({ apiKey: env.STABILITY_API_KEY, model: env.STABILITY_MODEL }) : null,
 );
 
-/** "auto": first configured, cheapest first. */
-const AUTO_ORDER = ['replicate', 'stability', 'openai'];
+registerImageProvider('cloudflare', ({ env }) =>
+  env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_API_TOKEN ? new CloudflareImageProvider({ accountId: env.CLOUDFLARE_ACCOUNT_ID, apiToken: env.CLOUDFLARE_API_TOKEN, model: env.CLOUDFLARE_IMAGE_MODEL }) : null,
+);
+registerImageProvider('huggingface', ({ env }) => (env.HF_TOKEN ? new HuggingFaceImageProvider({ token: env.HF_TOKEN, model: env.HF_IMAGE_MODEL }) : null));
+
+/** "auto": first configured — free tiers first, then paid ones from cheapest. */
+export const IMAGE_AUTO_ORDER = ['cloudflare', 'huggingface', 'replicate', 'stability', 'openai'];
 
 export const resolveImageProvider = (config: AppConfig, requested?: string): ImageProvider | null => {
   const id = requested ?? config.env.VIDEO_AGENT_IMAGE_PROVIDER;
   if (id === 'none') return null;
   if (id === 'auto') {
-    for (const candidate of AUTO_ORDER) {
+    for (const candidate of IMAGE_AUTO_ORDER) {
       const p = factories.get(candidate)?.(config);
       if (p) return p;
     }

@@ -33,7 +33,7 @@ ENV NODE_ENV=production \
 
 # Bibliothèques nécessaires à Chrome headless (+ espeak-ng pour la voix-off hors-ligne, tini pour les signaux).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates tini espeak-ng \
+      ca-certificates curl tini espeak-ng \
       libnss3 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 libgbm1 libasound2 libxrandr2 libxkbcommon0 \
       libxfixes3 libxcomposite1 libxdamage1 libpango-1.0-0 libcairo2 libcups2 libdrm2 libxshmfence1 fonts-liberation \
     && if [ "$BROWSER" = "debian" ]; then apt-get install -y --no-install-recommends chromium; fi \
@@ -52,6 +52,20 @@ COPY .env.example ./
 
 # Navigateur de rendu.
 RUN if [ "$BROWSER" = "remotion" ]; then npx remotion browser ensure; fi
+
+# Piper : voix-off neuronale gratuite et locale (binaire + voix FR/EN préinstallés).
+ARG TARGETARCH
+ARG PIPER_VOICES="fr_FR-siwis-medium en_US-lessac-medium"
+ENV PIPER_DATA_DIR=/opt/piper
+RUN set -e; mkdir -p /opt/piper/voices; \
+    case "${TARGETARCH:-amd64}" in arm64) PA=aarch64 ;; arm) PA=armv7l ;; *) PA=x86_64 ;; esac; \
+    curl -fsSL "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_${PA}.tar.gz" | tar -xz -C /opt/piper; \
+    for v in $PIPER_VOICES; do \
+      lang="${v%%_*}"; rest="${v#*_}"; region="${rest%%-*}"; tail="${v#*-}"; name="${tail%-*}"; quality="${v##*-}"; \
+      base="https://huggingface.co/rhasspy/piper-voices/resolve/main/${lang}/${lang}_${region}/${name}/${quality}/${v}.onnx"; \
+      curl -fsSL -o "/opt/piper/voices/${v}.onnx" "$base"; curl -fsSL -o "/opt/piper/voices/${v}.onnx.json" "${base}.json"; \
+    done; \
+    chown -R node:node /opt/piper
 
 RUN mkdir -p /app/output /app/assets /app/.video-agent /app/node_modules/.cache /app/node_modules/.remotion \
     && chown -R node:node /app/output /app/assets /app/.video-agent /app/node_modules/.cache /app/node_modules/.remotion \

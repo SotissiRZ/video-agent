@@ -7,6 +7,7 @@ export const tutorial: TemplateDefinition = {
   name: 'Tutoriel',
   description: 'Explication pas à pas : objectif, étapes numérotées, astuce, récapitulatif.',
   keywords: ['tutoriel', 'tuto', 'tutorial', 'comment', 'how to', 'guide', 'etapes', 'etape', 'steps', 'step by step', 'pas a pas', 'apprendre', 'learn', 'expliquer', 'explique', 'expliquant', 'explain', 'explaining', 'formation', 'mode d emploi', 'installer', 'configurer'],
+  strongKeywords: ['tutoriel', 'tuto', 'tutorial', 'how to', 'comment', 'expliquant', 'explaining', 'pas a pas', 'step by step'],
   defaultStyle: 'corporate',
   defaultDurationSec: 60,
   scenes: [

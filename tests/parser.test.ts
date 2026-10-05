@@ -82,6 +82,16 @@ describe('prompt parser', () => {
     expect(detectLanguage('Fais une vidéo pour notre nouveau produit')).toBe('fr');
   });
 
+  it('does not take a place or a person introduced by "de" for a brand', () => {
+    expect(parsePrompt("Raconte l'histoire d'une couturière de Bamako").brand).toBeUndefined();
+    expect(parsePrompt('Crée une pub pour promouvoir Sirago').brand).toBe('Sirago');
+  });
+
+  it('extracts the subject of a story', () => {
+    expect(parsePrompt("Raconte en 2 minutes l'histoire d'une couturière de Bamako qui lance sa marque grâce aux réseaux sociaux.").topic).toBe('une couturière de Bamako');
+    expect(parsePrompt("Tell the story of a young farmer in Kenya who builds a cooperative").topic).toBe('a young farmer');
+  });
+
   it('falls back to a topic when there is no brand', () => {
     const p = parsePrompt('Tutoriel de 1 min 30 expliquant comment installer notre application mobile, style minimaliste');
     expect(p.brand).toBeUndefined();

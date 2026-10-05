@@ -1,6 +1,7 @@
 import type { AppConfig } from '../config/config';
 import { ConfigError } from '../core/errors';
 import { AnthropicProvider } from './providers/anthropic';
+import { OllamaProvider } from './providers/ollama';
 import { OpenAICompatibleProvider } from './providers/openai-compatible';
 import type { LLMProvider } from './types';
 
@@ -37,8 +38,14 @@ registerLLMProvider('openai-compatible', ({ env }) =>
     : null,
 );
 
-/** Order used by "auto". */
-export const AUTO_ORDER = ['anthropic', 'openai', 'groq', 'openai-compatible'];
+registerLLMProvider('ollama', ({ env }) =>
+  env.OLLAMA_BASE_URL
+    ? new OllamaProvider({ baseUrl: env.OLLAMA_BASE_URL, model: env.OLLAMA_MODEL, timeoutMs: Math.max(env.VIDEO_AGENT_LLM_TIMEOUT_MS, 300_000), temperature: env.VIDEO_AGENT_LLM_TEMPERATURE })
+    : null,
+);
+
+/** Order used by "auto": cloud providers first (faster), then the free local model. */
+export const AUTO_ORDER = ['anthropic', 'openai', 'groq', 'openai-compatible', 'ollama'];
 
 export const listLLMProviders = (): string[] => [...factories.keys()];
 

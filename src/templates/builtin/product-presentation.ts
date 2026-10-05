@@ -7,6 +7,7 @@ export const productPresentation: TemplateDefinition = {
   name: 'Présentation produit',
   description: 'Mise en valeur d’un produit ou service : présentation, fonctionnalités clés, fonctionnement.',
   keywords: ['presentation produit', 'presenter', 'presentation', 'produit', 'product', 'fonctionnalites', 'features', 'showcase', 'decouvrir', 'nouveau produit', 'gamme', 'collection', 'offre', 'service'],
+  strongKeywords: ['presentation produit', 'presenter', 'showcase'],
   defaultStyle: 'modern',
   defaultDurationSec: 45,
   scenes: [

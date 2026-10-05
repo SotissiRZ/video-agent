@@ -7,6 +7,7 @@ export const appDemo: TemplateDefinition = {
   name: 'Démonstration d’application',
   description: 'Démo d’application mobile/web : problème, présentation, parcours en étapes, fonctionnalités, téléchargement.',
   keywords: ['application', 'app', 'appli', 'demo', 'demonstration', 'interface', 'logiciel', 'software', 'saas', 'mobile app', 'application mobile', 'plateforme', 'platform', 'telecharger', 'download', 'android', 'ios', 'web app', 'dashboard'],
+  strongKeywords: ['demo', 'demonstration', 'application mobile', 'mobile app'],
   defaultStyle: 'tech',
   defaultDurationSec: 45,
   scenes: [

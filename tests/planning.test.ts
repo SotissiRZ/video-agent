@@ -56,8 +56,11 @@ describe('scene slots', () => {
   });
   it('repeats repeatable scenes for long videos', () => {
     const slots = selectSlots(ad, 120);
-    expect(slots.filter((s) => s.role === 'benefits').length).toBeGreaterThan(1);
-    expect(120 / slots.length).toBeLessThanOrEqual(9);
+    const benefits = slots.filter((s) => s.role === 'benefits').length;
+    expect(benefits).toBeGreaterThan(1);
+    // Capped repetitions: long videos get longer scenes instead of endless duplicates.
+    expect(benefits).toBeLessThanOrEqual(3);
+    expect(selectSlots(ad, 600).filter((s) => s.role === 'benefits').length).toBe(3);
     expect(slots.at(-1)!.role).toBe('cta');
   });
 });
