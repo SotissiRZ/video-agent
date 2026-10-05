@@ -84,3 +84,37 @@ describe('web server', () => {
     expect((await (await fetch(`${base}/api/schedule/${queue[0].id}`, { method: 'DELETE' })).json()).cancelled).toBe(true);
   });
 });
+
+describe('web password', () => {
+  it('requires the password when VIDEO_AGENT_WEB_PASSWORD is set, except for health checks', async () => {
+    const started = await startServer(testConfig({ VIDEO_AGENT_WEB_PASSWORD: 's3cret' }), { port: 0, host: '127.0.0.1', webRoot: path.resolve('web'), scheduler: false,
+      deps: { renderer: fakeRenderer, logger: createLogger('silent'), llm: null, voice: null, stock: [] } });
+    try {
+      const url = started.url;
+      expect((await fetch(url + '/api/health')).status).toBe(200);
+      const denied = await fetch(url + '/api/options');
+      expect(denied.status).toBe(401);
+      expect(denied.headers.get('www-authenticate')).toContain('Basic');
+      const auth = (pwd: string) => ({ authorization: 'Basic ' + Buffer.from(`moi:${pwd}`).toString('base64') });
+      expect((await fetch(url + '/api/options', { headers: auth('mauvais') })).status).toBe(401);
+      expect((await fetch(url + '/api/options', { headers: auth('s3cret') })).status).toBe(200);
+      expect((await fetch(url + '/', { headers: auth('s3cret') })).status).toBe(200);
+    } finally {
+      await new Promise<void>((r) => started.server.close(() => r()));
+    }
+  });
+
+  it('never returns the password in the settings view', async () => {
+    const started = await startServer(testConfig({ VIDEO_AGENT_WEB_PASSWORD: 's3cret' }), { port: 0, host: '127.0.0.1', webRoot: path.resolve('web'), scheduler: false,
+      deps: { renderer: fakeRenderer, logger: createLogger('silent'), llm: null, voice: null, stock: [] } });
+    try {
+      const res = await fetch(started.url + '/api/settings', { headers: { authorization: 'Basic ' + Buffer.from(':s3cret').toString('base64') } });
+      const body = await res.text();
+      expect(res.status).toBe(200);
+      expect(body).not.toContain('s3cret');
+      expect(body).toContain('VIDEO_AGENT_WEB_PASSWORD');
+    } finally {
+      await new Promise<void>((r) => started.server.close(() => r()));
+    }
+  });
+});

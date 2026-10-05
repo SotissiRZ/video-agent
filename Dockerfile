@@ -29,6 +29,7 @@ ENV NODE_ENV=production \
     VIDEO_AGENT_OUTPUT_DIR=/app/output \
     VIDEO_AGENT_ASSETS_DIR=/app/assets \
     VIDEO_AGENT_AUTH_BIND_HOST=0.0.0.0 \
+    VIDEO_AGENT_IN_DOCKER=1 \
     REMOTION_DISABLE_TELEMETRY=1
 
 # Bibliothèques nécessaires à Chrome headless (+ espeak-ng pour la voix-off hors-ligne, tini pour les signaux).

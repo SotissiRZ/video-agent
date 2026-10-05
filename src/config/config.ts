@@ -120,12 +120,18 @@ const EnvSchema = z.object({
   VIDEO_AGENT_RENDER_CONCURRENCY: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(64).optional()),
   VIDEO_AGENT_RENDER_TIMEOUT_MS: int(60_000, 5_000, 600_000),
   VIDEO_AGENT_CRF: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(51).optional()),
+  /** H.264 encoder speed: faster presets render quicker, files are slightly larger. */
+  VIDEO_AGENT_X264_PRESET: enumWithDefault(['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow'] as const, 'veryfast'),
+  /** Chrome OpenGL backend. auto = Chrome's default (much faster than swangle on CPU-only machines). */
+  VIDEO_AGENT_RENDER_GL: enumWithDefault(['auto', 'angle', 'swangle', 'swiftshader', 'egl', 'vulkan', 'angle-egl'] as const, 'auto'),
 
   // --- Web server ----------------------------------------------------------
   /** Allow editing settings (.env) from the web UI. */
   VIDEO_AGENT_SETTINGS_UI: bool(true),
   VIDEO_AGENT_HOST: z.preprocess(emptyToUndefined, z.string().default('127.0.0.1')),
   VIDEO_AGENT_PORT: int(3210, 1, 65535),
+  /** Password protecting the web interface (HTTP Basic auth). Required when exposed on a network. */
+  VIDEO_AGENT_WEB_PASSWORD: optionalString,
 
   // --- Social publishing ---------------------------------------------------
   YOUTUBE_CLIENT_ID: optionalString,
@@ -245,6 +251,7 @@ export const describeSecrets = (env: Env): Record<string, boolean> => ({
   STABILITY_API_KEY: Boolean(env.STABILITY_API_KEY),
   CLOUDFLARE_API_TOKEN: Boolean(env.CLOUDFLARE_API_TOKEN),
   HF_TOKEN: Boolean(env.HF_TOKEN),
+  VIDEO_AGENT_WEB_PASSWORD: Boolean(env.VIDEO_AGENT_WEB_PASSWORD),
   PEXELS_API_KEY: Boolean(env.PEXELS_API_KEY),
   PIXABAY_API_KEY: Boolean(env.PIXABAY_API_KEY),
   UNSPLASH_ACCESS_KEY: Boolean(env.UNSPLASH_ACCESS_KEY),

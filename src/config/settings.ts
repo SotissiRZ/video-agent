@@ -93,7 +93,16 @@ export const SETTING_GROUPS: SettingGroup[] = [
     fields: [
       { key: 'VIDEO_AGENT_MUSIC', label: 'Musique', options: opt(['auto', 'Vos pistes (assets/music) sinon synthèse'], ['procedural', 'Synthèse automatique'], ['assets', 'Vos pistes uniquement'], ['none', 'Aucune']) },
       { key: 'VIDEO_AGENT_SUBTITLES', label: 'Sous-titres par défaut', options: opt(['true', 'Oui'], ['false', 'Non']) },
-      { key: 'VIDEO_AGENT_RENDER_CONCURRENCY', label: 'Rendus en parallèle', placeholder: 'auto (≈ nombre de cœurs)' },
+      { key: 'VIDEO_AGENT_RENDER_CONCURRENCY', label: 'Images rendues en parallèle', placeholder: 'auto (moitié des cœurs)', help: 'Augmentez jusqu’au nombre de cœurs du processeur pour accélérer le rendu (plus de mémoire utilisée).' },
+      { key: 'VIDEO_AGENT_X264_PRESET', label: 'Vitesse d’encodage MP4', options: opt(['veryfast', 'Rapide (recommandé)'], ['ultrafast', 'Très rapide (fichiers plus lourds)'], ['medium', 'Équilibré'], ['slow', 'Lent (fichiers plus légers)']) },
+    ],
+  },
+  {
+    id: 'security',
+    title: 'Sécurité',
+    description: 'Protège l’interface par un mot de passe (indispensable si elle est accessible depuis le réseau). Le navigateur le demandera à la prochaine visite ; le nom d’utilisateur est libre.',
+    fields: [
+      { key: 'VIDEO_AGENT_WEB_PASSWORD', label: 'Mot de passe de l’interface', secret: true },
     ],
   },
   {

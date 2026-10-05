@@ -1,4 +1,5 @@
 /** Local web interface: static UI + JSON API + Server-Sent Events. No framework needed. */
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -130,6 +131,20 @@ export interface ServerOptions {
   reloadConfig?: () => AppConfig;
 }
 
+/** HTTP Basic auth check (any user name, constant-time password comparison). */
+export const checkPassword = (header: string | undefined, password: string): boolean => {
+  const match = /^Basic\s+(.+)$/i.exec(header ?? '');
+  if (!match) return false;
+  const decoded = Buffer.from(match[1]!, 'base64').toString('utf8');
+  const given = decoded.slice(decoded.indexOf(':') + 1);
+  const a = crypto.createHash('sha256').update(given).digest();
+  const b = crypto.createHash('sha256').update(password).digest();
+  return crypto.timingSafeEqual(a, b);
+};
+
+const LOOPBACK = new Set(['127.0.0.1', '::1', 'localhost']);
+export const isLoopbackHost = (host: string): boolean => LOOPBACK.has(host) || host.startsWith('127.');
+
 export const createApp = (initialConfig: AppConfig, options: ServerOptions) => {
   // The configuration can be changed from the Settings page: keep a mutable reference.
   let config = initialConfig;
@@ -152,6 +167,12 @@ export const createApp = (initialConfig: AppConfig, options: ServerOptions) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const parts = url.pathname.split('/').filter(Boolean);
     try {
+      // Optional password (VIDEO_AGENT_WEB_PASSWORD). /api/health stays open for container health checks.
+      const password = config.env.VIDEO_AGENT_WEB_PASSWORD;
+      if (password && url.pathname !== '/api/health' && !checkPassword(req.headers.authorization, password)) {
+        res.writeHead(401, { 'www-authenticate': 'Basic realm="Video Agent", charset="UTF-8"', 'content-type': 'text/plain; charset=utf-8' });
+        return void res.end('Authentification requise');
+      }
       // Refuse cross-site writes (a web page cannot drive the local agent through the browser).
       if (req.method !== 'GET' && req.method !== 'HEAD' && req.headers.origin) {
         let originHost = '';
@@ -276,6 +297,12 @@ export const startServer = async (config: AppConfig, options: ServerOptions): Pr
   const server = http.createServer((req, res) => void handler(req, res));
   const host = options.host ?? config.env.VIDEO_AGENT_HOST;
   const port = options.port ?? config.env.VIDEO_AGENT_PORT;
+  if (!isLoopbackHost(host) && !config.env.VIDEO_AGENT_WEB_PASSWORD && !process.env.VIDEO_AGENT_IN_DOCKER) {
+    process.stderr.write(
+      `⚠️  L'interface écoute sur ${host} sans mot de passe : toute personne du réseau peut l'utiliser.\n` +
+        '   Définissez VIDEO_AGENT_WEB_PASSWORD dans .env pour la protéger.\n',
+    );
+  }
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, resolve);

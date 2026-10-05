@@ -25,12 +25,19 @@ export interface RenderOptions {
   browserExecutable?: string;
   concurrency?: number;
   crf?: number;
+  /** H.264 encoder preset (default veryfast). */
+  x264Preset?: X264Preset;
+  /** Chrome OpenGL backend; undefined/'auto' = Chrome's default. */
+  gl?: RenderGl;
   timeoutMs?: number;
   onProgress?: (p: RenderProgress) => void;
   signal?: AbortSignal;
   /** Override the Remotion entry point (tests). */
   entryPoint?: string;
 }
+
+export type X264Preset = 'ultrafast' | 'superfast' | 'veryfast' | 'faster' | 'fast' | 'medium' | 'slow' | 'slower' | 'veryslow';
+export type RenderGl = 'auto' | 'angle' | 'swangle' | 'swiftshader' | 'egl' | 'vulkan' | 'angle-egl';
 
 export interface RenderResult {
   file: string;
@@ -71,7 +78,8 @@ export const renderStoryboard = async (opts: RenderOptions): Promise<RenderResul
     browserExecutable: browser.executable,
     timeoutInMilliseconds: opts.timeoutMs ?? 60_000,
     logLevel: 'error' as const,
-    chromiumOptions: { gl: 'swangle' as const },
+    // Chrome's default GL backend is ~3.5x faster than 'swangle' on CPU-only machines.
+    chromiumOptions: { gl: opts.gl && opts.gl !== 'auto' ? opts.gl : null },
   };
   const composition = await selectComposition({ ...common, id: COMPOSITION_ID });
 
@@ -85,6 +93,7 @@ export const renderStoryboard = async (opts: RenderOptions): Promise<RenderResul
     concurrency: opts.concurrency ?? null,
     cancelSignal,
     ...(codec === 'h264' || codec === 'vp8' ? { crf: opts.crf ?? null } : {}),
+    ...(codec === 'h264' ? { x264Preset: opts.x264Preset ?? 'veryfast' } : {}),
     ...(codec === 'prores' ? { proResProfile: 'hq' as const } : {}),
     ...(codec === 'gif' ? { everyNthFrame: 2, scale: Math.min(1, 540 / Math.min(composition.width, composition.height)) } : {}),
     imageFormat: codec === 'prores' ? 'png' : 'jpeg',

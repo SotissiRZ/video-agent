@@ -131,7 +131,7 @@ describe('settings (web UI)', () => {
     const { server, url } = await startServer(reload(), { port: 0, host: '127.0.0.1', webRoot: path.resolve('web'), envFile, reloadConfig: reload, scheduler: false, deps: { renderer: fakeRenderer, logger: createLogger('silent'), llm: null, voice: null, stock: [] } });
     try {
       const get = await (await fetch(`${url}/api/settings`)).json();
-      expect(get.groups.map((g: { id: string }) => g.id)).toEqual(['llm', 'stock', 'images', 'voice', 'render', 'publish']);
+      expect(get.groups.map((g: { id: string }) => g.id)).toEqual(['llm', 'stock', 'images', 'voice', 'render', 'security', 'publish']);
       const put = await fetch(`${url}/api/settings`, { method: 'PUT', body: JSON.stringify({ PIXABAY_API_KEY: 'px' }) });
       expect(put.status).toBe(200);
       expect((await put.json()).providers.stock).toContain('pixabay');

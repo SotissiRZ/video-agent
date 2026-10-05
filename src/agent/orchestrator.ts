@@ -328,6 +328,8 @@ export class VideoAgent {
             browserExecutable: this.config.browserExecutable,
             concurrency: this.config.env.VIDEO_AGENT_RENDER_CONCURRENCY,
             crf: this.config.env.VIDEO_AGENT_CRF,
+            x264Preset: this.config.env.VIDEO_AGENT_X264_PRESET,
+            gl: this.config.env.VIDEO_AGENT_RENDER_GL,
             timeoutMs: this.config.env.VIDEO_AGENT_RENDER_TIMEOUT_MS,
             signal,
             onProgress: ({ stage, progress: p }) => {
