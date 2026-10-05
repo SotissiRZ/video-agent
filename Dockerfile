@@ -72,7 +72,7 @@ RUN mkdir -p /app/output /app/assets /app/.video-agent /app/node_modules/.cache 
     && ln -s /app/bin/video-agent.js /usr/local/bin/video-agent
 
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/entrypoint.sh
 
 USER node
 EXPOSE 3210 8765
