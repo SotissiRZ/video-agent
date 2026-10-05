@@ -10,9 +10,9 @@ import { ConfigError } from '../core/errors';
 import { OUTPUT_FORMATS } from '../core/formats';
 import type { LogLevel } from '../core/logger';
 
-export const LLM_PROVIDER_IDS = ['auto', 'anthropic', 'openai', 'groq', 'openai-compatible', 'local'] as const;
-export const IMAGE_PROVIDER_IDS = ['auto', 'none', 'openai', 'replicate', 'stability'] as const;
-export const VOICE_PROVIDER_IDS = ['auto', 'none', 'openai', 'elevenlabs', 'system'] as const;
+export const LLM_PROVIDER_IDS = ['auto', 'anthropic', 'openai', 'groq', 'openai-compatible', 'ollama', 'local'] as const;
+export const IMAGE_PROVIDER_IDS = ['auto', 'none', 'cloudflare', 'huggingface', 'openai', 'replicate', 'stability'] as const;
+export const VOICE_PROVIDER_IDS = ['auto', 'none', 'openai', 'elevenlabs', 'piper', 'system'] as const;
 export const VIDEO_PROVIDER_IDS = ['none', 'replicate'] as const;
 export const MUSIC_MODES = ['auto', 'procedural', 'assets', 'none'] as const;
 
@@ -44,6 +44,9 @@ const EnvSchema = z.object({
   OPENAI_COMPATIBLE_BASE_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
   OPENAI_COMPATIBLE_API_KEY: optionalString,
   OPENAI_COMPATIBLE_MODEL: optionalString,
+  /** Free local LLM. In Docker: http://ollama:11434 (profile "ollama"). */
+  OLLAMA_BASE_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
+  OLLAMA_MODEL: z.preprocess(emptyToUndefined, z.string().default('qwen2.5:3b')),
   VIDEO_AGENT_LLM_TIMEOUT_MS: int(120_000, 1_000, 900_000),
   VIDEO_AGENT_LLM_TEMPERATURE: z.preprocess((v) => (emptyToUndefined(v) === undefined ? 0.7 : Number(v)), z.number().min(0).max(2)),
 
@@ -53,6 +56,11 @@ const EnvSchema = z.object({
   REPLICATE_API_TOKEN: optionalString,
   REPLICATE_IMAGE_MODEL: z.preprocess(emptyToUndefined, z.string().default('black-forest-labs/flux-schnell')),
   VIDEO_AGENT_MAX_GENERATED_IMAGES: int(4, 0, 50),
+  CLOUDFLARE_ACCOUNT_ID: optionalString,
+  CLOUDFLARE_API_TOKEN: optionalString,
+  CLOUDFLARE_IMAGE_MODEL: z.preprocess(emptyToUndefined, z.string().default('@cf/black-forest-labs/flux-1-schnell')),
+  HF_TOKEN: optionalString,
+  HF_IMAGE_MODEL: z.preprocess(emptyToUndefined, z.string().default('black-forest-labs/FLUX.1-schnell')),
   STABILITY_API_KEY: optionalString,
   STABILITY_MODEL: enumWithDefault(['core', 'ultra', 'sd3'] as const, 'core'),
 
@@ -79,6 +87,14 @@ const EnvSchema = z.object({
   ELEVENLABS_VOICE_ID: z.preprocess(emptyToUndefined, z.string().default('21m00Tcm4TlvDq8ikWAM')),
   ELEVENLABS_MODEL: z.preprocess(emptyToUndefined, z.string().default('eleven_multilingual_v2')),
   VIDEO_AGENT_SYSTEM_VOICE: optionalString,
+  /** Piper (free neural voices). Data dir holds the binary and downloaded voices. */
+  PIPER_DATA_DIR: z.preprocess(emptyToUndefined, z.string().default('.video-agent/piper')),
+  PIPER_BINARY: optionalString,
+  PIPER_VOICE_FR: z.preprocess(emptyToUndefined, z.string().default('fr_FR-siwis-medium')),
+  PIPER_VOICE_EN: z.preprocess(emptyToUndefined, z.string().default('en_US-lessac-medium')),
+  /** >1 = slower speech. */
+  PIPER_LENGTH_SCALE: z.preprocess((v) => (emptyToUndefined(v) === undefined ? 1 : Number(v)), z.number().min(0.5).max(2)),
+  PIPER_AUTO_DOWNLOAD: bool(true),
 
   // --- Video generation ------------------------------------------------
   VIDEO_AGENT_VIDEO_PROVIDER: enumWithDefault(VIDEO_PROVIDER_IDS, 'none'),
@@ -106,6 +122,8 @@ const EnvSchema = z.object({
   VIDEO_AGENT_CRF: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(51).optional()),
 
   // --- Web server ----------------------------------------------------------
+  /** Allow editing settings (.env) from the web UI. */
+  VIDEO_AGENT_SETTINGS_UI: bool(true),
   VIDEO_AGENT_HOST: z.preprocess(emptyToUndefined, z.string().default('127.0.0.1')),
   VIDEO_AGENT_PORT: int(3210, 1, 65535),
 
@@ -225,6 +243,8 @@ export const describeSecrets = (env: Env): Record<string, boolean> => ({
   OPENAI_COMPATIBLE_BASE_URL: Boolean(env.OPENAI_COMPATIBLE_BASE_URL),
   REPLICATE_API_TOKEN: Boolean(env.REPLICATE_API_TOKEN),
   STABILITY_API_KEY: Boolean(env.STABILITY_API_KEY),
+  CLOUDFLARE_API_TOKEN: Boolean(env.CLOUDFLARE_API_TOKEN),
+  HF_TOKEN: Boolean(env.HF_TOKEN),
   PEXELS_API_KEY: Boolean(env.PEXELS_API_KEY),
   PIXABAY_API_KEY: Boolean(env.PIXABAY_API_KEY),
   UNSPLASH_ACCESS_KEY: Boolean(env.UNSPLASH_ACCESS_KEY),

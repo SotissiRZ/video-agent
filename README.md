@@ -164,6 +164,25 @@ node bin/video-agent.js doctor
 
 ## 6. Configuration
 
+### Configuration 100 % gratuite (recommandée pour commencer)
+
+| Besoin | Service gratuit | Réglage |
+|---|---|---|
+| Photos et vidéos réelles | [Pexels](https://www.pexels.com/api/), [Pixabay](https://pixabay.com/api/docs/), [Unsplash](https://unsplash.com/developers) | `PEXELS_API_KEY`… |
+| Textes (script, légendes) | [Groq](https://console.groq.com/keys) (offre gratuite), [Google Gemini](https://aistudio.google.com/apikey) via `OPENAI_COMPATIBLE_*`, ou **Ollama** (local, sans clé) | `GROQ_API_KEY` ou `OLLAMA_BASE_URL` |
+| Voix-off | **Piper** : voix neuronales locales, préinstallées dans Docker et téléchargées automatiquement sinon | rien à faire (`VIDEO_AGENT_VOICE_PROVIDER=auto` ou `piper`) |
+| Images IA | [Cloudflare Workers AI](https://dash.cloudflare.com/) (allocation quotidienne), [Hugging Face](https://huggingface.co/settings/tokens) (crédits mensuels) | `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN` ou `HF_TOKEN` |
+| Musique | synthèse procédurale intégrée | rien à faire |
+| Publication | API officielles de TikTok, Meta, YouTube, LinkedIn (gratuites) | § 15 |
+
+Tout se règle aussi depuis l'onglet **Réglages** de l'interface web, sans éditer de fichier.
+
+**Ollama (LLM local)** : avec Docker, ajoutez `COMPOSE_PROFILES=ollama` et `OLLAMA_BASE_URL=http://ollama:11434` dans `.env`, puis `docker compose up -d`. Sans Docker, installez [Ollama](https://ollama.com) et mettez `OLLAMA_BASE_URL=http://localhost:11434`. Le modèle (`OLLAMA_MODEL`, par défaut `qwen2.5:3b`, environ 2 Go) est téléchargé automatiquement au premier usage. Comptez 8 Go de RAM pour les modèles de 7-8 milliards de paramètres, plus précis.
+
+**Piper (voix-off)** : choix de la voix avec `PIPER_VOICE_FR` / `PIPER_VOICE_EN` ([écouter les voix](https://rhasspy.github.io/piper-samples/)), débit avec `PIPER_LENGTH_SCALE`.
+
+### Variables
+
 Toute la configuration passe par des **variables d'environnement**, lues aussi depuis un fichier `.env` à la racine. Les vraies variables d'environnement sont prioritaires sur `.env`. Le fichier [`.env.example`](.env.example) documente chaque variable. **Aucune clé n'est versionnée** : `.env` est ignoré par git.
 
 | Variable | Par défaut | Rôle |
@@ -246,18 +265,26 @@ Raccourcis npm : `npm run demo` (génère la vidéo Sirago dans `output/demo`), 
 npm run web            # ou : video-agent web --port 8080
 ```
 
-Ouvrez **http://127.0.0.1:3210**. Depuis l'interface, vous pouvez :
+Ouvrez **http://127.0.0.1:3210**. L'interface comporte quatre onglets :
 
-- saisir le prompt ;
-- choisir le format, la durée, le style, le template, les fps, le conteneur, la langue et une résolution personnalisée ;
-- activer ou désactiver les sous-titres, la musique, la voix-off et le mode hors-ligne ;
-- lancer la génération et suivre les 12 étapes en direct (Server-Sent Events) ;
-- prévisualiser la vidéo et la télécharger, ainsi que le storyboard, le script et les sous-titres ;
-- parcourir l'historique des vidéos générées.
+- **🎬 Créer** :
+  - le prompt, avec des exemples en un clic ;
+  - le format choisi visuellement (9:16, 16:9, 1:1, 4:5), la durée (3 s à 10 min), le style et le template ;
+  - des interrupteurs pour la voix-off, les sous-titres, la musique et les photos réelles ;
+  - des options avancées : fps, conteneur, langue, résolution exacte, couverture en visuels.
 
-Les tâches sont mises en file et exécutées une à la fois, car le rendu sollicite fortement le processeur. Le serveur écoute sur `127.0.0.1` par défaut. Ne l'exposez pas sur un réseau public sans protection.
+  La progression des 12 étapes s'affiche en direct, puis l'aperçu, les téléchargements et le panneau de publication.
+- **⚙️ Réglages** : toutes les clés et options, groupées par usage, avec les services **gratuits** signalés et un lien pour obtenir chaque clé. Les valeurs sont écrites dans `.env` et appliquées sans redémarrage. Les clés ne sont jamais réaffichées. Pour désactiver cette page : `VIDEO_AGENT_SETTINGS_UI=false`.
+- **🗓 Programmées** : les publications en attente, annulables.
+- **📁 Historique** : les vidéos déjà générées.
 
-API : `GET /api/options`, `GET|POST /api/jobs`, `GET|DELETE /api/jobs/:id`, `GET /api/jobs/:id/events` (SSE), `GET /api/jobs/:id/video[?download=1]`, `GET /api/jobs/:id/poster`, `GET /api/jobs/:id/files/{storyboard.json|script.md|subtitles.srt|subtitles.vtt}`.
+Les badges en haut à droite indiquent l'état des fournisseurs. Un point bleu signale un service gratuit, un point vert un service payant configuré.
+
+Les tâches sont mises en file et exécutées une à la fois, car le rendu sollicite fortement le processeur. Le serveur écoute sur `127.0.0.1` par défaut et refuse les requêtes d'écriture venant d'un autre site. Ne l'exposez pas sur un réseau public sans protection.
+
+**Durée** : jusqu'à 10 minutes. Pour les vidéos longues, l'agent ajoute des scènes (chaque type de scène répétable apparaît au plus 3 fois), puis allonge les scènes. Avec un LLM, chaque scène reçoit un texte différent ; sans LLM, les textes génériques se répètent davantage. Le rendu prend environ 1 minute pour 10 s de vidéo en 1080p sur 4 cœurs.
+
+API : `GET /api/options`, `GET|PUT /api/settings`, `GET|POST /api/jobs`, `GET|DELETE /api/jobs/:id`, `GET /api/jobs/:id/events` (SSE), `GET /api/jobs/:id/video[?download=1]`, `GET /api/jobs/:id/poster`, `GET /api/jobs/:id/files/{storyboard.json|script.md|subtitles.srt|subtitles.vtt}`.
 
 ## 9. Ajouter un provider
 

@@ -7,6 +7,7 @@ export const storytelling: TemplateDefinition = {
   name: 'Storytelling',
   description: 'Récit en arc narratif : situation, difficulté, déclic, résolution, message final.',
   keywords: ['storytelling', 'histoire', 'raconter', 'raconte', 'recit', 'temoignage', 'parcours', 'journey', 'story of', 'tell', 'narrative', 'inspirant', 'inspiring', 'emotion', 'emouvant', 'il etait une fois', 'portrait'],
+  strongKeywords: ['raconte', 'raconter', 'histoire', 'storytelling', 'temoignage', 'parcours', 'story of', 'journey'],
   defaultStyle: 'elegant',
   defaultDurationSec: 60,
   scenes: [

@@ -39,7 +39,7 @@ export class JobManager extends EventEmitter {
   private running = false;
 
   constructor(
-    private readonly config: AppConfig,
+    private config: AppConfig,
     private readonly deps: AgentDependencies = {},
   ) {
     super();
@@ -75,6 +75,11 @@ export class JobManager extends EventEmitter {
         /* ignore unreadable jobs */
       }
     }
+  }
+
+  /** New configuration (Settings page): used by the next jobs. */
+  setConfig(config: AppConfig): void {
+    this.config = config;
   }
 
   list(): JobRecord[] {

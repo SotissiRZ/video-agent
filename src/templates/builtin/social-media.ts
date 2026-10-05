@@ -7,6 +7,7 @@ export const socialMedia: TemplateDefinition = {
   name: 'Réseaux sociaux',
   description: 'Format court et rythmé pour TikTok, Reels, Shorts : accroche forte, points percutants, abonnement.',
   keywords: ['reseaux sociaux', 'social', 'social media', 'tiktok', 'reels', 'reel', 'shorts', 'instagram', 'viral', 'stories', 'story', 'facebook', 'linkedin', 'post', 'buzz', 'tendance', 'trend'],
+  strongKeywords: [],
   defaultStyle: 'vibrant',
   defaultFormat: 'vertical',
   defaultDurationSec: 20,

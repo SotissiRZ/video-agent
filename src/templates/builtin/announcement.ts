@@ -7,6 +7,7 @@ export const announcement: TemplateDefinition = {
   name: 'Annonce',
   description: 'Annonce d’une nouveauté, d’un lancement ou d’un événement.',
   keywords: ['annonce', 'annoncer', 'announcement', 'announce', 'lancement', 'launch', 'nouveaute', 'ouverture', 'opening', 'evenement', 'event', 'inauguration', 'bientot', 'coming soon', 'save the date', 'arrive', 'disponible'],
+  strongKeywords: ['annonce', 'annoncer', 'announcement', 'announce', 'ouverture', 'lancement', 'inauguration'],
   defaultStyle: 'elegant',
   defaultDurationSec: 20,
   scenes: [

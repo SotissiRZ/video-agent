@@ -19,6 +19,8 @@ describe('template registry & selection', () => {
     ['Un reel Instagram viral', 'social-media'],
     ['Présentation produit de notre nouvelle gamme', 'product-presentation'],
     ['Explain how to set up the router step by step', 'tutorial'],
+    ["Raconte l'histoire d'une couturière qui lance sa marque grâce aux réseaux sociaux", 'storytelling'],
+    ['Tutoriel TikTok : comment monter une vidéo', 'tutorial'],
   ])('"%s" → %s', (prompt, expected) => {
     expect(selectTemplate(prompt).template.id).toBe(expected);
   });

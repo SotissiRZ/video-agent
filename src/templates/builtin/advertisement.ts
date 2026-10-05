@@ -7,6 +7,7 @@ export const advertisement: TemplateDefinition = {
   name: 'Publicité',
   description: 'Spot publicitaire persuasif (accroche, problème, solution, bénéfices, appel à l’action).',
   keywords: ['pub', 'publicite', 'publicitaire', 'promouvoir', 'promotion', 'promo', 'campagne', 'marketing', 'spot', 'advert', 'advertisement', 'ad', 'ads', 'promote', 'commercial', 'vendre', 'sell', 'convaincre', 'faire connaitre'],
+  strongKeywords: ['promouvoir', 'publicite', 'pub', 'promote', 'advertisement', 'advert'],
   defaultStyle: 'vibrant',
   defaultDurationSec: 30,
   scenes: [

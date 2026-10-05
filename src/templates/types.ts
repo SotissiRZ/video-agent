@@ -44,6 +44,8 @@ export interface TemplateDefinition {
   description: string;
   /** Normalised (lower-case, no accents) words or phrases that point to this template. */
   keywords: string[];
+  /** Words that state the intent of the video ("raconte", "tutoriel"...): they outweigh context words like platform names. */
+  strongKeywords?: string[];
   defaultStyle: string;
   /** Format used when the prompt does not specify one. */
   defaultFormat?: string;

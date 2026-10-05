@@ -8,6 +8,11 @@
 #
 # Les vidéos sont écrites dans ./output, vos médias sont lus dans ./assets,
 # les jetons OAuth renouvelés sont conservés dans ./.video-agent.
+#
+# LLM local gratuit (Ollama) : ajoutez dans .env
+#   COMPOSE_PROFILES=ollama
+#   OLLAMA_BASE_URL=http://ollama:11434
+# puis : docker compose up -d   (le modèle est téléchargé au premier usage)
 
 x-video-agent: &video-agent
   build:
@@ -15,9 +20,8 @@ x-video-agent: &video-agent
     args:
       BROWSER: ${VIDEO_AGENT_DOCKER_BROWSER:-remotion}
   image: video-agent:latest
-  env_file:
-    - path: .env
-      required: false
+  # La configuration est lue dans /app/.env (monté ci-dessous) : la page Réglages
+  # de l'interface peut ainsi la modifier sans redémarrer le conteneur.
   environment:
     VIDEO_AGENT_HOST: 0.0.0.0
     VIDEO_AGENT_OUTPUT_DIR: /app/output
@@ -32,6 +36,9 @@ x-video-agent: &video-agent
   # Chrome a besoin d'une mémoire partagée plus grande que les 64 Mo par défaut.
   shm_size: 1gb
   init: true
+
+volumes:
+  ollama-models:
 
 services:
   # Interface web + API + planificateur de publications.
@@ -51,3 +58,16 @@ services:
     ports:
       # Serveur de retour OAuth pour "auth" (utilisé avec --service-ports).
       - "127.0.0.1:8765:8765"
+
+  # LLM local gratuit (profil "ollama"). Les modèles sont conservés dans un volume.
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+    # Décommentez pour utiliser une carte graphique NVIDIA :
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]

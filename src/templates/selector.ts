@@ -13,8 +13,10 @@ export const scoreTemplates = (prompt: string): TemplateScore[] => {
   const text = ` ${normalize(prompt).replace(/[^a-z0-9:]+/g, ' ')} `;
   return listTemplates()
     .map((t) => {
-      const matches = t.keywords.filter((k) => text.includes(` ${k} `));
-      const score = matches.reduce((sum, k) => sum + (k.includes(' ') ? 2 : 1), 0);
+      const strong = new Set(t.strongKeywords ?? []);
+      const matches = [...new Set([...t.keywords, ...strong])].filter((k) => text.includes(` ${k} `));
+      // Intent words weigh 3, multi-word phrases 2, other context words 1.
+      const score = matches.reduce((sum, k) => sum + (strong.has(k) ? 3 : k.includes(' ') ? 2 : 1), 0);
       return { id: t.id, score, matches };
     })
     .sort((a, b) => b.score - a.score);

@@ -5,6 +5,8 @@ import path from 'node:path';
 import { z } from 'zod';
 import type { AgentDependencies } from '../agent/orchestrator';
 import { providerStatus } from '../agent/doctor';
+import { loadConfig } from '../config/config';
+import { saveSettings, settingsView } from '../config/settings';
 import type { AppConfig } from '../config/config';
 import { errorMessage } from '../core/errors';
 import { FORMAT_PRESETS, OUTPUT_FORMATS, SUPPORTED_FPS } from '../core/formats';
@@ -122,10 +124,18 @@ export interface ServerOptions {
   publishDeps?: Pick<PublishJobOptions, 'publisherFactory' | 'scheduleStore'>;
   /** Run the local publication scheduler (default: VIDEO_AGENT_SCHEDULER). */
   scheduler?: boolean;
+  /** .env file edited by the Settings page (default: ./.env). */
+  envFile?: string;
+  /** How to rebuild the configuration after a settings change. */
+  reloadConfig?: () => AppConfig;
 }
 
-export const createApp = (config: AppConfig, options: ServerOptions) => {
+export const createApp = (initialConfig: AppConfig, options: ServerOptions) => {
+  // The configuration can be changed from the Settings page: keep a mutable reference.
+  let config = initialConfig;
   const jobs = new JobManager(config, options.deps);
+  const envFile = options.envFile ?? path.join(process.cwd(), '.env');
+  const reloadConfig = options.reloadConfig ?? (() => loadConfig({ packageRoot: initialConfig.paths.root }));
   const webRoot = path.resolve(options.webRoot);
   const schedule = options.publishDeps?.scheduleStore ?? ScheduleStore.forConfig(config);
   const llm = () => {
@@ -142,8 +152,33 @@ export const createApp = (config: AppConfig, options: ServerOptions) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const parts = url.pathname.split('/').filter(Boolean);
     try {
+      // Refuse cross-site writes (a web page cannot drive the local agent through the browser).
+      if (req.method !== 'GET' && req.method !== 'HEAD' && req.headers.origin) {
+        let originHost = '';
+        try {
+          originHost = new URL(req.headers.origin).host;
+        } catch {
+          /* invalid origin */
+        }
+        if (originHost !== req.headers.host) return json(res, 403, { error: 'cross-origin request refused' });
+      }
       if (parts[0] === 'api') {
         if (req.method === 'GET' && parts[1] === 'health') return json(res, 200, { ok: true });
+        if (parts[1] === 'settings' && parts.length === 2) {
+          if (!config.env.VIDEO_AGENT_SETTINGS_UI) return json(res, 403, { error: 'réglages désactivés (VIDEO_AGENT_SETTINGS_UI=false)' });
+          if (req.method === 'GET') return json(res, 200, { envFile, groups: settingsView(config) });
+          if (req.method === 'PUT') {
+            const body = z.record(z.string(), z.string().max(2000).nullable()).safeParse(await readBody(req));
+            if (!body.success) return json(res, 400, { error: 'format invalide' });
+            try {
+              config = saveSettings(envFile, body.data, reloadConfig);
+            } catch (err) {
+              return json(res, 400, { error: errorMessage(err) });
+            }
+            jobs.setConfig(config);
+            return json(res, 200, { groups: settingsView(config), providers: (({ secrets: _s, ...rest }) => rest)(providerStatus(config)) });
+          }
+        }
         if (req.method === 'GET' && parts[1] === 'options') {
           return json(res, 200, {
             formats: FORMAT_PRESETS.map(({ id, label, width, height }) => ({ id, label, width, height })),
