@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Video Agent</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="logo">▶</span> Video Agent</div>
+    <div id="providers" class="providers"></div>
+  </header>
+
+  <main class="layout">
+    <section class="panel">
+      <h1>Nouvelle vidéo</h1>
+      <form id="form">
+        <label for="prompt">Décrivez votre vidéo</label>
+        <textarea id="prompt" name="prompt" rows="5" required minlength="3"
+          placeholder="Crée une vidéo verticale de 30 secondes pour promouvoir Sirago auprès des chauffeurs au Burkina Faso."></textarea>
+
+        <div class="grid">
+          <label>Format
+            <select id="format" name="format"><option value="">Auto (selon la demande)</option></select>
+          </label>
+          <label>Durée (s)
+            <input id="duration" name="durationSec" type="number" min="3" max="600" placeholder="auto" />
+          </label>
+          <label>Style
+            <select id="style" name="style"><option value="auto">Auto</option></select>
+          </label>
+          <label>Template
+            <select id="template" name="template"><option value="auto">Auto</option></select>
+          </label>
+          <label>FPS
+            <select id="fps" name="fps"></select>
+          </label>
+          <label>Fichier
+            <select id="outputFormat" name="outputFormat"></select>
+          </label>
+          <label>Langue
+            <select id="language" name="language">
+              <option value="auto">Auto</option><option value="fr">Français</option><option value="en">English</option>
+            </select>
+          </label>
+          <label>Résolution personnalisée
+            <input id="resolution" name="resolution" placeholder="ex. 1280x720" pattern="\d{2,5}x\d{2,5}" />
+          </label>
+        </div>
+
+        <div class="toggles">
+          <label><input type="checkbox" id="subtitles" checked /> Sous-titres</label>
+          <label><input type="checkbox" id="music" checked /> Musique</label>
+          <label><input type="checkbox" id="voice" checked /> Voix-off</label>
+          <label><input type="checkbox" id="stock" checked /> Photos et vidéos réelles (banques d’images)</label>
+          <label><input type="checkbox" id="offline" /> Mode hors-ligne (sans LLM)</label>
+        </div>
+
+        <button type="submit" id="submit">🎬 Générer la vidéo</button>
+        <p id="formError" class="error" hidden></p>
+      </form>
+    </section>
+
+    <section class="panel" id="current" hidden>
+      <div class="row">
+        <h2 id="jobTitle">Génération…</h2>
+        <button type="button" id="cancel" class="ghost">Annuler</button>
+      </div>
+      <div class="progress"><div id="bar"></div></div>
+      <p id="jobMessage" class="muted"></p>
+      <ol id="steps" class="steps"></ol>
+      <div id="result" hidden>
+        <video id="player" controls playsinline></video>
+        <div class="actions">
+          <a id="download" class="button" download>⬇ Télécharger la vidéo</a>
+          <a id="storyboardLink" class="ghost button" target="_blank">storyboard.json</a>
+          <a id="scriptLink" class="ghost button" target="_blank">script.md</a>
+          <a id="srtLink" class="ghost button" target="_blank">subtitles.srt</a>
+          <a id="creditsLink" class="ghost button" target="_blank" hidden>crédits</a>
+        </div>
+        <div class="publish">
+          <h3>📣 Publier sur les réseaux sociaux</h3>
+          <div id="platformList" class="platforms"></div>
+          <div class="row wrap">
+            <button type="button" id="prepare" class="ghost">✏️ Préparer les textes</button>
+            <label class="inline">Programmer
+              <input type="datetime-local" id="publishAt" />
+            </label>
+          </div>
+          <div id="captionEditors"></div>
+          <div class="row wrap" id="publishActions" hidden>
+            <button type="button" id="dryRun" class="ghost">👁 Vérifier (sans publier)</button>
+            <button type="button" id="publishBtn">🚀 Publier</button>
+          </div>
+          <ul id="publishResults" class="results"></ul>
+        </div>
+        <ul id="warnings" class="warnings"></ul>
+      </div>
+      <p id="jobError" class="error" hidden></p>
+    </section>
+
+    <section class="panel wide" id="schedulePanel" hidden>
+      <h2>Publications programmées</h2>
+      <ul id="scheduleList" class="results"></ul>
+    </section>
+
+    <section class="panel wide">
+      <h2>Historique</h2>
+      <div id="history" class="history"><p class="muted">Aucune vidéo pour l’instant.</p></div>
+    </section>
+  </main>
+  <script src="app.js" type="module"></script>
+</body>
+</html>

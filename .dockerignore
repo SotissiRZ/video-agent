@@ -1,0 +1,12 @@
+node_modules
+dist
+output
+assets
+.video-agent
+.env
+.env.*
+!.env.example
+.git
+docs
+coverage
+*.log

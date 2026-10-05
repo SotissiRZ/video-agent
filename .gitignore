@@ -1,0 +1,23 @@
+node_modules/
+dist/
+output/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+coverage/
+.remotion/
+
+# Assets personnels (seuls le README et la structure sont versionnés)
+assets/*
+!assets/README.md
+!assets/images/
+!assets/music/
+assets/images/*
+assets/music/*
+!assets/images/.gitkeep
+!assets/music/.gitkeep
+
+# Jetons OAuth renouvelés automatiquement
+.video-agent/

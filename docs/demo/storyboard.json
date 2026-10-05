@@ -1,0 +1,276 @@
+{
+  "version": 1,
+  "meta": {
+    "title": "Sirago — publicité",
+    "language": "fr",
+    "template": "advertisement",
+    "style": "vibrant",
+    "prompt": "Crée une vidéo verticale de 30 secondes pour promouvoir Sirago auprès des chauffeurs au Burkina Faso.",
+    "generator": "video-agent"
+  },
+  "format": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "durationInFrames": 900
+  },
+  "theme": {
+    "id": "vibrant",
+    "palette": {
+      "background": "#FF4D2E",
+      "backgroundAlt": "#FF9F1C",
+      "surface": "rgba(0,0,0,0.18)",
+      "primary": "#1A1A2E",
+      "secondary": "#FFD23F",
+      "accent": "#FFE066",
+      "text": "#FFFFFF",
+      "mutedText": "rgba(255,255,255,0.85)",
+      "onPrimary": "#FFFFFF"
+    },
+    "headingFont": "'Montserrat', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
+    "bodyFont": "'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
+    "headingWeight": 900,
+    "radius": 20,
+    "motion": "energetic",
+    "uppercaseHeadlines": true
+  },
+  "brand": {
+    "name": "Sirago",
+    "tagline": "Simple. Rapide. Fiable.",
+    "showWatermark": true
+  },
+  "scenes": [
+    {
+      "id": "01-hook",
+      "kind": "title",
+      "role": "hook",
+      "durationInFrames": 140,
+      "headline": "Et si votre quotidien devenait *plus simple* ?",
+      "subheadline": "Chauffeurs au Burkina Faso",
+      "body": "",
+      "items": [],
+      "narration": "Chauffeurs au Burkina Faso, et si votre quotidien devenait plus simple ?",
+      "background": {
+        "variant": "shapes"
+      },
+      "layout": "center",
+      "animation": {
+        "entrance": "pop",
+        "stagger": 3,
+        "kenBurns": 0.04
+      },
+      "transitionOut": {
+        "type": "slide",
+        "durationInFrames": 11,
+        "direction": "from-right"
+      }
+    },
+    {
+      "id": "02-problem",
+      "kind": "text",
+      "role": "problem",
+      "durationInFrames": 155,
+      "headline": "Moins de temps perdu, *plus de résultats*",
+      "subheadline": "",
+      "body": "Chaque minute compte. Vous méritez un outil qui travaille pour vous.",
+      "items": [],
+      "narration": "Chaque minute compte. Vous méritez un outil qui travaille pour vous.",
+      "background": {
+        "variant": "gradient"
+      },
+      "layout": "center",
+      "animation": {
+        "entrance": "slide",
+        "stagger": 3,
+        "kenBurns": 0.04
+      },
+      "transitionOut": {
+        "type": "wipe",
+        "durationInFrames": 11,
+        "direction": "from-bottom"
+      }
+    },
+    {
+      "id": "03-solution",
+      "kind": "title",
+      "role": "solution",
+      "durationInFrames": 155,
+      "headline": "Découvrez *Sirago*",
+      "subheadline": "La solution",
+      "body": "Pensé pour les chauffeurs au Burkina Faso.",
+      "items": [],
+      "narration": "Découvrez Sirago, pensé pour les chauffeurs au Burkina Faso.",
+      "background": {
+        "variant": "waves"
+      },
+      "layout": "center",
+      "animation": {
+        "entrance": "rise",
+        "stagger": 3,
+        "kenBurns": 0.04
+      },
+      "transitionOut": {
+        "type": "flip",
+        "durationInFrames": 11,
+        "direction": "from-left"
+      }
+    },
+    {
+      "id": "04-benefits",
+      "kind": "bullets",
+      "role": "benefits",
+      "durationInFrames": 211,
+      "headline": "Pourquoi *Sirago* ?",
+      "subheadline": "",
+      "body": "",
+      "items": [
+        "Simple à utiliser",
+        "Rapide et fiable",
+        "Pensé pour vous"
+      ],
+      "narration": "Simple à utiliser, rapide, fiable, et pensé pour vous.",
+      "background": {
+        "variant": "shapes"
+      },
+      "layout": "center",
+      "animation": {
+        "entrance": "pop",
+        "stagger": 3,
+        "kenBurns": 0.04
+      },
+      "transitionOut": {
+        "type": "slide",
+        "durationInFrames": 11,
+        "direction": "from-top"
+      }
+    },
+    {
+      "id": "05-proof",
+      "kind": "image",
+      "role": "proof",
+      "durationInFrames": 140,
+      "headline": "Avancez *plus loin*",
+      "subheadline": "",
+      "body": "Avec Sirago, chaque journée compte davantage.",
+      "items": [],
+      "narration": "Avec Sirago, chaque journée compte davantage.",
+      "background": {
+        "variant": "gradient"
+      },
+      "layout": "center",
+      "animation": {
+        "entrance": "slide",
+        "stagger": 3,
+        "kenBurns": 0.04
+      },
+      "transitionOut": {
+        "type": "wipe",
+        "durationInFrames": 11,
+        "direction": "from-right"
+      }
+    },
+    {
+      "id": "06-cta",
+      "kind": "cta",
+      "role": "cta",
+      "durationInFrames": 154,
+      "headline": "Essayez *Sirago* dès aujourd'hui",
+      "subheadline": "Je me lance",
+      "body": "Simple. Rapide. Fiable.",
+      "items": [],
+      "narration": "Essayez Sirago dès aujourd'hui.",
+      "background": {
+        "variant": "gradient"
+      },
+      "layout": "center",
+      "animation": {
+        "entrance": "rise",
+        "stagger": 3,
+        "kenBurns": 0.04
+      },
+      "transitionOut": {
+        "type": "none",
+        "durationInFrames": 0,
+        "direction": "from-bottom"
+      }
+    }
+  ],
+  "subtitles": {
+    "enabled": true,
+    "style": "karaoke",
+    "cues": [
+      {
+        "startFrame": 6,
+        "endFrame": 52,
+        "text": "Chauffeurs au Burkina Faso,"
+      },
+      {
+        "startFrame": 52,
+        "endFrame": 88,
+        "text": "et si votre quotidien"
+      },
+      {
+        "startFrame": 88,
+        "endFrame": 126,
+        "text": "devenait plus simple ?"
+      },
+      {
+        "startFrame": 146,
+        "endFrame": 185,
+        "text": "Chaque minute compte."
+      },
+      {
+        "startFrame": 185,
+        "endFrame": 224,
+        "text": "Vous méritez un outil"
+      },
+      {
+        "startFrame": 224,
+        "endFrame": 270,
+        "text": "qui travaille pour vous."
+      },
+      {
+        "startFrame": 290,
+        "endFrame": 349,
+        "text": "Découvrez Sirago, pensé pour"
+      },
+      {
+        "startFrame": 349,
+        "endFrame": 414,
+        "text": "les chauffeurs au Burkina Faso."
+      },
+      {
+        "startFrame": 434,
+        "endFrame": 522,
+        "text": "Simple à utiliser, rapide,"
+      },
+      {
+        "startFrame": 522,
+        "endFrame": 614,
+        "text": "fiable, et pensé pour vous."
+      },
+      {
+        "startFrame": 634,
+        "endFrame": 681,
+        "text": "Avec Sirago, chaque"
+      },
+      {
+        "startFrame": 681,
+        "endFrame": 743,
+        "text": "journée compte davantage."
+      },
+      {
+        "startFrame": 763,
+        "endFrame": 897,
+        "text": "Essayez Sirago dès aujourd'hui."
+      }
+    ]
+  },
+  "audio": {
+    "music": {
+      "src": "music/procedural.wav",
+      "volume": 0.45,
+      "duckedVolume": 0.1
+    }
+  }
+}

@@ -1,0 +1,53 @@
+# Video Agent en conteneurs.
+#
+#   cp .env.example .env              # puis renseignez vos clés
+#   docker compose up -d web          # interface : http://localhost:3210
+#   docker compose run --rm cli "Crée une vidéo verticale de 30 secondes pour promouvoir Sirago…"
+#   docker compose run --rm cli publish output/<job> --to tiktok,instagram
+#   docker compose run --rm --service-ports cli auth youtube --save
+#
+# Les vidéos sont écrites dans ./output, vos médias sont lus dans ./assets,
+# les jetons OAuth renouvelés sont conservés dans ./.video-agent.
+
+x-video-agent: &video-agent
+  build:
+    context: .
+    args:
+      BROWSER: ${VIDEO_AGENT_DOCKER_BROWSER:-remotion}
+  image: video-agent:latest
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    VIDEO_AGENT_HOST: 0.0.0.0
+    VIDEO_AGENT_OUTPUT_DIR: /app/output
+    VIDEO_AGENT_ASSETS_DIR: /app/assets
+    VIDEO_AGENT_AUTH_BIND_HOST: 0.0.0.0
+  volumes:
+    - ./output:/app/output
+    - ./assets:/app/assets
+    - ./.video-agent:/app/.video-agent
+    # .env monté pour que "auth --save" puisse l'enrichir.
+    - ./.env:/app/.env
+  # Chrome a besoin d'une mémoire partagée plus grande que les 64 Mo par défaut.
+  shm_size: 1gb
+  init: true
+
+services:
+  # Interface web + API + planificateur de publications.
+  web:
+    <<: *video-agent
+    command: ["web"]
+    ports:
+      - "127.0.0.1:${VIDEO_AGENT_PORT:-3210}:3210"
+    restart: unless-stopped
+
+  # Commandes ponctuelles : génération, rendu, publication, auth…
+  cli:
+    <<: *video-agent
+    profiles: ["cli"]
+    entrypoint: ["tini", "--", "entrypoint.sh"]
+    command: ["--help"]
+    ports:
+      # Serveur de retour OAuth pour "auth" (utilisé avec --service-ports).
+      - "127.0.0.1:8765:8765"
