@@ -90,3 +90,25 @@ describe('password reset', () => {
     expect((await new Client(base).json('POST', '/api/auth/login', { email: 'bob@example.com', password: 'nouveaumotdepasse' })).status).toBe(200);
   });
 });
+
+describe('retention and legal pages', () => {
+  it('deletes finished videos past the retention period, keeping those awaiting publication', async () => {
+    const { purgeOldJobs } = await import('../src/saas/jobs');
+    const user = await db.one<{ id: string }>("SELECT id FROM users WHERE email = 'awa@example.com'");
+    const old = new Date(Date.now() - 40 * 86_400_000).toISOString();
+    for (const [id, status] of [['old-done', 'completed'], ['old-failed', 'failed'], ['old-scheduled', 'completed'], ['old-running', 'running']]) {
+      await db.query('INSERT INTO jobs (id, user_id, prompt, status, created_at, dir) VALUES ($1, $2, $3, $4, $5, $6)', [id, user!.id, 'x', status, old, `/tmp/none/${id}`]);
+    }
+    await db.query("INSERT INTO publications (id, user_id, job_id, platforms, at) VALUES ('p1', $1, 'old-scheduled', '[\"youtube\"]', now() + interval '1 day')", [user!.id]);
+    const removed = (await purgeOldJobs(db, 30)).map((r) => r.id).sort();
+    expect(removed).toEqual(['old-done', 'old-failed']);
+  });
+
+  it('serves the legal pages with the company details', async () => {
+    const page = await fetch(`${base}/legal`);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('legal.js');
+    const cfg = (await new Client(base).json('GET', '/api/public/config')).body;
+    expect(cfg.company.name).toBe('ZSR-TechNum');
+  });
+});

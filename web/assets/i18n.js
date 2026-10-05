@@ -70,6 +70,10 @@ export const MESSAGES = {
     'landing.faq.4.a': 'Oui, depuis votre espace Facturation. Votre offre reste active jusqu’à la fin de la période payée.',
     'landing.cta.title': 'Votre prochaine vidéo est à une phrase.',
     'landing.footer.rights': 'Tous droits réservés.',
+    'legal.terms': 'Conditions d’utilisation',
+    'legal.privacy': 'Confidentialité',
+    'legal.notice': 'Mentions légales',
+    'auth.consent': 'En créant un compte, vous acceptez les <a href="/legal#terms" target="_blank">conditions d’utilisation</a> et la <a href="/legal#privacy" target="_blank">politique de confidentialité</a>.',
 
     // ---- Plans
     'plan.free': 'Gratuit',
@@ -444,6 +448,10 @@ export const MESSAGES = {
     'landing.faq.4.a': 'Yes, from your Billing page. Your plan stays active until the end of the paid period.',
     'landing.cta.title': 'Your next video is one sentence away.',
     'landing.footer.rights': 'All rights reserved.',
+    'legal.terms': 'Terms of use',
+    'legal.privacy': 'Privacy',
+    'legal.notice': 'Legal notice',
+    'auth.consent': 'By creating an account, you accept the <a href="/legal#terms" target="_blank">terms of use</a> and the <a href="/legal#privacy" target="_blank">privacy policy</a>.',
 
     'plan.free': 'Free',
     'plan.creator': 'Creator',

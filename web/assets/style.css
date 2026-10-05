@@ -224,7 +224,7 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .nav a:hover { background: var(--surface-2); color: var(--text); }
 .nav a.active { background: var(--primary-soft); color: var(--primary); }
 .nav a .count { margin-left: auto; font-size: 11px; font-weight: 700; background: var(--primary); color: #fff; border-radius: 999px; padding: 0 7px; line-height: 18px; }
-.sidebar-footer { margin-top: auto; display: grid; gap: 12px; padding-top: 12px; }
+.sidebar-footer { margin-top: auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; padding-top: 12px; }
 .usage-card { border: 1px solid var(--border); border-radius: 12px; padding: 12px; background: var(--surface-2); display: grid; gap: 8px; font-size: 12.5px; }
 .usage-card .row { display: flex; justify-content: space-between; color: var(--text-2); }
 .usage-card .plan { display: flex; align-items: center; justify-content: space-between; }
@@ -318,6 +318,16 @@ table.table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .color-item input[type=text] { width: 86px; border: 0; background: transparent; color: var(--text); font: 13px ui-monospace, Menlo, Consolas, monospace; }
 .logo-preview { height: 160px; border: 1px dashed var(--border-strong); border-radius: 12px; display: grid; place-items: center; color: var(--muted); background: repeating-conic-gradient(var(--surface-2) 0% 25%, var(--surface) 0% 50%) 50% / 18px 18px; }
 .logo-preview img { max-height: 130px; max-width: 90%; object-fit: contain; }
+
+/* ---- Legal pages ---- */
+.container.legal { padding-top: 32px; padding-bottom: 48px; display: grid; gap: 20px; max-width: 860px; }
+.legal-card { padding: 28px 32px; line-height: 1.65; }
+.legal-card h2 { font-size: 22px; margin-bottom: 12px; scroll-margin-top: 80px; }
+.legal-card h3 { margin: 18px 0 6px; }
+.legal-card p, .legal-card li { color: var(--text-2); }
+.legal-card ul { padding-left: 20px; }
+.footer-links { display: flex; gap: 16px; flex-wrap: wrap; }
+.footer-links a { color: var(--muted); }
 
 /* ---- Auth ---------------------------------------------------------------------------- */
 .auth { min-height: 100vh; display: grid; grid-template-rows: auto 1fr; background: var(--bg); background-image: var(--hero-glow); }

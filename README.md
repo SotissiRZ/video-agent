@@ -592,6 +592,16 @@ Les limites sont définies dans `src/saas/plans.ts` ; les prix affichés dans `P
 
 **Sauvegardes** : la base (`docker compose -f docker-compose.prod.yml exec postgres pg_dump -U videoagent videoagent > backup.sql`) et le volume `videos`.
 
+**E-mails** : `SMTP_URL` (ex. `smtps://user:pass@smtp-relay.brevo.com:465`) et `MAIL_FROM` activent l'e-mail de confirmation à l'inscription et le lien « Mot de passe oublié » (valable 1 h, à usage unique). Sans SMTP, les liens sont écrits dans les journaux (`docker compose logs web`). `REQUIRE_EMAIL_VERIFICATION=true` impose la confirmation avant de créer des vidéos.
+
+**Kit de marque** : chaque client renseigne dans **Ma marque** son nom, ses couleurs et son logo (PNG, JPEG ou WebP). Ils sont appliqués à ses vidéos (case « Appliquer ma marque » dans le formulaire). Le logo est affiché en ouverture, en conclusion et en filigrane.
+
+**Plans multiples** : les scènes longues enchaînent jusqu'à `VIDEO_AGENT_SHOTS_PER_SCENE` photos ou clips (3 par défaut), en fondu, pour un rythme de 2 à 4 s par plan.
+
+**Pages légales** : `/legal` (conditions d'utilisation, confidentialité, mentions légales) en français et en anglais, remplies avec `COMPANY_NAME`, `COMPANY_ADDRESS` et `CONTACT_EMAIL`. Ce sont des modèles : faites-les relire pour votre pays et votre activité.
+
+**Conservation** : `VIDEO_AGENT_RETENTION_DAYS=30` supprime chaque heure les vidéos de plus de 30 jours (sauf celles dont une publication est programmée).
+
 **Sécurité** : mots de passe hachés (scrypt), sessions en cookie `HttpOnly` / `SameSite=Lax` (`Secure` en HTTPS), vérification de l'origine des requêtes, limitation des tentatives de connexion, en-têtes CSP stricts, chaque requête limitée aux données de l'utilisateur connecté, webhooks Stripe signés.
 
 ## Développement

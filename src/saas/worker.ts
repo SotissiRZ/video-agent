@@ -4,6 +4,7 @@
  * Run several workers (containers) to render several videos at once.
  */
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import os from 'node:os';
 import { VideoAgent, type AgentDependencies } from '../agent/orchestrator';
 import type { AppConfig } from '../config/config';
@@ -17,7 +18,7 @@ import { createConnectionPublisher, getConnection, providerFor, saveConnection, 
 import type { Vault } from './crypto';
 import type { Db } from './db';
 import { getBrandKit } from './brand';
-import { claimNextJob, failStaleJobs, type JobRow } from './jobs';
+import { claimNextJob, failStaleJobs, purgeOldJobs, type JobRow } from './jobs';
 import { getPlan } from './plans';
 import { claimDuePublication, finishPublication, type PublicationRow } from './publications';
 
@@ -44,7 +45,7 @@ export class Worker {
   constructor(private readonly o: WorkerOptions) {}
 
   start(): void {
-    this.loops = [this.loop(() => this.renderNext()), this.loop(() => this.publishNext())];
+    this.loops = [this.loop(this.renderTick), this.loop(() => this.publishNext())];
     void failStaleJobs(this.o.db).catch(() => undefined);
   }
 
@@ -59,8 +60,19 @@ export class Worker {
     for (const wake of [...this.wakers]) wake();
   }
 
+  /** Delete videos past VIDEO_AGENT_RETENTION_DAYS (hourly; harmless when several workers do it). */
+  async purge(): Promise<number> {
+    const days = this.o.config().env.VIDEO_AGENT_RETENTION_DAYS;
+    if (!days) return 0;
+    const removed = await purgeOldJobs(this.o.db, days);
+    for (const job of removed) fs.rmSync(job.dir, { recursive: true, force: true });
+    if (removed.length) this.o.logger.info(`retention: ${removed.length} video(s) older than ${days} days deleted`);
+    return removed.length;
+  }
+
   private async loop(tick: () => Promise<boolean>): Promise<void> {
     let lastStaleCheck = Date.now();
+    let lastPurge = 0;
     while (!this.stopped) {
       let worked = false;
       try {
@@ -68,6 +80,10 @@ export class Worker {
         if (Date.now() - lastStaleCheck > 60_000) {
           lastStaleCheck = Date.now();
           await failStaleJobs(this.o.db);
+        }
+        if (tick === this.renderTick && Date.now() - lastPurge > 3600_000) {
+          lastPurge = Date.now();
+          await this.purge();
         }
       } catch (err) {
         this.o.logger.error(`worker: ${errorMessage(err)}`);
@@ -85,6 +101,8 @@ export class Worker {
       }
     }
   }
+
+  private readonly renderTick = () => this.renderNext();
 
   /** Render one queued video. Returns false when the queue is empty. */
   async renderNext(): Promise<boolean> {

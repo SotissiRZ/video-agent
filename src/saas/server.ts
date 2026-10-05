@@ -230,6 +230,8 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         signupOpen: config.env.SIGNUP_MODE === 'open' || users === 0,
         firstUser: users === 0,
         billing: billingEnabled(config),
+        company: { name: config.env.COMPANY_NAME, address: config.env.COMPANY_ADDRESS, email: config.env.CONTACT_EMAIL, url: config.env.PUBLIC_URL ?? '' },
+        retentionDays: config.env.VIDEO_AGENT_RETENTION_DAYS,
         plans: listPlans(config).map(({ stripePriceId, ...p }) => ({ ...p, purchasable: Boolean(stripePriceId) })),
       });
     }
@@ -529,7 +531,8 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       if (parts[0] === 'api') return await api(req, res, url, parts);
 
       if (req.method !== 'GET' && req.method !== 'HEAD') return json(res, 405, { error: 'method not allowed' });
-      const page = url.pathname === '/' ? 'index.html' : url.pathname === '/app' || url.pathname === '/app/' ? 'app.html' : decodeURIComponent(url.pathname.slice(1));
+      const pages: Record<string, string> = { '/': 'index.html', '/app': 'app.html', '/app/': 'app.html', '/legal': 'legal.html', '/legal/': 'legal.html' };
+      const page = pages[url.pathname] ?? decodeURIComponent(url.pathname.slice(1));
       const file = path.resolve(webRoot, page);
       if (!file.startsWith(webRoot + path.sep)) return json(res, 403, { error: 'forbidden' });
       return sendFile(req, res, file, { cache: /\.(css|js|svg|woff2|png|jpg|webp)$/.test(file) ? 'public, max-age=300' : 'no-cache' });
