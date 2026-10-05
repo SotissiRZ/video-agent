@@ -7,7 +7,7 @@ import { flip } from '@remotion/transitions/flip';
 import { slide } from '@remotion/transitions/slide';
 import { wipe } from '@remotion/transitions/wipe';
 import { StoryboardSchema, type CompositionProps, type Transition } from './contract/storyboard';
-import { computeTimeline, transitionLength, VOICE_OFFSET_FRAMES } from './contract/timeline';
+import { computeTimeline, transitionLength, voiceStartFrame } from './contract/timeline';
 import { SubtitlesOverlay } from './components/SubtitlesOverlay';
 import { PlanBadge, Watermark } from './components/Watermark';
 import { ensureFonts } from './fonts';
@@ -42,7 +42,7 @@ export const VideoComposition: React.FC<CompositionProps> = (props) => {
     () =>
       storyboard.scenes.flatMap((scene, i) =>
         scene.voiceover
-          ? [{ start: timeline[i]!.soloFrom + VOICE_OFFSET_FRAMES, end: timeline[i]!.soloFrom + VOICE_OFFSET_FRAMES + scene.voiceover.durationInFrames }]
+          ? [{ start: voiceStartFrame(timeline[i]!), end: voiceStartFrame(timeline[i]!) + scene.voiceover.durationInFrames }]
           : [],
       ),
     [storyboard.scenes, timeline],
@@ -96,7 +96,7 @@ export const VideoComposition: React.FC<CompositionProps> = (props) => {
         scene.voiceover ? (
           <Sequence
             key={`vo-${scene.id}`}
-            from={timeline[i]!.soloFrom + VOICE_OFFSET_FRAMES}
+            from={voiceStartFrame(timeline[i]!)}
             durationInFrames={scene.voiceover.durationInFrames}
             name={`voice ${i + 1}`}
           >

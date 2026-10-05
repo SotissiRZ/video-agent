@@ -6,11 +6,11 @@ import { selectSlots } from '../src/planning/slots';
 import { parsePrompt } from '../src/prompt/parser';
 import { StoryboardSchema, type Storyboard } from '../src/remotion/contract/storyboard';
 import { getStyle, STYLES } from '../src/remotion/contract/styles';
-import { computeTimeline, computeTotalDuration } from '../src/remotion/contract/timeline';
+import { computeTimeline, computeTotalDuration, voiceStartFrame } from '../src/remotion/contract/timeline';
 import { applyAnimations } from '../src/storyboard/animations';
 import { allocateDurations, buildStoryboard, sanitizeScene } from '../src/storyboard/builder';
 import { refineScenes } from '../src/storyboard/scenes';
-import { fitScenesToVoiceover, matchTargetDuration } from '../src/storyboard/timing';
+import { fitScenesToVoiceover, matchTargetDuration, paceScenesToVoiceover } from '../src/storyboard/timing';
 import { validateStoryboard } from '../src/storyboard/validator';
 import { buildSubtitleCues, chunkText, toSrt, toVtt } from '../src/subtitles/subtitles';
 import { getTemplate } from '../src/templates/registry';
@@ -101,6 +101,29 @@ describe('timing with voice-over', () => {
     expect(fitted.scenes[0]!.durationInFrames).toBeGreaterThan(sb.scenes[0]!.voiceover!.durationInFrames);
     expect(fitted.format.durationInFrames).toBe(computeTotalDuration(fitted.scenes));
     expect(validateStoryboard(fitted).valid).toBe(true);
+  });
+
+  it('paces scenes on the narration: short pauses between sentences, no long silences', async () => {
+    const sb = await makeStoryboard('Vidéo de 30s pour promouvoir Sirago');
+    const fps = sb.format.fps;
+    // Short sentences (1.5 s) in long scenes: the old timing left seconds of silence.
+    sb.scenes = sb.scenes.map((s) => ({ ...s, voiceover: { src: 'voice/x.wav', durationInFrames: Math.round(1.5 * fps), volume: 1 } }));
+    const paced = paceScenesToVoiceover(sb);
+    const timeline = computeTimeline(paced.scenes);
+    for (let i = 1; i < paced.scenes.length; i++) {
+      const previousEnd = voiceStartFrame(timeline[i - 1]!) + paced.scenes[i - 1]!.voiceover!.durationInFrames;
+      const gap = (voiceStartFrame(timeline[i]!) - previousEnd) / fps;
+      expect(gap).toBeGreaterThan(0.2);
+      expect(gap).toBeLessThan(2.3);
+    }
+    expect(validateStoryboard(paced).valid).toBe(true);
+    // A requested duration is kept within 85 %.
+    const target = 30 * fps;
+    const filled = paceScenesToVoiceover(sb, { targetFrames: target });
+    expect(filled.format.durationInFrames).toBeGreaterThanOrEqual(Math.round(target * 0.85));
+    // Long sentences stretch their scene.
+    sb.scenes[0] = { ...sb.scenes[0]!, voiceover: { src: 'voice/x.wav', durationInFrames: 8 * fps, volume: 1 } };
+    expect(paceScenesToVoiceover(sb).scenes[0]!.durationInFrames).toBeGreaterThan(8 * fps);
   });
 });
 

@@ -43,7 +43,8 @@ import { getStyle } from '../remotion/contract/styles';
 import { applyAnimations } from '../storyboard/animations';
 import { buildStoryboard } from '../storyboard/builder';
 import { refineScenes } from '../storyboard/scenes';
-import { fitScenesToVoiceover, matchTargetDuration, recomputeDuration } from '../storyboard/timing';
+import { matchTargetDuration, paceScenesToVoiceover, recomputeDuration } from '../storyboard/timing';
+import { trimWavSilence, wavDurationSec } from '../audio/wav';
 import { validateStoryboard } from '../storyboard/validator';
 import { buildSubtitleCues, toSrt, toVtt } from '../subtitles/subtitles';
 import { getTemplate } from '../templates/registry';
@@ -269,7 +270,8 @@ export class VideoAgent {
         let sb = storyboard;
         if (voiceProvider) {
           sb = await this.generateVoiceover(sb, brief, paths, voiceProvider, warnings, progress, signal);
-          sb = fitScenesToVoiceover(sb);
+          // The narration sets the pace: no long silences between sentences.
+          if (sb.scenes.some((s) => s.voiceover)) sb = paceScenesToVoiceover(sb, { targetFrames: Math.round(brief.durationSec * sb.format.fps) });
         }
         if (brief.music) {
           const music = this.prepareMusic(sb, brief, paths, style.theme.motion, style.id === 'elegant');
@@ -408,7 +410,13 @@ export class VideoAgent {
       progress(i / scenes.length, `Voix-off ${i + 1}/${scenes.length}`);
       const outFile = path.join(paths.publicDir, 'voice', `${scene.id}.wav`);
       try {
-        const { durationSec } = await provider.synthesize({ text, language: brief.language, outFile, signal });
+        let { durationSec } = await provider.synthesize({ text, language: brief.language, outFile, signal });
+        // TTS engines pad sentences with silence: trim it so the voice starts right on cue.
+        if (fs.existsSync(outFile)) {
+          const trimmed = trimWavSilence(fs.readFileSync(outFile));
+          fs.writeFileSync(outFile, trimmed);
+          durationSec = wavDurationSec(trimmed);
+        }
         scenes[i] = { ...scene, voiceover: { src: `voice/${scene.id}.wav`, durationInFrames: Math.max(1, Math.ceil(durationSec * fps)), volume: 1 } };
       } catch (err) {
         if (signal?.aborted) throw err;

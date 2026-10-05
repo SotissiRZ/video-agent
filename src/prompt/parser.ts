@@ -94,6 +94,14 @@ const NOT_BRANDS = new Set(
     'cree', 'creer', 'create', 'make', 'fais', 'faire', 'genere', 'generer', 'generate', 'produis', 'realise', 'video', 'une', 'un',
     'tiktok', 'instagram', 'youtube', 'facebook', 'linkedin', 'whatsapp', 'reels', 'shorts', 'je', 'nous', 'i', 'we', 'please', 'merci',
     'pour', 'for', 'avec', 'with', 'le', 'la', 'les', 'the', 'a', 'an', 'mon', 'ma', 'notre', 'our', 'my',
+    // Acronyms and generic business words written in capitals, not brand names ("plateforme SaaS pour les PME").
+    'saas', 'paas', 'pme', 'pmes', 'tpe', 'tpes', 'eti', 'sme', 'smes', 'ia', 'ai', 'api', 'apis', 'crm', 'erp', 'b2b', 'b2c', 'it', 'iot', 'cloud',
+    'data', 'web', 'web3', 'tech', 'fintech', 'edtech', 'healthtech', 'ecommerce', 'e-commerce', 'rh', 'hr', 'seo', 'rgpd', 'gdpr', 'ceo', 'cto',
+    'pdg', 'dg', 'ux', 'ui', 'mvp', 'roi', 'kpi', 'ong', 'ngo', 'vtc', 'gps', 'nft', 'blockchain', 'bitcoin', 'android', 'ios', 'windows', 'mac',
+    'internet', 'startup', 'start-up', 'bac', 'master', 'covid',
+    'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+    'janvier', 'fevrier', 'mars', 'avril', 'mai', 'juin', 'juillet', 'aout', 'septembre', 'octobre', 'novembre', 'decembre',
+    'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december', 'noel', 'christmas',
   ].map(normalize),
 );
 
@@ -127,6 +135,8 @@ export const parseBrand = (text: string, location?: string): string | undefined 
   while ((m = afterVerb.exec(text))) {
     const candidate = m[1]!.replace(/[.,;:!?]+$/, '');
     if (location && candidate === location) continue;
+    // "AI API", "SaaS": generic words, not a brand.
+    if (candidate.split(/\s+/).every((w) => NOT_BRANDS.has(normalize(w)))) continue;
     if (!NOT_BRANDS.has(normalize(candidate))) return candidate;
   }
   // Any capitalised word that is not the first word of a sentence nor part of the location.
@@ -216,6 +226,7 @@ export const parseTopic = (text: string, brand?: string): string => {
     // Cut the relative clause and the audience/location tail: keep the subject itself.
     .replace(/\s+(?:qui|que|dont|who|that|which)\s+.*$/i, '')
     .replace(/\s+(?:aupr[eè]s|targeting)\s+.*$/i, '')
+    .replace(/\s+(?:pour|for)\s+(?:les|des|the)\s+.*$/i, '')
     .replace(/\s+(?:au|aux|en|à|in|for)\s+(?=[A-ZÀ-Þ0-9]).*$/u, '')
     .trim();
   return topic.length > 80 ? `${topic.slice(0, 77).trim()}…` : topic;

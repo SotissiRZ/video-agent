@@ -1,8 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { synthesizeMusic } from '../src/audio/music';
-import { encodeWav, pcm16ToWav, wavDurationSec } from '../src/audio/wav';
+import { encodeWav, pcm16ToWav, trimWavSilence, wavDurationSec } from '../src/audio/wav';
 
 describe('audio', () => {
+  it('trims the silence around a voice clip, keeping a short margin', () => {
+    const rate = 22050;
+    const samples = new Float32Array(rate * 2); // 2 s
+    for (let i = Math.round(rate * 0.6); i < Math.round(rate * 1.4); i++) samples[i] = Math.sin(i / 5) * 0.5; // speech 0.6 s → 1.4 s
+    const trimmed = trimWavSilence(encodeWav(samples, rate));
+    expect(wavDurationSec(trimmed)).toBeCloseTo(0.9, 1);
+    expect(trimWavSilence(Buffer.from('not a wav'))).toEqual(Buffer.from('not a wav'));
+    const silent = encodeWav(new Float32Array(rate), rate);
+    expect(trimWavSilence(silent)).toBe(silent);
+  });
+
   it('encodes and measures WAV files', () => {
     const wav = encodeWav(new Float32Array(22050), 11025);
     expect(wav.toString('ascii', 0, 4)).toBe('RIFF');

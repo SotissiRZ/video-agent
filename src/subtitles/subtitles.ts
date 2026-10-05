@@ -1,6 +1,6 @@
 /** Subtitle cue generation (timed on scenes/voice-over) and SRT/WebVTT export. */
 import type { Storyboard, SubtitleCue } from '../remotion/contract/storyboard';
-import { computeTimeline, VOICE_OFFSET_FRAMES } from '../remotion/contract/timeline';
+import { computeTimeline, voiceStartFrame } from '../remotion/contract/timeline';
 
 /**
  * Split `words` into exactly `k` consecutive chunks, minimising the length deviation
@@ -81,7 +81,7 @@ export const buildSubtitleCues = (storyboard: Storyboard, maxChars?: number): Su
     const window = timeline[i]!;
     const chunks = chunkText(scene.narration, limit);
     if (!chunks.length) return;
-    let start = window.soloFrom + (scene.voiceover ? VOICE_OFFSET_FRAMES : Math.round(fps * 0.2));
+    let start = scene.voiceover ? voiceStartFrame(window) : window.soloFrom + Math.round(fps * 0.2);
     const end = scene.voiceover ? Math.min(window.soloTo, start + scene.voiceover.durationInFrames) : window.soloTo - Math.round(fps * 0.1);
     const available = end - start;
     if (available < chunks.length * 6) return;

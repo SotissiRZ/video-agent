@@ -107,3 +107,13 @@ describe('topic extraction', () => {
     expect(parsePrompt('Make a video to promote my yoga studio').topic).toBe('my yoga studio');
   });
 });
+
+describe('brand detection', () => {
+  it('does not take acronyms or generic tech words for a brand', () => {
+    const p = parsePrompt('Crée une vidéo verticale de 30 secondes pour présenter notre plateforme SaaS de cybersécurité pour les PME, style tech');
+    expect(p.brand).toBeUndefined();
+    expect(p.topic).toBe('notre plateforme SaaS de cybersécurité');
+    expect(parsePrompt('Make a video about our AI API for developers').brand).toBeUndefined();
+    expect(parsePrompt('Crée une vidéo pour promouvoir Sirago auprès des chauffeurs').brand).toBe('Sirago');
+  });
+});

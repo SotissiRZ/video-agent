@@ -32,7 +32,7 @@ export const proceduralScript = (brief: VideoBrief, template: TemplateDefinition
       statLabel: c.stat?.label ?? '',
       narration: c.narration,
       visualKeywords: [...(c.visualKeywords ?? []), slot.role, ...brief.keywords].filter(Boolean),
-      visualPrompt: [c.headline.replace(/\*/g, ''), brief.audience, brief.location, 'cinematic photo, natural light'].filter(Boolean).join(', '),
+      visualPrompt: [brief.topic, c.headline.replace(/\*/g, ''), brief.audience, brief.location, 'cinematic photo, natural light'].filter(Boolean).join(', '),
       weight: slot.weight,
     };
   });
