@@ -1,0 +1,60 @@
+{
+  "name": "video-agent",
+  "version": "0.1.0",
+  "description": "Autonomous AI video generation agent powered by Remotion — from a natural-language brief to a rendered video, fully local.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "video-agent": "bin/video-agent.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "src",
+    "web",
+    "assets",
+    ".env.example"
+  ],
+  "engines": {
+    "node": ">=20.3"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/cli/index.ts",
+    "start": "node bin/video-agent.js",
+    "web": "node bin/video-agent.js web",
+    "studio": "remotion studio src/remotion/index.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "test": "vitest run --exclude tests/render.e2e.test.ts",
+    "test:render": "vitest run tests/render.e2e.test.ts",
+    "test:all": "vitest run",
+    "test:watch": "vitest",
+    "doctor": "node bin/video-agent.js doctor",
+    "demo": "node bin/video-agent.js \"Crée une vidéo verticale de 30 secondes pour promouvoir Sirago auprès des chauffeurs au Burkina Faso.\" --out output/demo"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
+    "@fontsource/inter": "^5.3.0",
+    "@fontsource/montserrat": "^5.3.0",
+    "@remotion/bundler": "^4.0.532",
+    "@remotion/cli": "^4.0.532",
+    "@remotion/fonts": "^4.0.532",
+    "@remotion/renderer": "^4.0.532",
+    "@remotion/transitions": "^4.0.532",
+    "commander": "^15.0.0",
+    "dotenv": "^18.0.5",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "remotion": "^4.0.532",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "@types/react": "^19.3.0",
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}
