@@ -34,3 +34,16 @@ export class StoryboardValidationError extends VideoAgentError {
 }
 
 export const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+/**
+ * Short, readable form of a provider error: keeps the provider prefix and the human message
+ * found in JSON error bodies, drops request ids and raw JSON.
+ */
+export const summarizeError = (message: string, max = 220): string => {
+  const prefix = /^\[[\w-]+\]\s*/.exec(message)?.[0] ?? '';
+  const inner = [...message.matchAll(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]!.replace(/\\"/g, '"'));
+  const status = /\b(4\d\d|5\d\d)\b/.exec(message)?.[1];
+  let text = inner.length ? `${prefix}${status ? `${status} ` : ''}${inner[inner.length - 1]}` : message;
+  text = text.replace(/,?\s*"?request_id"?\s*:\s*"[^"]*"/g, '').replace(/\s+/g, ' ').trim();
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+};

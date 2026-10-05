@@ -4,7 +4,7 @@
  */
 import { z } from 'zod';
 import type { VideoBrief, VideoConcept } from '../core/types';
-import { errorMessage } from '../core/errors';
+import { errorMessage, summarizeError } from '../core/errors';
 import { generateJson } from '../llm/json';
 import type { LLMProvider } from '../llm/types';
 import type { MediaCredit } from '../media/director';
@@ -146,7 +146,7 @@ Return {${platforms.map((p) => `"${p}": {"title","caption","hashtags"}`).join(',
     return { captions, source: `${llm.id}:${llm.model}` };
   } catch (err) {
     if (signal?.aborted) throw err;
-    warnings.push(`LLM captions failed, using procedural captions: ${errorMessage(err)}`);
+    warnings.push(`LLM captions failed, using procedural captions: ${summarizeError(errorMessage(err))}`);
     return { captions: fallback, source: 'procedural' };
   }
 };

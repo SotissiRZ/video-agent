@@ -48,3 +48,32 @@ export const Watermark: React.FC<{ storyboard: Storyboard }> = ({ storyboard }) 
     </AbsoluteFill>
   );
 };
+
+/** Plan badge ("Made with Video Agent") in the top-right corner, away from the subtitles. */
+export const PlanBadge: React.FC<{ storyboard: Storyboard }> = ({ storyboard }) => {
+  const layout = useLayout();
+  const { brand, theme } = storyboard;
+  if (!brand.badge) return null;
+  const size = Math.round(layout.unit * 0.026);
+  return (
+    <AbsoluteFill style={{ pointerEvents: 'none' }}>
+      <div
+        style={{
+          position: 'absolute',
+          right: layout.padX * 0.6,
+          top: layout.isPortrait ? layout.height * 0.055 : layout.padY * 0.6,
+          fontFamily: theme.bodyFont,
+          fontWeight: 600,
+          fontSize: size,
+          color: '#ffffff',
+          background: 'rgba(0,0,0,0.45)',
+          padding: `${size * 0.35}px ${size * 0.7}px`,
+          borderRadius: size,
+          opacity: 0.85,
+        }}
+      >
+        {brand.badge}
+      </div>
+    </AbsoluteFill>
+  );
+};

@@ -2,7 +2,7 @@
  * Planner facade: produces the concept and script, using the LLM when available
  * and falling back to the deterministic planner on any failure.
  */
-import { errorMessage } from '../core/errors';
+import { errorMessage, summarizeError } from '../core/errors';
 import type { Logger } from '../core/logger';
 import type { PlannedScene, VideoBrief, VideoConcept } from '../core/types';
 import type { LLMProvider } from '../llm/types';
@@ -33,7 +33,7 @@ export class Planner {
         return { value: await llmConcept(this.llm, brief, template, signal), source: this.source };
       } catch (err) {
         if (signal?.aborted) throw err;
-        const warning = `LLM concept failed, using procedural concept: ${errorMessage(err)}`;
+        const warning = `LLM concept failed, using procedural concept: ${summarizeError(errorMessage(err))}`;
         this.logger.warn(warning);
         return { value: proceduralConcept(brief, template), source: 'procedural', warning };
       }
@@ -47,7 +47,7 @@ export class Planner {
         return { value: await llmScript(this.llm, brief, template, concept, slots, signal), source: this.source };
       } catch (err) {
         if (signal?.aborted) throw err;
-        const warning = `LLM script failed, using procedural script: ${errorMessage(err)}`;
+        const warning = `LLM script failed, using procedural script: ${summarizeError(errorMessage(err))}`;
         this.logger.warn(warning);
         return { value: proceduralScript(brief, template, slots), source: 'procedural', warning };
       }

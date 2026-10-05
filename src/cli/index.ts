@@ -24,7 +24,11 @@ import { remotionEntryPoint, renderStoryboard } from '../render/renderer';
 import { STYLES } from '../remotion/contract/styles';
 import { validateStoryboard } from '../storyboard/validator';
 import { listTemplates } from '../templates/registry';
-import { startServer } from '../server/server';
+import { startSaasServer } from '../saas/server';
+import { connectDatabase } from '../saas/db';
+import { resolveAppSecret, Vault } from '../saas/crypto';
+import { Worker } from '../saas/worker';
+import { createLogger } from '../core/logger';
 import { createProgressPrinter } from './progress';
 import { parseDate, parsePlatforms, publishFromCli, registerPublishCommands } from './publish-commands';
 import { PLATFORM_IDS, type PlatformId } from '../publish/types';
@@ -297,13 +301,34 @@ program
 
 program
   .command('web')
-  .description('start the local web interface')
+  .description('start the web app (SaaS): accounts, videos, publishing, billing')
   .option('-p, --port <port>', 'port', positiveInt('port'))
   .option('--host <host>', 'host (default 127.0.0.1)')
   .action(async (flags: { port?: number; host?: string }) => {
     const cfg = config();
-    const { url } = await startServer(cfg, { port: flags.port, host: flags.host, webRoot: path.join(packageRoot, 'web') });
-    process.stdout.write(`🎬 Video Agent web UI: ${url}\n`);
+    const { url, app } = await startSaasServer(cfg, { port: flags.port, host: flags.host, webRoot: path.join(packageRoot, 'web') });
+    process.stdout.write(`🎬 Video Agent : ${url}\n`);
+    process.stdout.write(`   Base de données : ${app.db.kind === 'pglite' ? `intégrée (${path.join(cfg.paths.data, 'db')})` : 'PostgreSQL'} · rendu : ${app.worker ? 'dans ce processus' : 'workers séparés ("video-agent worker")'}\n`);
+    const shutdown = () => void app.close().finally(() => process.exit(0));
+    process.once('SIGINT', shutdown);
+    process.once('SIGTERM', shutdown);
+  });
+
+program
+  .command('worker')
+  .description('render worker for the web app: renders queued videos and runs due publications (needs DATABASE_URL)')
+  .action(async () => {
+    const cfg = config();
+    if (!cfg.env.DATABASE_URL) throw new VideoAgentError('Le worker séparé nécessite DATABASE_URL (PostgreSQL)', 'Sans PostgreSQL, "video-agent web" rend les vidéos lui-même.');
+    const db = await connectDatabase(cfg);
+    const logger = createLogger(cfg.logLevel);
+    // Fresh configuration for every job: changes made in the admin Settings page apply without restart.
+    const worker = new Worker({ db, vault: new Vault(resolveAppSecret(cfg)), config: () => { try { return config(); } catch { return cfg; } }, logger });
+    worker.start();
+    process.stdout.write(`🛠  Worker ${worker.id} prêt\n`);
+    const shutdown = () => void worker.stop().then(() => db.close()).finally(() => process.exit(0));
+    process.once('SIGINT', shutdown);
+    process.once('SIGTERM', shutdown);
   });
 
 program.parseAsync(process.argv).catch((err: unknown) => {

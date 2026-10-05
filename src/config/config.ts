@@ -170,6 +170,31 @@ const EnvSchema = z.object({
   /** Run the local publication scheduler inside "video-agent web". */
   VIDEO_AGENT_SCHEDULER: bool(true),
 
+  // --- SaaS ----------------------------------------------------------------
+  /** PostgreSQL connection string. Empty = embedded database (PGlite) in VIDEO_AGENT_DATA_DIR. */
+  DATABASE_URL: optionalString,
+  /** Local data (embedded database, generated secret). */
+  VIDEO_AGENT_DATA_DIR: z.preprocess(emptyToUndefined, z.string().default('.video-agent')),
+  /** Secret used to sign sessions and encrypt OAuth tokens (32+ chars). Generated locally if empty. */
+  APP_SECRET: z.preprocess(emptyToUndefined, z.string().min(32, 'APP_SECRET doit faire au moins 32 caractères').optional()),
+  /** Public URL of the app (OAuth redirects, Stripe return URLs, secure cookies when https). */
+  PUBLIC_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
+  /** open = anyone can sign up | closed = only existing accounts (and the first user). */
+  SIGNUP_MODE: enumWithDefault(['open', 'closed'] as const, 'open'),
+  /** Comma-separated e-mails that get the admin role (the first account is always admin). */
+  ADMIN_EMAILS: z.preprocess(emptyToUndefined, z.string().default('')),
+  /** Run the render worker inside the web process (auto = only with the embedded database). */
+  VIDEO_AGENT_EMBEDDED_WORKER: enumWithDefault(['auto', 'true', 'false'] as const, 'auto'),
+  /** Behind a reverse proxy (Caddy in docker-compose): trust X-Forwarded-For / X-Forwarded-Proto. */
+  VIDEO_AGENT_TRUST_PROXY: bool(false),
+  STRIPE_SECRET_KEY: optionalString,
+  STRIPE_WEBHOOK_SECRET: optionalString,
+  STRIPE_PRICE_CREATOR: optionalString,
+  STRIPE_PRICE_PRO: optionalString,
+  /** Prices shown on the pricing page (Stripe remains the source of truth for billing). */
+  PLAN_CREATOR_PRICE: z.preprocess(emptyToUndefined, z.string().default('19 €')),
+  PLAN_PRO_PRICE: z.preprocess(emptyToUndefined, z.string().default('49 €')),
+
   VIDEO_AGENT_LOG_LEVEL: enumWithDefault(['debug', 'info', 'warn', 'error', 'silent'] as const, 'info'),
 });
 
@@ -178,7 +203,7 @@ export type Env = z.infer<typeof EnvSchema>;
 export interface AppConfig {
   env: Env;
   /** Absolute paths. */
-  paths: { root: string; output: string; assets: string };
+  paths: { root: string; output: string; assets: string; data: string };
   logLevel: LogLevel;
   browserExecutable?: string;
 }
@@ -235,6 +260,7 @@ export const loadConfig = (options: LoadConfigOptions = {}): AppConfig => {
       root,
       output: path.resolve(cwd, env.VIDEO_AGENT_OUTPUT_DIR),
       assets: path.resolve(cwd, env.VIDEO_AGENT_ASSETS_DIR),
+      data: path.resolve(cwd, env.VIDEO_AGENT_DATA_DIR),
     },
     logLevel: env.VIDEO_AGENT_LOG_LEVEL,
     browserExecutable: env.VIDEO_AGENT_BROWSER_EXECUTABLE ?? env.REMOTION_BROWSER_EXECUTABLE,
@@ -256,6 +282,9 @@ export const describeSecrets = (env: Env): Record<string, boolean> => ({
   PIXABAY_API_KEY: Boolean(env.PIXABAY_API_KEY),
   UNSPLASH_ACCESS_KEY: Boolean(env.UNSPLASH_ACCESS_KEY),
   ELEVENLABS_API_KEY: Boolean(env.ELEVENLABS_API_KEY),
+  APP_SECRET: Boolean(env.APP_SECRET),
+  STRIPE_SECRET_KEY: Boolean(env.STRIPE_SECRET_KEY),
+  STRIPE_WEBHOOK_SECRET: Boolean(env.STRIPE_WEBHOOK_SECRET),
   YOUTUBE_REFRESH_TOKEN: Boolean(env.YOUTUBE_REFRESH_TOKEN),
   TIKTOK_REFRESH_TOKEN: Boolean(env.TIKTOK_REFRESH_TOKEN || env.TIKTOK_ACCESS_TOKEN),
   FACEBOOK_PAGE_ACCESS_TOKEN: Boolean(env.FACEBOOK_PAGE_ACCESS_TOKEN),

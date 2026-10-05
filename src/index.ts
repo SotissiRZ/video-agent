@@ -27,7 +27,8 @@ export { renderStoryboard, type RenderOptions, type RenderResult } from './rende
 export { validateStoryboard } from './storyboard/validator';
 export { StoryboardSchema, type Storyboard, type Scene } from './remotion/contract/storyboard';
 export { STYLES, getStyle } from './remotion/contract/styles';
-export { startServer } from './server/server';
+export { createSaasApp, startSaasServer } from './saas/server';
+export { Worker } from './saas/worker';
 export { MediaDirector, type MediaCredit } from './media/director';
 export { registerStockProvider, resolveStockProviders } from './providers/stock/registry';
 export type { StockProvider, StockQuery, StockResult } from './providers/stock/types';

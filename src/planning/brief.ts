@@ -25,7 +25,7 @@ export const buildBrief = (parsed: ParsedPrompt, options: VideoOptions, config: 
   resolution ??= parsed.format ?? resolveFormat(template.defaultFormat) ?? resolveFormat(env.VIDEO_AGENT_DEFAULT_FORMAT) ?? resolveFormat('landscape')!;
   const { width, height } = normalizeResolution(resolution);
 
-  const durationSec = clamp(Math.round(options.durationSec ?? parsed.durationSec ?? env.VIDEO_AGENT_DEFAULT_DURATION ?? template.defaultDurationSec), 3, 600);
+  const durationSec = clamp(Math.round(options.durationSec ?? parsed.durationSec ?? env.VIDEO_AGENT_DEFAULT_DURATION ?? template.defaultDurationSec), 3, Math.min(600, options.maxDurationSec ?? 600));
   const fps = clamp(Math.round(options.fps ?? parsed.fps ?? env.VIDEO_AGENT_DEFAULT_FPS), 1, 120);
 
   // Style
@@ -57,6 +57,7 @@ export const buildBrief = (parsed: ParsedPrompt, options: VideoOptions, config: 
     voice: options.voice ?? parsed.wantsVoice ?? true,
     music: options.music ?? parsed.wantsMusic ?? env.VIDEO_AGENT_MUSIC !== 'none',
     subtitles: options.subtitles ?? parsed.wantsSubtitles ?? env.VIDEO_AGENT_SUBTITLES,
+    badge: options.badge,
     parsed,
   };
   return { brief, notes };

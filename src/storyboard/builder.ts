@@ -83,7 +83,7 @@ export const buildStoryboard = ({ brief, concept, scenes, style }: BuildStoryboa
     meta: { title: concept.title, language: brief.language, template: brief.templateId, style: style.id, prompt: brief.prompt },
     format: { width: brief.width, height: brief.height, fps, durationInFrames: computeTotalDuration(storyboardScenes) },
     theme: style.theme,
-    brand: { name: brief.brand, tagline: concept.tagline, showWatermark: Boolean(brief.brand) },
+    brand: { name: brief.brand, tagline: concept.tagline, showWatermark: Boolean(brief.brand), ...(brief.badge ? { badge: brief.badge } : {}) },
     scenes: storyboardScenes,
     subtitles: { enabled: brief.subtitles, style: style.subtitleStyle, cues: [] },
     audio: {},
