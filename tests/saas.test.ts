@@ -275,7 +275,7 @@ describe('brand kit', () => {
     const saved = await zsr.json('PUT', '/api/brand', { name: 'ZSR-TechNum', colors: ['#0b1c8c', '#3cc8c8'] });
     expect(saved.body).toMatchObject({ name: 'ZSR-TechNum', colors: ['#0B1C8C', '#3CC8C8'] });
 
-    const upload = (body: Buffer) => fetch(`${base}/api/brand/logo`, { method: 'PUT', body, headers: { cookie: zsr.cookie, 'content-type': 'image/png' } });
+    const upload = (body: Buffer) => fetch(`${base}/api/brand/logo`, { method: 'PUT', body: new Uint8Array(body), headers: { cookie: zsr.cookie, 'content-type': 'image/png' } });
     const svg = await upload(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'));
     expect(svg.status).toBe(400);
     expect((await svg.json()).code).toBe('logo_format');
