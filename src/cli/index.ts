@@ -217,6 +217,8 @@ program
       browserExecutable: cfg.browserExecutable,
       concurrency: cfg.env.VIDEO_AGENT_RENDER_CONCURRENCY,
       crf: cfg.env.VIDEO_AGENT_CRF,
+      x264Preset: cfg.env.VIDEO_AGENT_X264_PRESET,
+      gl: cfg.env.VIDEO_AGENT_RENDER_GL,
       onProgress: ({ stage, progress }) =>
         print({ step: 'render', stepIndex: 10, totalSteps: 12, status: 'progress', message: `${stage} ${Math.round(progress * 100)}%`, overall: progress }),
     });

@@ -142,3 +142,25 @@ describe('contract', () => {
     expect(computeTotalDuration(sb.scenes)).toBe(60);
   });
 });
+
+describe('Ken Burns camera move', () => {
+  it('pans inside the zoom margin so image edges never show', async () => {
+    const { kenBurnsMove } = await import('../src/remotion/components/MediaLayer');
+    for (const src of ['a.jpg', 'media/b.png', 'https://x/c.jpg', 'd.webp']) {
+      for (const k of [0.04, 0.08, 0.3, 0.5]) {
+        for (const p of [0, 0.25, 0.5, 1]) {
+          const m = kenBurnsMove(src, k, p);
+          const margin = ((m.scale - 1) / 2) * 100;
+          expect(Math.abs(m.x) * m.scale).toBeLessThanOrEqual(margin + 1e-9);
+          expect(Math.abs(m.y) * m.scale).toBeLessThanOrEqual(margin + 1e-9);
+        }
+      }
+    }
+  });
+
+  it('varies the move between photos', async () => {
+    const { kenBurnsMove } = await import('../src/remotion/components/MediaLayer');
+    const moves = ['a.jpg', 'b.jpg', 'c.jpg', 'd.jpg', 'e.jpg'].map((s) => kenBurnsMove(s, 0.08, 1));
+    expect(new Set(moves.map((m) => `${m.x.toFixed(2)},${m.y.toFixed(2)}`)).size).toBeGreaterThan(1);
+  });
+});

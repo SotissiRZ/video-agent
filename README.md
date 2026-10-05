@@ -202,7 +202,9 @@ Toute la configuration passe par des **variables d'environnement**, lues aussi d
 | `VIDEO_AGENT_OUTPUT_DIR` / `VIDEO_AGENT_ASSETS_DIR` | `output` / `assets` | Dossiers |
 | `VIDEO_AGENT_BROWSER_EXECUTABLE` | auto | Chrome/Chromium headless à utiliser |
 | `VIDEO_AGENT_RENDER_CONCURRENCY` / `VIDEO_AGENT_CRF` | Remotion | Performance et qualité du rendu |
+| `VIDEO_AGENT_X264_PRESET` / `VIDEO_AGENT_RENDER_GL` | `veryfast` / `auto` | Vitesse d'encodage et moteur graphique de Chrome |
 | `VIDEO_AGENT_HOST` / `VIDEO_AGENT_PORT` | `127.0.0.1` / `3210` | Interface web |
+| `VIDEO_AGENT_WEB_PASSWORD` | vide | Mot de passe de l'interface (nom d'utilisateur libre) |
 
 Vérifier ce qui est actif :
 
@@ -280,7 +282,7 @@ Ouvrez **http://127.0.0.1:3210**. L'interface comporte quatre onglets :
 
 Les badges en haut à droite indiquent l'état des fournisseurs. Un point bleu signale un service gratuit, un point vert un service payant configuré.
 
-Les tâches sont mises en file et exécutées une à la fois, car le rendu sollicite fortement le processeur. Le serveur écoute sur `127.0.0.1` par défaut et refuse les requêtes d'écriture venant d'un autre site. Ne l'exposez pas sur un réseau public sans protection.
+Les tâches sont mises en file et exécutées une à la fois, car le rendu sollicite fortement le processeur. Le serveur écoute sur `127.0.0.1` par défaut et refuse les requêtes d'écriture venant d'un autre site. Pour y accéder depuis un autre appareil (téléphone, autre PC), définissez d'abord `VIDEO_AGENT_WEB_PASSWORD` (ou dans **Réglages → Sécurité**) : le navigateur demandera ce mot de passe, avec un nom d'utilisateur libre. Sans mot de passe, le serveur affiche un avertissement s'il écoute sur le réseau.
 
 **Durée** : jusqu'à 10 minutes. Pour les vidéos longues, l'agent ajoute des scènes (chaque type de scène répétable apparaît au plus 3 fois), puis allonge les scènes. Avec un LLM, chaque scène reçoit un texte différent ; sans LLM, les textes génériques se répètent davantage. Le rendu prend environ 1 minute pour 10 s de vidéo en 1080p sur 4 cœurs.
 
@@ -389,7 +391,8 @@ Contenu de `output/<job>/` :
 | `Video Agent is not built yet` | Lancez `npm run build`, ou utilisez `npm run dev -- "…"`. |
 | Échec du téléchargement de Chrome Headless Shell (403, proxy, hors-ligne) | Indiquez un Chromium existant : `VIDEO_AGENT_BROWSER_EXECUTABLE=/chemin/vers/chrome-headless-shell`. Le Chromium de Playwright est détecté automatiquement. |
 | Linux : `error while loading shared libraries` au rendu | Installez les bibliothèques listées dans les [Prérequis](#3-prérequis). |
-| Rendu lent | Réduisez la résolution ou les fps, augmentez `VIDEO_AGENT_RENDER_CONCURRENCY` (≈ nombre de cœurs), utilisez `--no-render` pour itérer sur le storyboard. |
+| Docker sous Windows : `entrypoint.sh: not found` ou `\r: command not found` | Fins de ligne Windows (CRLF). Le dépôt force maintenant LF (`.gitattributes`). Sur un clone existant : `git rm --cached -r . -q` puis `git reset --hard`, puis `docker compose build --no-cache`. |
+| Rendu lent | Comptez environ 1 min pour 30 s en 1080x1920 sur 4 cœurs. Vérifiez `VIDEO_AGENT_RENDER_GL=auto` (le mode `swangle` est ~3,5 fois plus lent), augmentez `VIDEO_AGENT_RENDER_CONCURRENCY` jusqu'au nombre de cœurs, gardez `VIDEO_AGENT_X264_PRESET=veryfast`, ou utilisez `--no-render` pour itérer sur le storyboard. |
 | `LLM concept failed, using procedural concept` | Clé invalide, quota atteint ou réponse non conforme. La vidéo est quand même produite. Vérifiez avec `video-agent providers`. |
 | Aucune photo/vidéo réelle dans la vidéo | Ajoutez au moins une clé gratuite (`PEXELS_API_KEY`…) ou des fichiers dans `assets/`. `video-agent doctor` affiche les sources actives, `credits.md` celles utilisées. |
 | Publication : `HTTP 401` | Jeton expiré ou révoqué : relancez `video-agent auth <plateforme> --save`. |
@@ -440,7 +443,7 @@ docker compose down                  # arrêt
 - **Windows** : utilisez PowerShell dans le dossier du projet, avec les mêmes commandes. `copy .env.example .env` remplace `cp`.
 - **`.env` doit exister** avant `docker compose up`. Sinon, Docker crée un *dossier* `.env` à sa place.
 - **Navigateur** : si `remotion.media` est inaccessible (proxy d'entreprise), construisez avec le Chromium de Debian : `VIDEO_AGENT_DOCKER_BROWSER=debian docker compose build`.
-- **Sécurité** : l'interface n'est exposée que sur `127.0.0.1` de l'hôte. Pour un serveur, placez un reverse proxy authentifié devant.
+- **Sécurité** : l'interface n'est exposée que sur `127.0.0.1` de l'hôte. Pour l'ouvrir au réseau, remplacez `127.0.0.1:` par `0.0.0.0:` dans `ports` **et** définissez `VIDEO_AGENT_WEB_PASSWORD` ; sur un serveur public, ajoutez un reverse proxy HTTPS devant.
 - **Ressources** : `shm_size: 1gb` est requis par Chrome. Réglez `VIDEO_AGENT_RENDER_CONCURRENCY` selon les cœurs alloués à Docker.
 - **Planificateur** : il tourne dans le service `web`, qui doit rester démarré (`restart: unless-stopped`) pour que les publications programmées partent à l'heure.
 
@@ -455,8 +458,10 @@ Pour chaque scène, l'agent cherche un visuel dans l'ordre de `VIDEO_AGENT_MEDIA
    - [Unsplash](https://unsplash.com/developers) (photos) → `UNSPLASH_ACCESS_KEY`
 
    Les requêtes vont du plus précis au plus général : mots-clés de la scène, puis public et lieu, puis une idée générique liée au rôle de la scène. Les clips vidéo et les photos sont alternés. Un média n'est jamais réutilisé dans la même vidéo.
-3. **`ai`** : génération d'images si rien n'a été trouvé : Replicate (FLUX), Stability AI ou OpenAI. Le nombre d'images est limité par `VIDEO_AGENT_MAX_GENERATED_IMAGES`. Les clips IA (Replicate) s'activent avec `--ai-video`.
+3. **`ai`** : génération d'images si rien n'a été trouvé : Cloudflare Workers AI et Hugging Face (gratuits), puis Replicate (FLUX), Stability AI ou OpenAI. Le nombre d'images est limité par `VIDEO_AGENT_MAX_GENERATED_IMAGES`. Les clips IA (Replicate) s'activent avec `--ai-video`.
 4. **Sinon** : fond animé procédural, comme dans le mode hors-ligne.
+
+**Photos animées** : chaque photo reçoit un mouvement de caméra lent (zoom avant ou arrière avec un panoramique), différent d'une photo à l'autre. Une vidéo faite uniquement de photos, gratuite, paraît ainsi filmée, sans générateur de clips payant.
 
 `VIDEO_AGENT_MEDIA_COVERAGE=all` met un visuel dans chaque scène, avec un voile sombre pour garder le texte lisible. `visual` le limite aux scènes « image ». Options CLI : `--media all|visual|none`, `--no-stock`, `--no-images`.
 

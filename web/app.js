@@ -12,6 +12,11 @@ let providers = {};
 
 const api = async (path, init) => {
   const res = await fetch(path, { headers: { 'content-type': 'application/json' }, ...init });
+  // Password just enabled (or changed): reload so the browser asks for it.
+  if (res.status === 401) {
+    window.location.reload();
+    throw new Error('Authentification requise');
+  }
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
   return body;
@@ -128,7 +133,7 @@ function renderSteps(job) {
   $('steps').innerHTML = Object.entries(STEP_LABELS).map(([id, label]) => {
     const s = job.steps?.[id];
     const status = s ? s.status : 'pending';
-    return `<li class="${status}"><span>${label}</span><small title="${escapeHtml(s?.message || '')}">${s ? escapeHtml(s.message || '') : ''}</small></li>`;
+    return `<li class="st-${status}"><span>${label}</span><small title="${escapeHtml(s?.message || '')}">${s ? escapeHtml(s.message || '') : ''}</small></li>`;
   }).join('');
 }
 
@@ -308,6 +313,11 @@ async function saveGroup(id) {
   card.querySelectorAll('[data-key]').forEach((el) => (updates[el.dataset.key] = el.value));
   try {
     await putSettings(updates);
+    if (updates.VIDEO_AGENT_WEB_PASSWORD) {
+      toast('🔒 Mot de passe activé : le navigateur va vous le demander (nom d’utilisateur libre).');
+      setTimeout(() => window.location.reload(), 1500);
+      return;
+    }
     toast('✅ Réglages enregistrés — appliqués aux prochaines vidéos.');
     loadSettings();
   } catch (err) {

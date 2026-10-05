@@ -1,0 +1,14 @@
+# Fins de ligne : LF partout (les scripts shell et le Dockerfile cassent avec CRLF
+# dans un conteneur Linux, même quand le dépôt est cloné sous Windows).
+* text=auto eol=lf
+# Scripts PowerShell : CRLF, natif sous Windows.
+*.ps1 text eol=crlf
+# Binaires
+*.mp4 binary
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.wav binary
+*.mp3 binary
+*.woff binary
+*.woff2 binary

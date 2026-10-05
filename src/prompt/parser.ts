@@ -210,6 +210,8 @@ export const parseTopic = (text: string, brand?: string): string => {
   const story = /(?:l['’]histoire|histoire|le parcours|parcours|the story|story|journey)\s+(?:d['’]|de |du |des |of )\s*(.+?)(?:[.,;!?]|$)/i.exec(t);
   const m = story ?? /(?:pour|sur|about|on|expliquant|explaining|pr[ée]sentant|presenting|montrant|showing|promouvoir|promote|pr[ée]senter|present|annoncer|announce|raconter|tell)\s+(.+?)(?:[.,;!?]|$)/i.exec(t);
   const topic = (m ? m[1]! : t)
+    // "pour promouvoir un café" → "un café": drop chained intent verbs.
+    .replace(/^(?:(?:faire\s+)?(?:promouvoir|pr[ée]senter|annoncer|expliquer|montrer|raconter|vendre|lancer|d[ée]couvrir|faire conna[iî]tre|promote|present|announce|explain|show|tell|sell|launch|introduce|showcase)\s+)+/i, '')
     .replace(/\b(?:de|of|en|in)\s+\d+\s*(?:secondes?|seconds?|s|min(?:utes?)?)\b/gi, '')
     // Cut the relative clause and the audience/location tail: keep the subject itself.
     .replace(/\s+(?:qui|que|dont|who|that|which)\s+.*$/i, '')

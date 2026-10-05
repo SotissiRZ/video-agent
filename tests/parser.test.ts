@@ -99,3 +99,11 @@ describe('prompt parser', () => {
     expect(p.durationSec).toBe(90);
   });
 });
+
+describe('topic extraction', () => {
+  it('drops chained intent verbs ("pour promouvoir un café" → "un café")', () => {
+    expect(parsePrompt('Crée une vidéo verticale de 30 secondes pour promouvoir un café à la plage en ville').topic).toBe('un café à la plage en ville');
+    expect(parsePrompt('Fais une vidéo pour présenter notre nouvelle application de livraison').topic).toBe('notre nouvelle application de livraison');
+    expect(parsePrompt('Make a video to promote my yoga studio').topic).toBe('my yoga studio');
+  });
+});
