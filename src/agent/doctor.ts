@@ -6,6 +6,8 @@ import { describeSecrets } from '../config/config';
 import { errorMessage } from '../core/errors';
 import { resolveLLM } from '../llm/registry';
 import { resolveImageProvider } from '../providers/image/registry';
+import { resolveStockProviders } from '../providers/stock/registry';
+import { platformStatus } from '../publish/registry';
 import { resolveVideoProvider } from '../providers/video/registry';
 import { detectSystemEngine } from '../providers/voice/system';
 import { resolveVoiceProvider } from '../providers/voice/registry';
@@ -30,7 +32,10 @@ export const providerStatus = (config: AppConfig) => {
   const voice = tryResolve(() => resolveVoiceProvider(config));
   const image = tryResolve(() => resolveImageProvider(config));
   const video = tryResolve(() => resolveVideoProvider(config));
+  const stock = tryResolve(() => resolveStockProviders(config));
   return {
+    stock: stock.error ? `error: ${stock.error}` : stock.value!.map((p) => p.id).join(', ') || 'none',
+    platforms: platformStatus(config).filter((p) => p.configured).map((p) => p.id).join(', ') || 'none',
     llm: llm.error ? `error: ${llm.error}` : llm.value ? `${llm.value.id} (${llm.value.model})` : 'procedural (no LLM configured)',
     voice: voice.error ? `error: ${voice.error}` : voice.value?.id ?? 'none',
     image: image.error ? `error: ${image.error}` : image.value?.id ?? 'none',
@@ -82,8 +87,12 @@ export const runDoctor = (config: AppConfig): Check[] => {
   const providers = providerStatus(config);
   checks.push({ name: 'LLM', status: providers.llm.startsWith('error') ? 'error' : providers.llm.startsWith('procedural') ? 'info' : 'ok', detail: providers.llm });
   checks.push({ name: 'Voice', status: providers.voice.startsWith('error') ? 'warn' : 'info', detail: `${providers.voice} (system engine: ${providers.systemVoice})` });
-  checks.push({ name: 'Images', status: providers.image.startsWith('error') ? 'warn' : 'info', detail: providers.image });
+  checks.push({ name: 'Stock photos/videos', status: providers.stock.startsWith('error') ? 'warn' : providers.stock === 'none' ? 'info' : 'ok', detail: providers.stock === 'none' ? 'none (add PEXELS_API_KEY, PIXABAY_API_KEY or UNSPLASH_ACCESS_KEY — free)' : providers.stock });
+  checks.push({ name: 'AI images', status: providers.image.startsWith('error') ? 'warn' : 'info', detail: providers.image });
   checks.push({ name: 'Video clips', status: providers.video.startsWith('error') ? 'warn' : 'info', detail: providers.video });
   checks.push({ name: 'Music', status: 'info', detail: providers.music });
+  for (const p of platformStatus(config)) {
+    checks.push({ name: `Publication ${p.label}`, status: p.configured ? 'ok' : 'info', detail: p.configured ? p.notes.join(' · ') || 'configured' : `not configured (${p.missing.join(', ')})` });
+  }
   return checks;
 };

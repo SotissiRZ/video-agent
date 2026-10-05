@@ -26,6 +26,8 @@ import { validateStoryboard } from '../storyboard/validator';
 import { listTemplates } from '../templates/registry';
 import { startServer } from '../server/server';
 import { createProgressPrinter } from './progress';
+import { parseDate, parsePlatforms, publishFromCli, registerPublishCommands } from './publish-commands';
+import { PLATFORM_IDS, type PlatformId } from '../publish/types';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = findPackageRoot(here);
@@ -75,6 +77,11 @@ interface GenerateFlags {
   out?: string;
   offline?: boolean;
   json?: boolean;
+  stock?: boolean;
+  media?: 'all' | 'visual' | 'none';
+  publish?: PlatformId[] | true;
+  publishAt?: Date;
+  yes?: boolean;
 }
 
 const generate = async (promptParts: string[], flags: GenerateFlags) => {
@@ -102,6 +109,8 @@ const generate = async (promptParts: string[], flags: GenerateFlags) => {
     skipRender: flags.render === false,
     outDir: flags.out ? path.resolve(flags.out) : undefined,
     offline: flags.offline,
+    stock: flags.stock,
+    mediaCoverage: flags.media,
   };
   const controller = new AbortController();
   process.once('SIGINT', () => {
@@ -127,10 +136,18 @@ const generate = async (promptParts: string[], flags: GenerateFlags) => {
       `   Miniature   : ${rel(result.posterFile)}`,
       `   Storyboard  : ${rel(result.storyboardFile)}`,
       `   Dossier     : ${rel(result.jobDir)}`,
-      `   Fournisseurs: planner=${result.providers.planner} voice=${result.providers.voice} images=${result.providers.image} music=${result.providers.music}`,
+      `   Fournisseurs: planner=${result.providers.planner} stock=${result.providers.stock} images IA=${result.providers.image} voix=${result.providers.voice} musique=${result.providers.music}`,
+      ...(result.credits.length ? [`   Crédits     : ${rel(path.join(result.jobDir, 'credits.md'))}`] : []),
       '',
     ].join('\n'),
   );
+
+  if (flags.publish && result.videoFile) {
+    const platforms = flags.publish === true ? (cfg.env.VIDEO_AGENT_PUBLISH_PLATFORMS ? parsePlatforms(cfg.env.VIDEO_AGENT_PUBLISH_PLATFORMS) : []) : flags.publish;
+    if (!platforms.length) throw new VideoAgentError('Aucune plateforme de publication', 'Utilisez --publish tiktok,instagram ou définissez VIDEO_AGENT_PUBLISH_PLATFORMS.');
+    const ok = await publishFromCli(cfg, result.jobDir, platforms, { at: flags.publishAt, yes: flags.yes });
+    process.exitCode = ok ? 0 : 1;
+  }
 };
 
 const program = new Command();
@@ -165,7 +182,14 @@ program
   .option('--no-render', 'stop after writing the Remotion project (storyboard, script, assets)')
   .option('--out <dir>', 'job output directory')
   .option('--json', 'print the result as JSON on stdout')
+  .option('--no-stock', 'do not search stock libraries (Pexels, Pixabay, Unsplash)')
+  .addOption(new Option('--media <coverage>', 'which scenes get a photo/clip').choices(['all', 'visual', 'none']))
+  .option('--publish [platforms]', `publish after rendering (${PLATFORM_IDS.join(',')}, all)`, parsePlatforms)
+  .option('--publish-at <date>', 'schedule the publication', parseDate)
+  .option('-y, --yes', 'publish without confirmation')
   .action(generate);
+
+registerPublishCommands(program, config, () => path.join(process.cwd(), '.env'));
 
 program
   .command('render')

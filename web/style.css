@@ -46,3 +46,18 @@ video { width: 100%; max-height: 70vh; background: black; border-radius: 12px; m
 .card div { padding: 10px; }
 .card .status { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
 @media (max-width: 900px) { .layout { grid-template-columns: 1fr; padding: 16px; } }
+
+h3 { font-size: 16px; margin: 18px 0 10px; }
+.publish { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 4px; }
+.platforms { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+.platforms label { flex-direction: row; align-items: center; gap: 6px; color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; }
+.platforms label.off { opacity: .45; }
+.platforms input { width: auto; }
+.wrap { flex-wrap: wrap; justify-content: flex-start; margin: 10px 0; }
+label.inline { flex-direction: row; align-items: center; gap: 8px; }
+label.inline input { width: auto; }
+.editor { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 10px 0; display: grid; gap: 8px; }
+.editor b { text-transform: capitalize; }
+.editor textarea { margin: 0; min-height: 90px; }
+.results { list-style: none; padding: 0; font-size: 13px; display: grid; gap: 6px; }
+.results a { color: var(--accent); }

@@ -33,6 +33,9 @@ import type { ImageProvider } from '../providers/image/types';
 import { resolveVideoProvider } from '../providers/video/registry';
 import type { VideoProvider } from '../providers/video/types';
 import { resolveVoiceProvider } from '../providers/voice/registry';
+import { resolveStockProviders } from '../providers/stock/registry';
+import type { StockProvider } from '../providers/stock/types';
+import { MediaDirector, type MediaCredit } from '../media/director';
 import type { VoiceProvider } from '../providers/voice/types';
 import { renderStoryboard, type RenderOptions, type RenderResult } from '../render/renderer';
 import type { Storyboard } from '../remotion/contract/storyboard';
@@ -53,6 +56,7 @@ export interface AgentDependencies {
   voice?: VoiceProvider | null;
   image?: ImageProvider | null;
   video?: VideoProvider | null;
+  stock?: StockProvider[];
   renderer?: (options: RenderOptions) => Promise<RenderResult>;
   logger?: Logger;
 }
@@ -72,7 +76,9 @@ export interface VideoResult {
   brief: VideoBrief;
   concept: VideoConcept;
   warnings: string[];
-  providers: { planner: string; voice: string; image: string; video: string; music: string };
+  providers: { planner: string; voice: string; image: string; stock: string; video: string; music: string };
+  /** Attribution of stock media used in the video. */
+  credits: MediaCredit[];
   timingsMs: Partial<Record<StepId, number>>;
 }
 
@@ -174,12 +180,14 @@ export class VideoAgent {
 
     // ---- 3. Script -------------------------------------------------------------
     const slots = selectSlots(template, brief.durationSec);
+    let scriptSource = 'procedural';
     const planned = await step(
       'script',
       `Script de ${slots.length} scènes (${planner.source})`,
       async () => {
         const r = await planner.script(brief, template, concept, slots, signal);
         if (r.warning) warnings.push(r.warning);
+        scriptSource = r.source;
         return r.value;
       },
       (s) => `${s.length} scènes écrites`,
@@ -196,18 +204,41 @@ export class VideoAgent {
     // ---- 5. Scenes -------------------------------------------------------------
     storyboard = await step('scenes', 'Choix des scènes', () => refineScenes(storyboard), (sb) => sb.scenes.map((s) => s.kind).join(' → '));
 
-    // ---- 6. Assets -------------------------------------------------------------
+    // ---- 6. Assets (local library → stock photos/videos → AI generation) -------------
     const imageProvider = options.generateImages === false ? null : this.deps.image !== undefined ? this.deps.image : safeResolve(() => resolveImageProvider(this.config), warnings);
     const videoProvider = options.generateVideo ? (this.deps.video !== undefined ? this.deps.video : safeResolve(() => resolveVideoProvider(this.config), warnings)) : null;
-    storyboard = await step(
-      'assets',
-      'Sélection des assets',
-      (progress) => this.selectAssets(storyboard, planned, brief, paths, imageProvider, videoProvider, warnings, progress, signal),
-      (sb) => {
-        const media = sb.scenes.filter((s) => s.media).length;
-        return `${media} visuel(s)${sb.brand.logo ? ' + logo' : ''}${media === 0 ? ' — mode procédural' : ''}`;
+    const stockProviders = options.stock === false ? [] : this.deps.stock ?? safeResolve(() => resolveStockProviders(this.config), warnings) ?? [];
+    let library: AssetLibrary | undefined;
+    try {
+      library = AssetLibrary.load(this.config.paths.assets);
+    } catch (err) {
+      warnings.push(`asset library ignored: ${errorMessage(err)}`);
+    }
+    const director = new MediaDirector(
+      { library, stock: stockProviders, image: imageProvider, video: videoProvider, logger: this.logger },
+      {
+        sources: this.config.env.VIDEO_AGENT_MEDIA_SOURCES,
+        coverage: options.mediaCoverage ?? this.config.env.VIDEO_AGENT_MEDIA_COVERAGE,
+        stockVideos: this.config.env.VIDEO_AGENT_STOCK_VIDEOS,
+        maxGeneratedImages: this.config.env.VIDEO_AGENT_MAX_GENERATED_IMAGES,
+        maxGeneratedClips: this.config.env.VIDEO_AGENT_MAX_GENERATED_CLIPS,
+        // LLM scripts produce English visual keywords; procedural ones are in the brief's language.
+        keywordLanguage: scriptSource === 'procedural' ? brief.language : 'en',
       },
     );
+    storyboard = await step(
+      'assets',
+      'Sélection des visuels',
+      (progress) => director.run(storyboard, planned, brief, paths, warnings, progress, signal),
+      (sb) => {
+        const media = sb.scenes.filter((s) => s.media);
+        if (!media.length) return `aucun visuel trouvé${sb.brand.logo ? ' (logo seul)' : ''} — fonds animés procéduraux`;
+        const bySource = new Map<string, number>();
+        for (const s of media) bySource.set(s.media!.origin, (bySource.get(s.media!.origin) ?? 0) + 1);
+        return `${media.length}/${sb.scenes.length} scènes illustrées (${[...bySource].map(([k, v]) => `${k}×${v}`).join(', ')})${sb.brand.logo ? ' + logo' : ''}`;
+      },
+    );
+    const credits = director.credits;
 
     // ---- 7. Animations -----------------------------------------------------------
     storyboard = await step(
@@ -314,6 +345,7 @@ export class VideoAgent {
       planner: planner.source,
       voice: voiceProvider?.id ?? 'none',
       image: imageProvider?.id ?? 'none',
+      stock: stockProviders.map((p) => p.id).join(',') || 'none',
       video: videoProvider?.id ?? 'none',
       music: musicSource,
     };
@@ -332,6 +364,7 @@ export class VideoAgent {
           concept,
           warnings,
           providers,
+          credits,
           timingsMs: timings,
         };
         writeJson(paths.jobFile, {
@@ -354,80 +387,6 @@ export class VideoAgent {
   }
 
   // ------------------------------------------------------------------------------------
-
-  private async selectAssets(
-    storyboard: Storyboard,
-    planned: PlannedScene[],
-    brief: VideoBrief,
-    paths: JobPaths,
-    imageProvider: ImageProvider | null,
-    videoProvider: VideoProvider | null,
-    warnings: string[],
-    progress: (p: number, msg?: string) => void,
-    signal?: AbortSignal,
-  ): Promise<Storyboard> {
-    let library: AssetLibrary | undefined;
-    try {
-      library = AssetLibrary.load(this.config.paths.assets);
-    } catch (err) {
-      warnings.push(`asset library ignored: ${errorMessage(err)}`);
-    }
-    const sb: Storyboard = { ...storyboard, brand: { ...storyboard.brand }, scenes: storyboard.scenes.map((s) => ({ ...s })) };
-
-    if (library && brief.brand) {
-      const logo = library.findLogo(brief.brand);
-      if (logo) sb.brand.logo = importAsset(logo.file, paths.publicDir, 'brand');
-    }
-
-    const used = new Set<string>();
-    let generatedImages = 0;
-    let generatedClips = 0;
-    const maxImages = this.config.env.VIDEO_AGENT_MAX_GENERATED_IMAGES;
-    const maxClips = this.config.env.VIDEO_AGENT_MAX_GENERATED_CLIPS;
-
-    for (let i = 0; i < sb.scenes.length; i++) {
-      const scene = sb.scenes[i]!;
-      const plan = planned[i];
-      progress(i / sb.scenes.length, `Assets ${i + 1}/${sb.scenes.length}`);
-      // Visual scenes always want media; others only take a strongly matching one as backdrop.
-      const wantsMedia = scene.kind === 'image';
-      const keywords = [...(plan?.visualKeywords ?? []), scene.role, brief.brand, brief.location].filter(Boolean);
-
-      const match = library?.findBest(['image', 'video'], keywords, used, wantsMedia ? 1 : 2);
-      if (match) {
-        used.add(match.file);
-        scene.media = { type: match.type === 'video' ? 'video' : 'image', src: importAsset(match.file, paths.publicDir, 'media'), fit: 'cover', origin: 'asset' };
-        continue;
-      }
-      if (!wantsMedia) continue;
-
-      const prompt = plan?.visualPrompt || [scene.headline.replace(/\*/g, ''), brief.audience, brief.location].filter(Boolean).join(', ');
-      const base = path.join(paths.publicDir, 'media', `${scene.id}-generated`);
-      if (videoProvider && generatedClips < maxClips) {
-        try {
-          const { file } = await videoProvider.generate({ prompt, width: brief.width, height: brief.height, durationSec: scene.durationInFrames / brief.fps, outFileBase: base, signal });
-          generatedClips++;
-          scene.media = { type: 'video', src: path.relative(paths.publicDir, file).split(path.sep).join('/'), fit: 'cover', origin: `ai:${videoProvider.id}` };
-          continue;
-        } catch (err) {
-          if (signal?.aborted) throw err;
-          warnings.push(`video generation failed for ${scene.id}: ${errorMessage(err)}`);
-        }
-      }
-      if (imageProvider && generatedImages < maxImages) {
-        try {
-          const { file } = await imageProvider.generate({ prompt, width: brief.width, height: brief.height, outFileBase: base, signal });
-          generatedImages++;
-          scene.media = { type: 'image', src: path.relative(paths.publicDir, file).split(path.sep).join('/'), fit: 'cover', origin: `ai:${imageProvider.id}` };
-        } catch (err) {
-          if (signal?.aborted) throw err;
-          warnings.push(`image generation failed for ${scene.id}: ${errorMessage(err)}`);
-        }
-      }
-      // Otherwise the ImageScene draws its procedural visual.
-    }
-    return sb;
-  }
 
   private async generateVoiceover(
     storyboard: Storyboard,

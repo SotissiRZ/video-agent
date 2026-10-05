@@ -11,6 +11,11 @@ import { FORMAT_PRESETS, OUTPUT_FORMATS, SUPPORTED_FPS } from '../core/formats';
 import { STYLES } from '../remotion/contract/styles';
 import { listTemplates } from '../templates/registry';
 import { JobManager, publicJob } from './jobs';
+import { resolveLLM } from '../llm/registry';
+import { platformStatus } from '../publish/registry';
+import { ScheduleStore, startSchedulerLoop } from '../publish/scheduler';
+import { ensureCaptions, loadJob, publishJob, saveCaptions, type PublishJobOptions } from '../publish/service';
+import { PLATFORM_IDS, type Captions, type PlatformId } from '../publish/types';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -44,9 +49,19 @@ export const CreateJobSchema = z.object({
   music: z.boolean().optional(),
   subtitles: z.boolean().optional(),
   offline: z.boolean().optional(),
+  stock: z.boolean().optional(),
+  mediaCoverage: z.enum(['all', 'visual', 'none']).optional(),
 });
 
 const JOB_ID = /^[a-z0-9-]{1,80}$/;
+
+const PlatformsSchema = z.array(z.enum(PLATFORM_IDS)).min(1);
+export const PublishSchema = z.object({
+  platforms: PlatformsSchema,
+  at: z.string().datetime({ offset: true }).optional(),
+  captions: z.record(z.enum(PLATFORM_IDS), z.object({ title: z.string().max(300), caption: z.string().max(6000), hashtags: z.array(z.string().max(100)).max(30) })).optional(),
+  dryRun: z.boolean().optional(),
+});
 
 const json = (res: http.ServerResponse, status: number, body: unknown) => {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
@@ -103,11 +118,25 @@ export interface ServerOptions {
   host?: string;
   webRoot: string;
   deps?: AgentDependencies;
+  /** Test seam for publishing. */
+  publishDeps?: Pick<PublishJobOptions, 'publisherFactory' | 'scheduleStore'>;
+  /** Run the local publication scheduler (default: VIDEO_AGENT_SCHEDULER). */
+  scheduler?: boolean;
 }
 
 export const createApp = (config: AppConfig, options: ServerOptions) => {
   const jobs = new JobManager(config, options.deps);
   const webRoot = path.resolve(options.webRoot);
+  const schedule = options.publishDeps?.scheduleStore ?? ScheduleStore.forConfig(config);
+  const llm = () => {
+    if (options.deps?.llm !== undefined) return options.deps.llm;
+    try {
+      return resolveLLM(config);
+    } catch {
+      return null;
+    }
+  };
+  const publish = (jobDir: string, opts: Omit<PublishJobOptions, 'llm'>) => publishJob(config, jobDir, { ...opts, llm: llm(), ...options.publishDeps });
 
   const handler = async (req: http.IncomingMessage, res: http.ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -125,6 +154,11 @@ export const createApp = (config: AppConfig, options: ServerOptions) => {
             defaults: { durationSec: config.env.VIDEO_AGENT_DEFAULT_DURATION ?? 30, fps: config.env.VIDEO_AGENT_DEFAULT_FPS, outputFormat: config.env.VIDEO_AGENT_DEFAULT_OUTPUT_FORMAT },
             providers: (({ secrets: _secrets, ...rest }) => rest)(providerStatus(config)),
           });
+        }
+        if (req.method === 'GET' && parts[1] === 'platforms') return json(res, 200, platformStatus(config));
+        if (parts[1] === 'schedule') {
+          if (req.method === 'GET' && parts.length === 2) return json(res, 200, schedule.list());
+          if (req.method === 'DELETE' && parts[2]) return json(res, 200, { cancelled: schedule.cancel(parts[2]) });
         }
         if (parts[1] === 'jobs' && parts.length === 2) {
           if (req.method === 'GET') return json(res, 200, jobs.list().map(publicJob));
@@ -157,9 +191,27 @@ export const createApp = (config: AppConfig, options: ServerOptions) => {
             });
             return;
           }
+          if (sub === 'captions') {
+            if (job.status !== 'completed') return json(res, 409, { error: 'job not completed' });
+            if (req.method === 'GET') {
+              const platforms = (url.searchParams.get('platforms') ?? PLATFORM_IDS.join(',')).split(',').filter((p): p is PlatformId => (PLATFORM_IDS as readonly string[]).includes(p));
+              return json(res, 200, await ensureCaptions(config, loadJob(job.dir), platforms, { llm: llm() }));
+            }
+          }
+          if (sub === 'publish' && req.method === 'POST') {
+            if (job.status !== 'completed' || !job.videoFile) return json(res, 409, { error: 'la vidéo doit être générée avant publication' });
+            const parsed = PublishSchema.safeParse(await readBody(req));
+            if (!parsed.success) return json(res, 400, { error: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') });
+            if (parsed.data.captions) {
+              const current: Captions = await ensureCaptions(config, loadJob(job.dir), parsed.data.platforms, { llm: llm() });
+              saveCaptions(job.dir, { ...current, ...parsed.data.captions });
+            }
+            const result = await publish(job.dir, { platforms: parsed.data.platforms, at: parsed.data.at ? new Date(parsed.data.at) : undefined, dryRun: parsed.data.dryRun });
+            return json(res, 200, result);
+          }
           if (sub === 'video' && job.videoFile) return sendFile(req, res, job.videoFile, url.searchParams.get('download') === '1');
           if (sub === 'poster' && job.posterFile) return sendFile(req, res, job.posterFile);
-          if (sub === 'files' && parts[4] && ['storyboard.json', 'script.md', 'subtitles.srt', 'subtitles.vtt'].includes(parts[4])) {
+          if (sub === 'files' && parts[4] && ['storyboard.json', 'script.md', 'subtitles.srt', 'subtitles.vtt', 'credits.md', 'captions.json', 'publish.json'].includes(parts[4])) {
             return sendFile(req, res, path.join(job.dir, parts[4]), url.searchParams.get('download') === '1');
           }
         }
@@ -178,6 +230,9 @@ export const createApp = (config: AppConfig, options: ServerOptions) => {
     }
   };
 
+  if (options.scheduler ?? config.env.VIDEO_AGENT_SCHEDULER) {
+    startSchedulerLoop(schedule, async (jobDir, platforms) => (await publish(jobDir, { platforms })).outcomes);
+  }
   return { handler, jobs };
 };
 

@@ -53,6 +53,7 @@
           <label><input type="checkbox" id="subtitles" checked /> Sous-titres</label>
           <label><input type="checkbox" id="music" checked /> Musique</label>
           <label><input type="checkbox" id="voice" checked /> Voix-off</label>
+          <label><input type="checkbox" id="stock" checked /> Photos et vidéos réelles (banques d’images)</label>
           <label><input type="checkbox" id="offline" /> Mode hors-ligne (sans LLM)</label>
         </div>
 
@@ -76,10 +77,32 @@
           <a id="storyboardLink" class="ghost button" target="_blank">storyboard.json</a>
           <a id="scriptLink" class="ghost button" target="_blank">script.md</a>
           <a id="srtLink" class="ghost button" target="_blank">subtitles.srt</a>
+          <a id="creditsLink" class="ghost button" target="_blank" hidden>crédits</a>
+        </div>
+        <div class="publish">
+          <h3>📣 Publier sur les réseaux sociaux</h3>
+          <div id="platformList" class="platforms"></div>
+          <div class="row wrap">
+            <button type="button" id="prepare" class="ghost">✏️ Préparer les textes</button>
+            <label class="inline">Programmer
+              <input type="datetime-local" id="publishAt" />
+            </label>
+          </div>
+          <div id="captionEditors"></div>
+          <div class="row wrap" id="publishActions" hidden>
+            <button type="button" id="dryRun" class="ghost">👁 Vérifier (sans publier)</button>
+            <button type="button" id="publishBtn">🚀 Publier</button>
+          </div>
+          <ul id="publishResults" class="results"></ul>
         </div>
         <ul id="warnings" class="warnings"></ul>
       </div>
       <p id="jobError" class="error" hidden></p>
+    </section>
+
+    <section class="panel wide" id="schedulePanel" hidden>
+      <h2>Publications programmées</h2>
+      <ul id="scheduleList" class="results"></ul>
     </section>
 
     <section class="panel wide">

@@ -66,7 +66,92 @@ function showJob(job) {
     $('scriptLink').href = `/api/jobs/${job.id}/files/script.md`;
     $('srtLink').href = `/api/jobs/${job.id}/files/subtitles.srt`;
     $('warnings').innerHTML = (job.warnings || []).map((w) => `<li>⚠ ${escapeHtml(w)}</li>`).join('');
+    $('creditsLink').hidden = !job.credits;
+    $('creditsLink').href = `/api/jobs/${job.id}/files/credits.md`;
+    if (publishJobId !== job.id) resetPublish(job.id);
   }
+}
+
+// ---- Publication ---------------------------------------------------------------
+let platforms = [];
+let publishJobId = null;
+
+async function loadPlatforms() {
+  platforms = await api('/api/platforms');
+  $('platformList').innerHTML = platforms.map((p) => `<label class="${p.configured ? '' : 'off'}" title="${escapeHtml(p.configured ? p.notes.join(' · ') : 'Non configuré : ' + p.missing.join(', '))}">
+    <input type="checkbox" value="${p.id}" ${p.configured ? '' : 'disabled'} /> ${p.label}</label>`).join('');
+}
+
+function resetPublish(jobId) {
+  publishJobId = jobId;
+  $('captionEditors').innerHTML = '';
+  $('publishActions').hidden = true;
+  $('publishResults').innerHTML = '';
+}
+
+const selectedPlatforms = () => [...$('platformList').querySelectorAll('input:checked')].map((i) => i.value);
+
+$('prepare').addEventListener('click', async () => {
+  const chosen = selectedPlatforms();
+  if (!chosen.length) return alert('Choisissez au moins une plateforme configurée.');
+  $('prepare').disabled = true;
+  try {
+    const captions = await api(`/api/jobs/${publishJobId}/captions?platforms=${chosen.join(',')}`);
+    $('captionEditors').innerHTML = chosen.map((p) => `<div class="editor" data-platform="${p}">
+      <b>${p}</b>
+      <input class="title" value="${escapeHtml(captions[p].title)}" placeholder="Titre" />
+      <textarea class="caption">${escapeHtml(captions[p].caption)}</textarea>
+      <input class="hashtags" value="${escapeHtml(captions[p].hashtags.join(' '))}" placeholder="#hashtags" />
+    </div>`).join('');
+    $('publishActions').hidden = false;
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    $('prepare').disabled = false;
+  }
+});
+
+function editedCaptions() {
+  const out = {};
+  for (const el of $('captionEditors').querySelectorAll('.editor')) {
+    out[el.dataset.platform] = {
+      title: el.querySelector('.title').value.trim(),
+      caption: el.querySelector('.caption').value.trim(),
+      hashtags: el.querySelector('.hashtags').value.split(/\s+/).filter(Boolean),
+    };
+  }
+  return out;
+}
+
+async function sendPublish(dryRun) {
+  const captions = editedCaptions();
+  const chosen = Object.keys(captions);
+  const at = $('publishAt').value ? new Date($('publishAt').value).toISOString() : undefined;
+  if (!dryRun && !confirm(`${at ? 'Programmer' : 'Publier maintenant'} sur ${chosen.join(', ')} ?`)) return;
+  $('publishBtn').disabled = $('dryRun').disabled = true;
+  $('publishResults').innerHTML = '<li>⏳ Envoi en cours… (cela peut prendre quelques minutes)</li>';
+  try {
+    const { outcomes, warnings } = await api(`/api/jobs/${publishJobId}/publish`, { method: 'POST', body: JSON.stringify({ platforms: chosen, captions, at, dryRun }) });
+    $('publishResults').innerHTML = [
+      ...outcomes.map((o) => `<li>${o.ok ? (o.status === 'dry-run' ? '👁' : '✅') : '❌'} <b>${o.platform}</b> — ${escapeHtml(o.status)}${o.url ? ` · <a href="${escapeHtml(o.url)}" target="_blank" rel="noopener">voir</a>` : ''}${o.message ? ` · ${escapeHtml(o.message)}` : ''}${o.warnings.map((w) => `<br>⚠ ${escapeHtml(w)}`).join('')}</li>`),
+      ...warnings.map((w) => `<li>⚠ ${escapeHtml(w)}</li>`),
+    ].join('');
+    loadSchedule();
+  } catch (err) {
+    $('publishResults').innerHTML = `<li>❌ ${escapeHtml(err.message)}</li>`;
+  } finally {
+    $('publishBtn').disabled = $('dryRun').disabled = false;
+  }
+}
+$('dryRun').addEventListener('click', () => sendPublish(true));
+$('publishBtn').addEventListener('click', () => sendPublish(false));
+
+async function loadSchedule() {
+  const entries = (await api('/api/schedule')).filter((e) => e.status !== 'cancelled');
+  $('schedulePanel').hidden = !entries.length;
+  $('scheduleList').innerHTML = entries.map((e) => `<li>${new Date(e.at).toLocaleString()} · <b>${e.platforms.join(', ')}</b> · ${e.status}${e.error ? ` — ${escapeHtml(e.error)}` : ''}
+    ${e.status === 'pending' ? `<button class="ghost" data-cancel="${e.id}">Annuler</button>` : ''}</li>`).join('');
+  $('scheduleList').querySelectorAll('[data-cancel]').forEach((b) => (b.onclick = async () => { await api(`/api/schedule/${b.dataset.cancel}`, { method: 'DELETE' }); loadSchedule(); }));
 }
 
 function follow(id) {
@@ -112,6 +197,7 @@ $('form').addEventListener('submit', async (e) => {
     music: $('music').checked,
     voice: $('voice').checked,
     offline: $('offline').checked,
+    stock: $('stock').checked,
   };
   if ($('format').value) body.format = $('format').value;
   if ($('duration').value) body.durationSec = Number($('duration').value);
@@ -133,3 +219,5 @@ $('cancel').addEventListener('click', () => currentJob && api(`/api/jobs/${curre
 
 loadOptions().catch((err) => { $('formError').hidden = false; $('formError').textContent = err.message; });
 loadHistory().catch(() => {});
+loadPlatforms().catch(() => {});
+loadSchedule().catch(() => {});

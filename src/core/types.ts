@@ -20,6 +20,10 @@ export interface VideoOptions {
   generateImages?: boolean;
   /** Generate clips with the configured video provider. */
   generateVideo?: boolean;
+  /** Search stock photo/video libraries (Pexels, Pixabay, Unsplash). Default true. */
+  stock?: boolean;
+  /** Which scenes get a photo/clip: all, visual scenes only, none. */
+  mediaCoverage?: 'all' | 'visual' | 'none';
   llmProvider?: string;
   /** Stop after the storyboard / project files are written. */
   skipRender?: boolean;
