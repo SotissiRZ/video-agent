@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="fr" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Video Agent</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+  <script src="/assets/boot.js"></script>
+  <link rel="stylesheet" href="/assets/style.css" />
+</head>
+<body>
+  <!-- ============================== Auth ============================== -->
+  <div id="authView" class="auth" hidden>
+    <div class="auth-top">
+      <a class="brand" href="/"><i data-icon="logo" data-size="26"></i>Video Agent</a>
+      <div class="input-group">
+        <div class="segmented" data-lang-switch></div>
+        <button type="button" class="btn btn-ghost btn-icon" data-theme-toggle></button>
+      </div>
+    </div>
+    <div class="card auth-card">
+      <form id="loginForm" class="form-stack" novalidate>
+        <div>
+          <h1 data-i18n="auth.login.title"></h1>
+          <p class="sub" data-i18n="auth.login.subtitle"></p>
+        </div>
+        <label class="field"><span class="label" data-i18n="auth.email"></span><input class="input" type="email" name="email" autocomplete="email" required /></label>
+        <label class="field"><span class="label" data-i18n="auth.password"></span><input class="input" type="password" name="password" autocomplete="current-password" required /></label>
+        <div class="alert danger" data-error hidden></div>
+        <button class="btn btn-primary btn-lg btn-block" type="submit" data-i18n="auth.login"></button>
+        <p class="switch-link" data-i18n-html="auth.toSignup"></p>
+      </form>
+      <form id="signupForm" class="form-stack" novalidate hidden>
+        <div>
+          <h1 data-i18n="auth.signup.title"></h1>
+          <p class="sub" data-i18n="auth.signup.subtitle"></p>
+        </div>
+        <div class="alert info" id="firstUserNote" hidden><i data-icon="shield"></i><span data-i18n="auth.signup.first"></span></div>
+        <div class="alert warning" id="signupClosed" hidden><i data-icon="alert"></i><span data-i18n="auth.closed"></span></div>
+        <label class="field"><span class="label" data-i18n="auth.name"></span><input class="input" name="name" autocomplete="name" maxlength="100" /></label>
+        <label class="field"><span class="label" data-i18n="auth.email"></span><input class="input" type="email" name="email" autocomplete="email" required /></label>
+        <label class="field"><span class="label" data-i18n="auth.password"></span><input class="input" type="password" name="password" autocomplete="new-password" minlength="8" required /><span class="hint" data-i18n="auth.passwordHint"></span></label>
+        <div class="alert danger" data-error hidden></div>
+        <button class="btn btn-primary btn-lg btn-block" type="submit" data-i18n="auth.signup"></button>
+        <p class="switch-link" data-i18n-html="auth.toLogin"></p>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============================== App ============================== -->
+  <div id="appView" class="app" hidden>
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="/"><i data-icon="logo" data-size="26"></i>Video Agent</a>
+      <nav class="nav">
+        <a href="#create" data-page="create"><i data-icon="sparkles"></i><span data-i18n="nav.create"></span></a>
+        <a href="#library" data-page="library"><i data-icon="film"></i><span data-i18n="nav.library"></span></a>
+        <a href="#schedule" data-page="schedule"><i data-icon="calendar"></i><span data-i18n="nav.schedule"></span><span class="count" id="pendingCount" hidden></span></a>
+        <a href="#connections" data-page="connections"><i data-icon="link"></i><span data-i18n="nav.connections"></span></a>
+      </nav>
+      <div class="nav-section" data-i18n="nav.settings"></div>
+      <nav class="nav">
+        <a href="#billing" data-page="billing"><i data-icon="card"></i><span data-i18n="nav.billing"></span></a>
+        <a href="#account" data-page="account"><i data-icon="user"></i><span data-i18n="nav.account"></span></a>
+        <a href="#admin" data-page="admin" id="adminLink" hidden><i data-icon="shield"></i><span data-i18n="nav.admin"></span></a>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="usage-card">
+          <div class="plan"><b id="usagePlan"></b><a href="#billing" class="small" data-i18n="usage.upgrade" id="usageUpgrade"></a></div>
+          <div class="row"><span data-i18n="billing.videos"></span><span id="usageVideos"></span></div>
+          <div class="progress"><span id="usageBar"></span></div>
+        </div>
+        <div class="user-box">
+          <div class="avatar" id="avatar"></div>
+          <div class="who"><b id="userName"></b><span id="userEmail"></span></div>
+          <button type="button" class="btn btn-ghost btn-icon btn-sm" id="logout" data-i18n-title="auth.logout"><i data-icon="logout" data-size="16"></i></button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <button type="button" class="btn btn-ghost btn-icon menu-btn" id="menuBtn" aria-label="Menu"><i data-icon="menu"></i></button>
+        <h2 id="topTitle"></h2>
+        <div class="spacer"></div>
+        <div class="segmented" data-lang-switch></div>
+        <button type="button" class="btn btn-ghost btn-icon" data-theme-toggle></button>
+        <a class="btn btn-primary btn-sm" href="#create" id="newVideoBtn"><i data-icon="plus" data-size="16"></i><span data-i18n="job.new"></span></a>
+      </header>
+
+      <main class="content">
+        <!-- ---------------- Create ---------------- -->
+        <section class="page" id="page-create">
+          <div class="create-layout">
+            <form class="card" id="createForm" novalidate>
+              <div class="card-header"><div><h2 data-i18n="create.title"></h2><p data-i18n="create.subtitle"></p></div></div>
+              <div class="card-body form-stack">
+                <label class="field">
+                  <span class="label" data-i18n="create.prompt"></span>
+                  <textarea class="textarea" id="prompt" rows="4" maxlength="4000" required data-i18n-placeholder="create.placeholder"></textarea>
+                </label>
+                <div class="examples">
+                  <span class="hint" data-i18n="create.examples"></span>
+                  <button type="button" class="chip" data-example="create.ex.ad.text" data-i18n="create.ex.ad"></button>
+                  <button type="button" class="chip" data-example="create.ex.announce.text" data-i18n="create.ex.announce"></button>
+                  <button type="button" class="chip" data-example="create.ex.tutorial.text" data-i18n="create.ex.tutorial"></button>
+                  <button type="button" class="chip" data-example="create.ex.story.text" data-i18n="create.ex.story"></button>
+                </div>
+                <div class="field">
+                  <span class="label" data-i18n="create.format"></span>
+                  <div class="formats">
+                    <label class="format"><input type="radio" name="format" value="" checked /><span class="shape"><i data-icon="sparkles"></i></span><b data-i18n="create.format.auto"></b><small>&nbsp;</small></label>
+                    <label class="format"><input type="radio" name="format" value="vertical" /><span class="shape"><span class="v"></span></span><b>9:16</b><small data-i18n="create.format.vertical"></small></label>
+                    <label class="format"><input type="radio" name="format" value="landscape" /><span class="shape"><span class="h"></span></span><b>16:9</b><small data-i18n="create.format.landscape"></small></label>
+                    <label class="format"><input type="radio" name="format" value="square" /><span class="shape"><span class="s"></span></span><b>1:1</b><small data-i18n="create.format.square"></small></label>
+                    <label class="format"><input type="radio" name="format" value="portrait" /><span class="shape"><span class="p"></span></span><b>4:5</b><small data-i18n="create.format.portrait"></small></label>
+                  </div>
+                </div>
+                <div class="form-grid">
+                  <label class="field"><span class="label" data-i18n="create.duration"></span>
+                    <div class="input-group"><input class="input" id="duration" type="number" min="3" max="600" placeholder="auto" /><span class="muted">s</span></div>
+                    <span class="hint" id="durationHint"></span>
+                  </label>
+                  <label class="field"><span class="label" data-i18n="create.style"></span><select class="select" id="style"></select></label>
+                  <label class="field"><span class="label" data-i18n="create.template"></span><select class="select" id="template"></select></label>
+                </div>
+                <div class="toggles">
+                  <label class="switch"><input type="checkbox" id="voice" checked /><span class="track"></span><span data-i18n="create.voice"></span></label>
+                  <label class="switch"><input type="checkbox" id="subtitles" checked /><span class="track"></span><span data-i18n="create.subtitles"></span></label>
+                  <label class="switch"><input type="checkbox" id="music" checked /><span class="track"></span><span data-i18n="create.music"></span></label>
+                  <label class="switch"><input type="checkbox" id="stock" checked /><span class="track"></span><span data-i18n="create.stock"></span></label>
+                </div>
+                <div id="capHints"></div>
+                <details class="disclosure">
+                  <summary data-i18n="create.advanced"></summary>
+                  <div class="body form-grid">
+                    <label class="field"><span class="label" data-i18n="create.fps"></span><select class="select" id="fps"></select></label>
+                    <label class="field"><span class="label" data-i18n="create.file"></span><select class="select" id="outputFormat"></select></label>
+                    <label class="field"><span class="label" data-i18n="create.language"></span>
+                      <select class="select" id="language"><option value="auto" data-i18n="create.language.auto"></option><option value="fr">Français</option><option value="en">English</option></select>
+                    </label>
+                    <label class="field"><span class="label" data-i18n="create.resolution"></span><input class="input" id="resolution" placeholder="1280x720" pattern="\d{2,4}x\d{2,4}" /></label>
+                    <label class="field"><span class="label" data-i18n="create.media"></span>
+                      <select class="select" id="mediaCoverage">
+                        <option value="" data-i18n="create.media.default"></option><option value="all" data-i18n="create.media.all"></option>
+                        <option value="visual" data-i18n="create.media.visual"></option><option value="none" data-i18n="create.media.none"></option>
+                      </select>
+                    </label>
+                    <label class="switch" style="align-self: end; padding-bottom: 8px"><input type="checkbox" id="offline" /><span class="track"></span><span data-i18n="create.offline"></span></label>
+                  </div>
+                </details>
+                <div class="alert neutral" id="planNote" hidden><i data-icon="info"></i><span id="planNoteText"></span><a href="#billing" data-i18n="common.upgrade"></a></div>
+                <div class="alert danger" id="createError" hidden></div>
+              </div>
+              <div class="card-footer">
+                <button class="btn btn-primary btn-lg" type="submit" id="submit"><i data-icon="sparkles"></i><span data-i18n="create.submit"></span></button>
+              </div>
+            </form>
+
+            <div class="sticky-col">
+              <div class="card" id="emptyJob">
+                <div class="empty-state">
+                  <div class="icon-wrap"><i data-icon="play"></i></div>
+                  <h3 data-i18n="create.empty.title"></h3>
+                  <p data-i18n="create.empty.text"></p>
+                </div>
+              </div>
+              <div class="card" id="jobCard" hidden>
+                <div class="card-header">
+                  <div style="min-width: 0">
+                    <div class="input-group"><span id="jobBadge"></span><span class="hint" id="jobQueue"></span></div>
+                    <h2 id="jobTitle" style="margin-top: 8px"></h2>
+                    <p id="jobPrompt"></p>
+                  </div>
+                  <button type="button" class="btn btn-secondary btn-sm" id="cancelJob" data-i18n="job.cancel"></button>
+                </div>
+                <div class="card-body">
+                  <div id="jobProgress">
+                    <div class="input-group" style="justify-content: space-between; margin-bottom: 8px"><span class="small" id="jobMessage"></span><b class="small" id="jobPercent"></b></div>
+                    <div class="progress"><span id="jobBar"></span></div>
+                    <ol class="steps" id="steps" style="margin-top: 14px"></ol>
+                  </div>
+                  <div class="alert danger" id="jobError" hidden></div>
+                  <div id="jobResult" hidden>
+                    <video class="player" id="player" controls playsinline preload="metadata"></video>
+                    <div class="result-actions" style="margin-top: 14px">
+                      <a class="btn btn-primary" id="download" download><i data-icon="download" data-size="16"></i><span data-i18n="job.download"></span></a>
+                      <a class="btn btn-ghost btn-sm" id="fileStoryboard" target="_blank" rel="noopener" data-i18n="job.file.storyboard"></a>
+                      <a class="btn btn-ghost btn-sm" id="fileScript" target="_blank" rel="noopener" data-i18n="job.file.script"></a>
+                      <a class="btn btn-ghost btn-sm" id="fileSrt" target="_blank" rel="noopener" data-i18n="job.file.srt"></a>
+                      <a class="btn btn-ghost btn-sm" id="fileCredits" target="_blank" rel="noopener" data-i18n="job.file.credits" hidden></a>
+                    </div>
+                    <div id="jobWarnings" style="margin-top: 14px; display: grid; gap: 8px"></div>
+
+                    <div class="divider"></div>
+                    <div id="publishBox">
+                      <h3 data-i18n="publish.title"></h3>
+                      <p class="muted small" data-i18n="publish.subtitle" style="margin: 4px 0 12px"></p>
+                      <div class="alert neutral" id="publishUpsell" hidden><i data-icon="zap"></i><span data-i18n="publish.upsell"></span><a href="#billing" data-i18n="common.upgrade"></a></div>
+                      <div class="alert neutral" id="publishNoAccount" hidden><i data-icon="link"></i><span data-i18n="publish.noAccount"></span><a href="#connections" data-i18n="publish.connect"></a></div>
+                      <div id="publishForm" hidden>
+                        <div class="platform-list" id="platformList"></div>
+                        <div class="form-grid" style="margin-top: 12px; align-items: end">
+                          <label class="field"><span class="label" data-i18n="publish.when"></span>
+                            <select class="select" id="publishWhen"><option value="now" data-i18n="publish.now"></option><option value="later" data-i18n="publish.later"></option></select>
+                          </label>
+                          <label class="field" id="publishAtField" hidden><span class="label">&nbsp;</span><input class="input" type="datetime-local" id="publishAt" /></label>
+                          <button type="button" class="btn btn-secondary" id="prepareCaptions"><i data-icon="edit" data-size="16"></i><span data-i18n="publish.prepare"></span></button>
+                        </div>
+                        <div id="captionEditors" style="display: grid; gap: 10px; margin-top: 12px"></div>
+                        <div class="result-actions" id="publishActions" style="margin-top: 12px" hidden>
+                          <button type="button" class="btn btn-secondary" id="dryRun"><i data-icon="eye" data-size="16"></i><span data-i18n="publish.check"></span></button>
+                          <button type="button" class="btn btn-primary" id="publishBtn"><i data-icon="send" data-size="16"></i><span id="publishBtnLabel" data-i18n="publish.submit"></span></button>
+                        </div>
+                        <div class="outcomes" id="publishOutcomes"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------------- Library ---------------- -->
+        <section class="page" id="page-library">
+          <div class="page-header"><div><h1 data-i18n="library.title"></h1><p data-i18n="library.subtitle"></p></div></div>
+          <div class="video-grid" id="videoGrid"></div>
+          <div class="card" id="libraryEmpty" hidden>
+            <div class="empty-state">
+              <div class="icon-wrap"><i data-icon="film"></i></div>
+              <h3 data-i18n="library.empty"></h3>
+              <a class="btn btn-primary" href="#create"><i data-icon="plus" data-size="16"></i><span data-i18n="library.create"></span></a>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------------- Publications ---------------- -->
+        <section class="page" id="page-schedule">
+          <div class="page-header"><div><h1 data-i18n="schedule.title"></h1><p data-i18n="schedule.subtitle"></p></div></div>
+          <div class="card">
+            <div class="table-wrap">
+              <table class="table">
+                <thead><tr><th data-i18n="schedule.date"></th><th data-i18n="schedule.video"></th><th data-i18n="schedule.platforms"></th><th data-i18n="schedule.status"></th><th></th></tr></thead>
+                <tbody id="scheduleRows"></tbody>
+              </table>
+            </div>
+            <div class="empty-state" id="scheduleEmpty" hidden>
+              <div class="icon-wrap"><i data-icon="calendar"></i></div>
+              <h3 data-i18n="schedule.empty"></h3>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------------- Connections ---------------- -->
+        <section class="page" id="page-connections">
+          <div class="page-header"><div><h1 data-i18n="conn.title"></h1><p data-i18n="conn.subtitle"></p></div></div>
+          <div class="alert neutral" id="connUpsell" hidden style="margin-bottom: 16px"><i data-icon="zap"></i><span data-i18n="publish.upsell"></span><a href="#billing" data-i18n="common.upgrade"></a></div>
+          <div class="grid-2" id="providerCards"></div>
+        </section>
+
+        <!-- ---------------- Billing ---------------- -->
+        <section class="page" id="page-billing">
+          <div class="page-header">
+            <div><h1 data-i18n="billing.title"></h1><p data-i18n="billing.subtitle"></p></div>
+            <button type="button" class="btn btn-secondary" id="portalBtn" hidden><i data-icon="external" data-size="16"></i><span data-i18n="billing.manage"></span></button>
+          </div>
+          <div class="alert info" id="billingDisabled" hidden style="margin-bottom: 16px"><i data-icon="info"></i><span data-i18n="billing.disabled"></span></div>
+          <div class="grid-3" style="margin-bottom: 20px">
+            <div class="card stat"><div class="k" data-i18n="billing.current"></div><div class="v" id="billingPlan"></div><div class="hint" id="billingRenew"></div></div>
+            <div class="card stat"><div class="meter"><div class="row"><span class="k" data-i18n="billing.videos"></span><b id="meterVideosText"></b></div><div class="progress"><span id="meterVideos"></span></div></div><div class="hint" style="margin-top: 10px" data-i18n="billing.resets"></div></div>
+            <div class="card stat"><div class="meter"><div class="row"><span class="k" data-i18n="billing.minutes"></span><b id="meterMinutesText"></b></div><div class="progress"><span id="meterMinutes"></span></div></div></div>
+          </div>
+          <div class="plans" id="billingPlans"></div>
+        </section>
+
+        <!-- ---------------- Account ---------------- -->
+        <section class="page" id="page-account">
+          <div class="page-header"><div><h1 data-i18n="account.title"></h1><p data-i18n="account.subtitle"></p></div></div>
+          <div class="grid-2">
+            <form class="card" id="profileForm">
+              <div class="card-header"><h2 data-i18n="account.profile"></h2></div>
+              <div class="card-body form-stack">
+                <label class="field"><span class="label" data-i18n="auth.name"></span><input class="input" name="name" maxlength="100" /></label>
+                <label class="field"><span class="label" data-i18n="auth.email"></span><input class="input" name="email" disabled /></label>
+                <label class="field"><span class="label" data-i18n="common.language"></span><select class="select" name="locale"><option value="fr">Français</option><option value="en">English</option></select></label>
+                <label class="field"><span class="label" data-i18n="common.theme"></span><select class="select" name="theme"><option value="light" data-i18n="common.light"></option><option value="dark" data-i18n="common.dark"></option></select></label>
+              </div>
+              <div class="card-footer"><button class="btn btn-primary" type="submit" data-i18n="common.save"></button></div>
+            </form>
+            <form class="card" id="passwordForm">
+              <div class="card-header"><h2 data-i18n="account.security"></h2></div>
+              <div class="card-body form-stack">
+                <label class="field"><span class="label" data-i18n="account.current"></span><input class="input" type="password" name="current" autocomplete="current-password" required /></label>
+                <label class="field"><span class="label" data-i18n="account.new"></span><input class="input" type="password" name="next" autocomplete="new-password" minlength="8" required /><span class="hint" data-i18n="auth.passwordHint"></span></label>
+              </div>
+              <div class="card-footer"><button class="btn btn-primary" type="submit" data-i18n="account.change"></button></div>
+            </form>
+            <div class="card">
+              <div class="card-header"><div><h2 data-i18n="account.danger"></h2><p data-i18n="account.deleteText"></p></div></div>
+              <div class="card-footer"><button class="btn btn-danger-ghost" type="button" id="deleteAccount"><i data-icon="trash" data-size="16"></i><span data-i18n="account.delete"></span></button></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------------- Admin ---------------- -->
+        <section class="page" id="page-admin">
+          <div class="page-header"><div><h1 data-i18n="admin.title"></h1><p data-i18n="admin.subtitle"></p></div></div>
+          <div class="grid-3" id="adminStats" style="grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); margin-bottom: 20px"></div>
+          <div class="card" style="margin-bottom: 20px">
+            <div class="card-header"><h2 data-i18n="admin.users"></h2></div>
+            <div class="card-body" style="padding: 8px 6px 6px">
+              <div class="table-wrap">
+                <table class="table">
+                  <thead><tr><th data-i18n="admin.user"></th><th data-i18n="admin.plan"></th><th data-i18n="admin.role"></th><th data-i18n="admin.videosMonth"></th><th data-i18n="admin.created"></th></tr></thead>
+                  <tbody id="adminUsers"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          <div class="page-header" style="margin-bottom: 14px"><div><h2 data-i18n="admin.services"></h2><p id="adminServicesText"></p></div></div>
+          <div class="grid-2" id="adminSettings"></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script type="module" src="/assets/app.js"></script>
+</body>
+</html>

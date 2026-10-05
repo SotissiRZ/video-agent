@@ -34,9 +34,9 @@ export const SETTING_GROUPS: SettingGroup[] = [
   {
     id: 'llm',
     title: 'Textes et script (LLM)',
-    description: 'Écrit le concept, le script et les légendes. Sans LLM, l’agent utilise des textes génériques.',
+    description: 'Écrit le concept, le script et les légendes. Plusieurs fournisseurs = relais automatique si l’un échoue (crédit épuisé, clé invalide). Sans LLM : textes génériques.',
     fields: [
-      { key: 'VIDEO_AGENT_LLM_PROVIDER', label: 'Fournisseur', options: opt(['auto', 'Automatique (le premier configuré)'], ['groq', 'Groq'], ['ollama', 'Ollama (local)'], ['openai-compatible', 'Compatible OpenAI (Gemini, OpenRouter…)'], ['anthropic', 'Claude'], ['openai', 'OpenAI'], ['local', 'Aucun (textes génériques)']) },
+      { key: 'VIDEO_AGENT_LLM_PROVIDER', label: 'Fournisseur', options: opt(['auto', 'Automatique (tous ceux configurés, avec relais)'], ['groq', 'Groq'], ['ollama', 'Ollama (local)'], ['openai-compatible', 'Compatible OpenAI (Gemini, OpenRouter…)'], ['anthropic', 'Claude'], ['openai', 'OpenAI'], ['local', 'Aucun (textes génériques)']) },
       { key: 'GROQ_API_KEY', label: 'Clé Groq', secret: true, free: true, link: 'https://console.groq.com/keys', help: 'Offre gratuite avec quotas, très rapide.' },
       { key: 'OLLAMA_BASE_URL', label: 'URL Ollama', credential: true, free: true, placeholder: 'http://ollama:11434 (Docker) ou http://localhost:11434', help: 'LLM 100 % local et gratuit. Avec Docker : ajoutez COMPOSE_PROFILES=ollama dans .env puis relancez.' },
       { key: 'OLLAMA_MODEL', label: 'Modèle Ollama', free: true, placeholder: 'qwen2.5:3b', help: 'Téléchargé automatiquement au premier usage (≈2 Go). Plus précis : qwen2.5:7b ou llama3.1:8b (8 Go de RAM).' },
@@ -100,15 +100,15 @@ export const SETTING_GROUPS: SettingGroup[] = [
   {
     id: 'security',
     title: 'Sécurité',
-    description: 'Protège l’interface par un mot de passe (indispensable si elle est accessible depuis le réseau). Le navigateur le demandera à la prochaine visite ; le nom d’utilisateur est libre.',
+    description: 'Mot de passe facultatif devant tout le site (préproduction) : le navigateur le demande avant même la page de connexion.',
     fields: [
       { key: 'VIDEO_AGENT_WEB_PASSWORD', label: 'Mot de passe de l’interface', secret: true },
     ],
   },
   {
     id: 'publish',
-    title: 'Publication',
-    description: 'Identifiants des applications développeur. Les jetons s’obtiennent avec « video-agent auth <plateforme> --save » (voir README § 15).',
+    title: 'Publication (applications développeur)',
+    description: 'Vos applications développeur : chaque client connecte ensuite ses propres comptes dans « Comptes connectés ». URL de retour OAuth : <PUBLIC_URL>/api/connections/<youtube|tiktok|linkedin|meta>/callback.',
     fields: [
       { key: 'VIDEO_AGENT_PUBLISH_PLATFORMS', label: 'Plateformes par défaut', placeholder: 'tiktok,instagram,youtube' },
       { key: 'YOUTUBE_CLIENT_ID', label: 'YouTube : Client ID', credential: true, free: true, link: 'https://console.cloud.google.com/apis/credentials' },

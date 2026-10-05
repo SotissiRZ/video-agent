@@ -1,172 +1,121 @@
 <!doctype html>
-<html lang="fr">
+<html lang="fr" data-theme="light">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Video Agent</title>
-  <link rel="stylesheet" href="style.css" />
+  <title>Video Agent — Vidéos marketing générées par IA</title>
+  <meta name="description" content="Décrivez votre vidéo en une phrase : script, voix-off, vraies photos, sous-titres et publication automatique sur TikTok, Instagram, YouTube et LinkedIn." />
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+  <script src="/assets/boot.js"></script>
+  <link rel="stylesheet" href="/assets/style.css" />
 </head>
 <body>
-  <header class="top">
-    <div class="brand"><span class="logo">▶</span> Video Agent</div>
-    <nav class="tabs" role="tablist">
-      <button class="tab active" data-tab="create" role="tab">🎬 Créer</button>
-      <button class="tab" data-tab="settings" role="tab">⚙️ Réglages</button>
-      <button class="tab" data-tab="schedule" role="tab">🗓 Programmées <span id="scheduleCount" class="count" hidden></span></button>
-      <button class="tab" data-tab="history" role="tab">📁 Historique</button>
-    </nav>
-    <div id="status" class="status" title="Cliquez pour configurer"></div>
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="/"><i data-icon="logo" data-size="26"></i>Video Agent</a>
+      <nav class="site-nav">
+        <a href="#how" data-i18n="landing.nav.how">Comment ça marche</a>
+        <a href="#features" data-i18n="landing.nav.features">Fonctionnalités</a>
+        <a href="#pricing" data-i18n="landing.nav.pricing">Tarifs</a>
+        <a href="#faq" data-i18n="landing.nav.faq">FAQ</a>
+      </nav>
+      <div class="actions">
+        <div class="segmented" data-lang-switch></div>
+        <button type="button" class="btn btn-ghost btn-icon" data-theme-toggle></button>
+        <a class="btn btn-ghost" id="loginLink" href="/app#login" data-i18n="landing.login">Se connecter</a>
+        <a class="btn btn-primary hide-sm" id="startLink" href="/app#signup" data-i18n="landing.start">Commencer gratuitement</a>
+      </div>
+    </div>
   </header>
 
   <main>
-    <!-- ============================ Créer ============================ -->
-    <section id="tab-create" class="tab-panel active">
-      <div class="layout">
-        <section class="panel">
-          <h1>Nouvelle vidéo</h1>
-          <form id="form">
-            <label for="prompt">Décrivez votre vidéo</label>
-            <textarea id="prompt" rows="4" required minlength="3" placeholder="Ex. : Crée une vidéo verticale de 30 secondes pour promouvoir Sirago auprès des chauffeurs au Burkina Faso."></textarea>
-            <div class="examples">
-              <span class="muted">Exemples :</span>
-              <button type="button" class="chip" data-example="Crée une vidéo verticale de 20 secondes pour promouvoir Sirago auprès des chauffeurs de moto-taxi à Ouagadougou, avec voix-off.">Publicité</button>
-              <button type="button" class="chip" data-example="Annonce carrée de 15 secondes pour l'ouverture du restaurant « Chez Awa » à Dakar ce samedi, style élégant.">Annonce</button>
-              <button type="button" class="chip" data-example="Tutoriel de 45 secondes en 16:9 expliquant comment commander une course sur l'application Sirago.">Tutoriel</button>
-              <button type="button" class="chip" data-example="Raconte en 90 secondes l'histoire d'une couturière de Bamako qui lance sa marque grâce aux réseaux sociaux.">Storytelling</button>
-              <button type="button" class="chip" data-example="Make a 30 second TikTok video to launch Zeta Pay for small shop owners in Nigeria, playful style.">English</button>
-            </div>
-
-            <div class="field">
-              <span class="label">Format</span>
-              <div class="formats" id="formats">
-                <label class="format"><input type="radio" name="format" value="" checked /><span class="shape auto">A</span>Auto</label>
-                <label class="format"><input type="radio" name="format" value="vertical" /><span class="shape v"></span>9:16<small>TikTok, Reels</small></label>
-                <label class="format"><input type="radio" name="format" value="landscape" /><span class="shape h"></span>16:9<small>YouTube</small></label>
-                <label class="format"><input type="radio" name="format" value="square" /><span class="shape s"></span>1:1<small>Post</small></label>
-                <label class="format"><input type="radio" name="format" value="portrait" /><span class="shape p"></span>4:5<small>Feed</small></label>
-              </div>
-            </div>
-
-            <div class="grid">
-              <label>Durée
-                <span class="duration"><input id="duration" type="number" min="3" max="600" placeholder="auto" /><span class="muted">s</span></span>
-                <span class="hint">3 s à 10 min</span>
-              </label>
-              <label>Style
-                <select id="style"><option value="auto">Auto</option></select>
-              </label>
-              <label>Template
-                <select id="template"><option value="auto">Auto</option></select>
-              </label>
-            </div>
-
-            <div class="toggles">
-              <label class="switch"><input type="checkbox" id="voice" checked /><span></span>Voix-off</label>
-              <label class="switch"><input type="checkbox" id="subtitles" checked /><span></span>Sous-titres</label>
-              <label class="switch"><input type="checkbox" id="music" checked /><span></span>Musique</label>
-              <label class="switch"><input type="checkbox" id="stock" checked /><span></span>Photos et vidéos réelles</label>
-            </div>
-            <p id="capabilityHint" class="hint warn" hidden></p>
-
-            <details class="advanced">
-              <summary>Options avancées</summary>
-              <div class="grid">
-                <label>Images par seconde <select id="fps"></select></label>
-                <label>Fichier <select id="outputFormat"></select></label>
-                <label>Langue
-                  <select id="language"><option value="auto">Auto</option><option value="fr">Français</option><option value="en">English</option></select>
-                </label>
-                <label>Résolution exacte <input id="resolution" placeholder="ex. 1280x720" pattern="\d{2,5}x\d{2,5}" /></label>
-                <label>Visuels
-                  <select id="mediaCoverage"><option value="">Par défaut</option><option value="all">Toutes les scènes</option><option value="visual">Scènes visuelles</option><option value="none">Aucun (fonds animés)</option></select>
-                </label>
-                <label class="switch inline"><input type="checkbox" id="offline" /><span></span>Sans LLM (textes génériques)</label>
-              </div>
-            </details>
-
-            <button type="submit" id="submit" class="primary">🎬 Générer la vidéo</button>
-            <p id="formError" class="error" hidden></p>
-          </form>
-        </section>
-
-        <section class="panel" id="current">
-          <div id="emptyState" class="empty">
-            <div class="big">🎞️</div>
-            <p>Décrivez votre vidéo puis cliquez sur <b>Générer</b>.<br />La progression et le résultat s’affichent ici.</p>
+    <section class="hero">
+      <div class="container hero-grid">
+        <div>
+          <span class="eyebrow"><i data-icon="sparkles" data-size="15"></i><span data-i18n="landing.hero.eyebrow"></span></span>
+          <h1 data-i18n-html="landing.hero.title"></h1>
+          <p class="lead" data-i18n="landing.hero.subtitle"></p>
+          <div class="cta">
+            <a class="btn btn-primary btn-lg" href="/app#signup" data-start><span data-i18n="landing.start"></span><i data-icon="arrow"></i></a>
+            <a class="btn btn-secondary btn-lg" href="#pricing" data-i18n="landing.hero.cta2"></a>
           </div>
-          <div id="jobView" hidden>
-            <div class="row">
-              <h2 id="jobTitle">Génération…</h2>
-              <button type="button" id="cancel" class="ghost small">Annuler</button>
-            </div>
-            <p id="jobPrompt" class="muted"></p>
-            <div class="progress"><div id="bar"></div></div>
-            <p id="jobMessage" class="muted"></p>
-            <ol id="steps" class="steps"></ol>
-            <p id="jobError" class="error" hidden></p>
-
-            <div id="result" hidden>
-              <video id="player" controls playsinline></video>
-              <div class="actions">
-                <a id="download" class="button primary" download>⬇ Télécharger</a>
-                <a id="storyboardLink" class="ghost button small" target="_blank">storyboard</a>
-                <a id="scriptLink" class="ghost button small" target="_blank">script</a>
-                <a id="srtLink" class="ghost button small" target="_blank">sous-titres</a>
-                <a id="creditsLink" class="ghost button small" target="_blank" hidden>crédits</a>
-              </div>
-              <ul id="warnings" class="warnings"></ul>
-
-              <div class="publish">
-                <h3>📣 Publier</h3>
-                <div id="platformList" class="platforms"></div>
-                <p id="platformHint" class="hint" hidden>Aucune plateforme configurée — voir <a href="#" data-goto="settings">Réglages › Publication</a>.</p>
-                <div class="row wrap">
-                  <button type="button" id="prepare" class="ghost small">✏️ Préparer les textes</button>
-                  <label class="inline">Programmer <input type="datetime-local" id="publishAt" /></label>
-                </div>
-                <div id="captionEditors"></div>
-                <div class="row wrap" id="publishActions" hidden>
-                  <button type="button" id="dryRun" class="ghost small">👁 Vérifier sans publier</button>
-                  <button type="button" id="publishBtn" class="primary small">🚀 Publier</button>
-                </div>
-                <ul id="publishResults" class="results"></ul>
-              </div>
+          <p class="note"><i data-icon="check" data-size="15"></i><span data-i18n="landing.hero.note"></span></p>
+        </div>
+        <div class="mock" aria-hidden="true">
+          <div class="mock-prompt"><i data-icon="sparkles"></i><span data-i18n="landing.mock.prompt"></span></div>
+          <div class="phone">
+            <div class="screen">
+              <span class="tag">Video Agent</span>
+              <div class="big" data-i18n="landing.mock.title"></div>
+              <span class="pill" data-i18n="landing.mock.sub"></span>
+              <span class="caption">♪ Video Agent</span>
             </div>
           </div>
-        </section>
+        </div>
       </div>
     </section>
 
-    <!-- ============================ Réglages ============================ -->
-    <section id="tab-settings" class="tab-panel">
-      <div class="panel intro">
-        <h1>Réglages</h1>
-        <p>Tout est optionnel. Les services marqués <span class="badge free">Gratuit</span> suffisent pour de vraies vidéos :
-          <b>Pexels</b> (photos et vidéos), <b>Groq</b>, <b>Gemini</b> ou <b>Ollama</b> (textes), <b>Piper</b> (voix-off, déjà inclus) et <b>Cloudflare</b> ou <b>Hugging Face</b> (images IA).</p>
-        <p class="muted">Les clés sont enregistrées dans <code id="envFile">.env</code> sur votre machine et ne sont jamais réaffichées.</p>
-      </div>
-      <div id="settingsGroups" class="settings"></div>
-    </section>
-
-    <!-- ============================ Programmées ============================ -->
-    <section id="tab-schedule" class="tab-panel">
-      <div class="panel">
-        <h1>Publications programmées</h1>
-        <p class="muted">Publiées automatiquement à l’heure prévue tant que Video Agent tourne.</p>
-        <ul id="scheduleList" class="results"></ul>
+    <section class="section alt" id="how">
+      <div class="container">
+        <div class="section-head"><h2 data-i18n="landing.how.title"></h2></div>
+        <div class="steps-3">
+          <div class="card step-card"><div class="num">1</div><h3 data-i18n="landing.how.1.title"></h3><p data-i18n="landing.how.1.text"></p></div>
+          <div class="card step-card"><div class="num">2</div><h3 data-i18n="landing.how.2.title"></h3><p data-i18n="landing.how.2.text"></p></div>
+          <div class="card step-card"><div class="num">3</div><h3 data-i18n="landing.how.3.title"></h3><p data-i18n="landing.how.3.text"></p></div>
+        </div>
       </div>
     </section>
 
-    <!-- ============================ Historique ============================ -->
-    <section id="tab-history" class="tab-panel">
-      <div class="panel">
-        <h1>Historique</h1>
-        <div id="history" class="history"><p class="muted">Aucune vidéo pour l’instant.</p></div>
+    <section class="section" id="features">
+      <div class="container">
+        <div class="section-head"><h2 data-i18n="landing.features.title"></h2></div>
+        <div class="features">
+          <div class="card feature"><div class="icon-wrap"><i data-icon="type"></i></div><h3 data-i18n="landing.f.script.title"></h3><p data-i18n="landing.f.script.text"></p></div>
+          <div class="card feature"><div class="icon-wrap"><i data-icon="image"></i></div><h3 data-i18n="landing.f.media.title"></h3><p data-i18n="landing.f.media.text"></p></div>
+          <div class="card feature"><div class="icon-wrap"><i data-icon="mic"></i></div><h3 data-i18n="landing.f.voice.title"></h3><p data-i18n="landing.f.voice.text"></p></div>
+          <div class="card feature"><div class="icon-wrap"><i data-icon="layout"></i></div><h3 data-i18n="landing.f.formats.title"></h3><p data-i18n="landing.f.formats.text"></p></div>
+          <div class="card feature"><div class="icon-wrap"><i data-icon="file"></i></div><h3 data-i18n="landing.f.subs.title"></h3><p data-i18n="landing.f.subs.text"></p></div>
+          <div class="card feature"><div class="icon-wrap"><i data-icon="send"></i></div><h3 data-i18n="landing.f.publish.title"></h3><p data-i18n="landing.f.publish.text"></p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section alt" id="pricing">
+      <div class="container">
+        <div class="section-head"><h2 data-i18n="landing.pricing.title"></h2><p data-i18n="landing.pricing.subtitle"></p></div>
+        <div class="plans" id="plans"></div>
+      </div>
+    </section>
+
+    <section class="section" id="faq">
+      <div class="container">
+        <div class="section-head"><h2 data-i18n="landing.faq.title"></h2></div>
+        <div class="faq">
+          <details><summary data-i18n="landing.faq.1.q"></summary><p data-i18n="landing.faq.1.a"></p></details>
+          <details><summary data-i18n="landing.faq.2.q"></summary><p data-i18n="landing.faq.2.a"></p></details>
+          <details><summary data-i18n="landing.faq.3.q"></summary><p data-i18n="landing.faq.3.a"></p></details>
+          <details><summary data-i18n="landing.faq.4.q"></summary><p data-i18n="landing.faq.4.a"></p></details>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" style="padding-top: 0">
+      <div class="container">
+        <div class="cta-band">
+          <h2 data-i18n="landing.cta.title"></h2>
+          <a class="btn btn-lg" href="/app#signup" data-start data-i18n="landing.start"></a>
+        </div>
       </div>
     </section>
   </main>
 
-  <div id="toast" class="toast" hidden></div>
-  <script src="app.js" type="module"></script>
+  <footer class="site-footer">
+    <div class="container">
+      <a class="brand" href="/"><i data-icon="logo" data-size="22"></i>Video Agent</a>
+      <span>© <span id="year"></span> Video Agent. <span data-i18n="landing.footer.rights"></span></span>
+    </div>
+  </footer>
+
+  <script type="module" src="/assets/landing.js"></script>
 </body>
 </html>
