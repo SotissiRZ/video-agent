@@ -263,6 +263,37 @@ video-agent web                            # interface web
 
 Raccourcis npm : `npm run demo` (génère la vidéo Sirago dans `output/demo`), `npm run web`, `npm run studio`, `npm run doctor`.
 
+### Prompt détaillé (script scène par scène)
+
+Pour garder la main sur le contenu, décrivez les scènes vous-même : l'agent conserve vos textes, vos minutages et votre voix-off au lieu de les réécrire.
+
+```text
+Crée une vidéo publicitaire pour ZSR-TechNum. Durée : 45 à 60 secondes. Format : vertical 9:16.
+Style visuel : technologie moderne. Couleurs officielles : #0B1C8C, #3CC8C8.
+
+SCÈNE 1 — INTRO (0–5 s)
+Montrer un environnement numérique moderne : ordinateur portable, interfaces web, données.
+Texte : « ZSR-TechNum »
+« Transformons vos idées en solutions numériques. »
+
+SCÈNE 2 — DÉVELOPPEMENT WEB (5–12 s)
+Texte : « Sites web & applications »
+« Des solutions modernes adaptées à vos besoins. »
+…
+VOIX OFF :
+« Vous avez une idée ? ZSR-TechNum vous accompagne… »
+
+Texte final :
+« Votre idée. Notre technologie. »
+« Contactez-nous pour votre projet. »
+```
+
+- **Scènes** : `SCÈNE n — TITRE (début–fin s)` ; les lignes `Texte : « … »` sont affichées telles quelles. Une ligne avec des `•` devient une liste à puces. La description sert à chercher les visuels.
+- **Voix-off** : chaque partie du texte est placée sur la scène dont elle parle. La dernière scène lit le texte final si la voix-off ne la couvre pas.
+- **Durée** : une plage (« 45 à 60 secondes ») vise sa borne basse ; les scènes suivent le rythme de la voix.
+- **Couleurs** : les codes `#RRGGBB` du prompt remplacent les couleurs du style (couleur sombre en fond, couleurs vives en accent).
+- **Logo** : déposez-le dans `assets/brand/` avec le nom de la marque dans le nom du fichier (ex. `zsr-technum-logo.png`) ; il n'est jamais inventé.
+
 ## 8. Utilisation de l'interface web
 
 ```bash

@@ -179,15 +179,26 @@ const STYLE_HINTS: Record<string, string[]> = {
   corporate: ['corporate', 'professionnel', 'professionnelle', 'professional', 'institutionnel', 'institutionnelle', 'b2b', 'serieux', 'serieuse'],
   elegant: ['elegant', 'elegante', 'luxe', 'luxury', 'premium', 'chic', 'haut de gamme', 'sombre', 'dark', 'cinematique', 'cinematic'],
   playful: ['ludique', 'playful', 'fun', 'amusant', 'amusante', 'enfants', 'kids', 'cartoon', 'joyeux', 'joyeuse'],
-  tech: ['tech', 'technologique', 'futuriste', 'futuristic', 'saas', 'logiciel', 'software', 'digital', 'numerique', 'neon'],
+  tech: ['tech', 'technologie', 'technology', 'technologique', 'futuriste', 'futuristic', 'saas', 'logiciel', 'software', 'digital', 'numerique', 'neon'],
   warm: ['chaleureux', 'chaleureuse', 'warm', 'humain', 'humaine', 'convivial', 'conviviale', 'familial', 'authentique', 'authentic'],
 };
 
-export const parseStyleHints = (text: string): string[] => {
+const hintsIn = (text: string): string[] => {
   const t = ` ${normalize(text)} `;
   return Object.entries(STYLE_HINTS)
     .filter(([, words]) => words.some((w) => t.includes(` ${w} `) || t.includes(` ${w},`) || t.includes(` ${w}.`)))
     .map(([id]) => id);
+};
+
+/** Styles mentioned in the prompt; an explicit "Style (visuel) : …" phrase comes first. */
+export const parseStyleHints = (text: string): string[] => {
+  const all = hintsIn(text);
+  const explicit = /\bstyle(?:\s+visuel)?\s*:\s*([^.\n]+)/i.exec(text);
+  if (!explicit) return all;
+  // Inside the phrase, the first words weigh most ("technologie moderne, élégant…" → tech).
+  const first = hintsIn(explicit[1]!.split(',')[0]!);
+  const phrase = hintsIn(explicit[1]!);
+  return [...new Set([...first, ...phrase, ...all])];
 };
 
 const toggle = (t: string, positive: RegExp, negative: RegExp): boolean | undefined =>
