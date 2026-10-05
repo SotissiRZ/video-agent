@@ -9,7 +9,7 @@ import { wipe } from '@remotion/transitions/wipe';
 import { StoryboardSchema, type CompositionProps, type Transition } from './contract/storyboard';
 import { computeTimeline, transitionLength, VOICE_OFFSET_FRAMES } from './contract/timeline';
 import { SubtitlesOverlay } from './components/SubtitlesOverlay';
-import { Watermark } from './components/Watermark';
+import { PlanBadge, Watermark } from './components/Watermark';
 import { ensureFonts } from './fonts';
 import { SceneRenderer } from './scenes';
 import { resolveSrc } from './utils';
@@ -89,6 +89,7 @@ export const VideoComposition: React.FC<CompositionProps> = (props) => {
     <AbsoluteFill style={{ backgroundColor: storyboard.theme.palette.background }}>
       <TransitionSeries>{children}</TransitionSeries>
       <Watermark storyboard={storyboard} />
+      <PlanBadge storyboard={storyboard} />
       <SubtitlesOverlay subtitles={storyboard.subtitles} theme={storyboard.theme} />
       {music ? <Audio src={resolveSrc(music.src)} volume={musicVolume} loop /> : null}
       {storyboard.scenes.map((scene, i) =>

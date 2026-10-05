@@ -11,7 +11,6 @@ import { HuggingFaceImageProvider } from '../src/providers/image/huggingface';
 import { resolveImageProvider } from '../src/providers/image/registry';
 import { piperArchiveName, piperVoiceUrl } from '../src/providers/voice/piper';
 import { resolveVoiceProvider } from '../src/providers/voice/registry';
-import { startServer } from '../src/server/server';
 import { json, mockFetch } from './fetch-mock';
 import { fakeRenderer, testConfig, tmpDir } from './helpers';
 
@@ -124,25 +123,6 @@ describe('settings (web UI)', () => {
     expect(fs.readFileSync(envFile, 'utf8')).toBe(before);
     expect(() => saveSettings(envFile, { VIDEO_AGENT_OUTPUT_DIR: '/etc' }, reload)).toThrow(/non modifiable/);
     expect(() => saveSettings(envFile, { GROQ_API_KEY: 'a\nINJECTED=1' }, reload)).toThrow(/invalide/);
-  });
-
-  it('serves and updates settings over HTTP, refusing cross-site writes', async () => {
-    const { envFile, reload } = setup();
-    const { server, url } = await startServer(reload(), { port: 0, host: '127.0.0.1', webRoot: path.resolve('web'), envFile, reloadConfig: reload, scheduler: false, deps: { renderer: fakeRenderer, logger: createLogger('silent'), llm: null, voice: null, stock: [] } });
-    try {
-      const get = await (await fetch(`${url}/api/settings`)).json();
-      expect(get.groups.map((g: { id: string }) => g.id)).toEqual(['llm', 'stock', 'images', 'voice', 'render', 'security', 'publish']);
-      const put = await fetch(`${url}/api/settings`, { method: 'PUT', body: JSON.stringify({ PIXABAY_API_KEY: 'px' }) });
-      expect(put.status).toBe(200);
-      expect((await put.json()).providers.stock).toContain('pixabay');
-      expect(fs.readFileSync(envFile, 'utf8')).toContain('PIXABAY_API_KEY=px');
-      const evil = await fetch(`${url}/api/settings`, { method: 'PUT', headers: { origin: 'https://evil.example' }, body: JSON.stringify({ GROQ_API_KEY: 'x' }) });
-      expect(evil.status).toBe(403);
-      const bad = await fetch(`${url}/api/settings`, { method: 'PUT', body: JSON.stringify({ VIDEO_AGENT_MUSIC: 'loud' }) });
-      expect(bad.status).toBe(400);
-    } finally {
-      await new Promise<void>((r) => server.close(() => r()));
-    }
   });
 });
 

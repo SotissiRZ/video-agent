@@ -152,6 +152,8 @@ export const StoryboardSchema = z.object({
       tagline: z.string().default(''),
       logo: z.string().optional(),
       showWatermark: z.boolean().default(true),
+      /** Small badge in the top-right corner (plan watermark, e.g. "Made with Video Agent"). */
+      badge: z.string().max(60).optional(),
     })
     .default({}),
   scenes: z.array(SceneSchema).min(1),

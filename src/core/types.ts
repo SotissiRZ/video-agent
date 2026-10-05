@@ -31,6 +31,10 @@ export interface VideoOptions {
   outDir?: string;
   /** Use only the deterministic planner (no LLM call). */
   offline?: boolean;
+  /** Upper bound for the duration (plan limit), applied after prompt parsing. */
+  maxDurationSec?: number;
+  /** Small badge shown in a corner of the video (e.g. free plan: "Made with Video Agent"). */
+  badge?: string;
 }
 
 export interface VideoRequest {
@@ -81,6 +85,8 @@ export interface VideoBrief {
   voice: boolean;
   music: boolean;
   subtitles: boolean;
+  /** Corner badge (plan watermark). */
+  badge?: string;
   parsed: ParsedPrompt;
 }
 

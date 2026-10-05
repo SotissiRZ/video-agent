@@ -1,0 +1,106 @@
+# Video Agent en production (SaaS) sur un serveur (VPS) :
+#
+#   HTTPS (Caddy) → web (interface + API) → PostgreSQL ← workers de rendu (1 vidéo à la fois chacun)
+#
+# 1. DNS : un enregistrement A de votre domaine vers l'IP du serveur.
+# 2. cp .env.example .env, puis renseignez au minimum :
+#      DOMAIN=app.example.com
+#      PUBLIC_URL=https://app.example.com
+#      APP_SECRET=$(openssl rand -hex 32)
+#      POSTGRES_PASSWORD=$(openssl rand -hex 16)
+#      + vos clés (Pexels, Groq…), Stripe et applications développeur des réseaux sociaux.
+# 3. docker compose -f docker-compose.prod.yml up -d --build
+# 4. Ouvrez https://app.example.com : le premier compte créé est administrateur.
+#
+# Plus de rendus en parallèle : WORKERS=3 docker compose -f docker-compose.prod.yml up -d
+# (prévoir ~2 cœurs et 2 Go de RAM par worker).
+
+name: video-agent
+
+x-app: &app
+  build:
+    context: .
+    args:
+      BROWSER: ${VIDEO_AGENT_DOCKER_BROWSER:-remotion}
+  image: video-agent:latest
+  environment:
+    DATABASE_URL: postgres://videoagent:${POSTGRES_PASSWORD:?définissez POSTGRES_PASSWORD dans .env}@postgres:5432/videoagent
+    VIDEO_AGENT_EMBEDDED_WORKER: "false"
+    VIDEO_AGENT_TRUST_PROXY: "true"
+    VIDEO_AGENT_OUTPUT_DIR: /app/output
+    VIDEO_AGENT_ASSETS_DIR: /app/assets
+  volumes:
+    - videos:/app/output
+    - ./assets:/app/assets
+    # .env monté : la page Administration › Services peut le modifier ; les workers le relisent à chaque vidéo.
+    - ./.env:/app/.env
+  depends_on:
+    postgres:
+      condition: service_healthy
+  restart: unless-stopped
+  init: true
+
+services:
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?définissez DOMAIN dans .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: videoagent
+      POSTGRES_DB: videoagent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U videoagent -d videoagent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  # Interface web, API, webhooks Stripe, retours OAuth. Ne rend pas de vidéo.
+  web:
+    <<: *app
+    command: ["web"]
+    expose:
+      - "3210"
+
+  # Rendu des vidéos et publications programmées.
+  worker:
+    <<: *app
+    command: ["worker"]
+    # Chrome a besoin d'une mémoire partagée plus grande que les 64 Mo par défaut.
+    shm_size: 1gb
+    deploy:
+      replicas: ${WORKERS:-1}
+    healthcheck:
+      disable: true
+
+  # LLM local gratuit (profil "ollama") : COMPOSE_PROFILES=ollama et OLLAMA_BASE_URL=http://ollama:11434
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  videos:
+  caddy-data:
+  caddy-config:
+  ollama-models:

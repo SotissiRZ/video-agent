@@ -12,7 +12,8 @@ Il produit `output/<job>/video.mp4` (1080×1920, 30 s, 30 fps), avec animations,
 - **Multi-fournisseurs, tous optionnels** : Claude, OpenAI, Groq, tout serveur compatible OpenAI (Ollama, LM Studio…), images (OpenAI, Replicate), voix (ElevenLabs, OpenAI, voix système), clips vidéo (Replicate).
 - **Vrais visuels** : vos photos (`assets/`), banques gratuites de photos et vidéos (Pexels, Pixabay, Unsplash), images IA (OpenAI, Replicate, Stability AI), avec crédits automatiques.
 - **Publication automatique** sur TikTok, Instagram, Facebook, YouTube et LinkedIn : légendes et hashtags par plateforme, publication immédiate ou programmée.
-- **CLI + interface web locale** avec progression en direct et prévisualisation, **ou Docker** (`docker compose up`).
+- **SaaS prêt à déployer** : comptes clients, offres et quotas, paiement Stripe, comptes sociaux connectés par chaque client, interface professionnelle en français et en anglais, thème clair et sombre (voir [§ 16](#16-saas--déploiement-en-production)).
+- **CLI + application web** avec progression en direct et prévisualisation, **ou Docker** (`docker compose up`).
 
 ![Images de la vidéo de démonstration Sirago](docs/demo/storyboard-frames.jpg)
 
@@ -37,6 +38,7 @@ Il produit `output/<job>/video.mp4` (1080×1920, 30 s, 30 fps), avec animations,
 13. [Docker](#13-docker)
 14. [Visuels : photos, vidéos et images IA](#14-visuels--photos-vidéos-et-images-ia)
 15. [Publication sur les réseaux sociaux](#15-publication-sur-les-réseaux-sociaux)
+16. [SaaS : déploiement en production](#16-saas--déploiement-en-production)
 
 ---
 
@@ -70,7 +72,7 @@ Il produit `output/<job>/video.mp4` (1080×1920, 30 s, 30 fps), avec animations,
 ```
 ┌──────────────┐   ┌──────────────────────────── agent/orchestrator ───────────────────────────┐
 │ CLI  (cli/)  │──▶│ prompt/ ─▶ planning/ ─▶ storyboard/ ─▶ assets/ ─▶ subtitles/ ─▶ audio/    │
-│ Web (server/)│   │  analyse    concept      builder,       sélection   cues SRT    voix,     │
+│ Web (saas/)  │   │  analyse    concept      builder,       sélection   cues SRT    voix,     │
 └──────────────┘   │             + script     animations,    + images    /VTT        musique   │
                    │   │            │          validator      IA                               │
                    │   ▼            ▼                                                           │
@@ -104,7 +106,7 @@ Il produit `output/<job>/video.mp4` (1080×1920, 30 s, 30 fps), avec animations,
 | `src/remotion/` | **Moteur vidéo** : compositions React/Remotion. Code compatible navigateur uniquement |
 | `src/render/` | Bundle et rendu Remotion, détection du navigateur |
 | `src/config/` | Variables d'environnement validées par zod |
-| `src/server/` + `web/` | Serveur HTTP local (API JSON + SSE) et interface web sans build |
+| `src/saas/` + `web/` | SaaS : base de données (PostgreSQL ou PGlite), comptes, offres, Stripe, file de rendu et workers, comptes sociaux par client, API JSON + SSE ; site et application web sans build (FR/EN, thèmes clair et sombre) |
 | `src/cli/` | Commandes `video-agent` |
 
 **Principes de conception**
@@ -267,26 +269,23 @@ Raccourcis npm : `npm run demo` (génère la vidéo Sirago dans `output/demo`), 
 npm run web            # ou : video-agent web --port 8080
 ```
 
-Ouvrez **http://127.0.0.1:3210**. L'interface comporte quatre onglets :
+Ouvrez **http://127.0.0.1:3210**. La page d'accueil présente le produit et les tarifs ; l'application est sur **/app**. Créez un compte : **le premier compte est administrateur**. En local, la base de données est intégrée (dossier `.video-agent/db`) et les vidéos sont rendues par le même processus : rien d'autre à installer.
 
-- **🎬 Créer** :
-  - le prompt, avec des exemples en un clic ;
-  - le format choisi visuellement (9:16, 16:9, 1:1, 4:5), la durée (3 s à 10 min), le style et le template ;
-  - des interrupteurs pour la voix-off, les sous-titres, la musique et les photos réelles ;
-  - des options avancées : fps, conteneur, langue, résolution exacte, couverture en visuels.
+L'interface est disponible en **français et en anglais** (sélecteur FR/EN) et en **thème clair ou sombre** (bouton soleil/lune). Le choix est mémorisé.
 
-  La progression des 12 étapes s'affiche en direct, puis l'aperçu, les téléchargements et le panneau de publication.
-- **⚙️ Réglages** : toutes les clés et options, groupées par usage, avec les services **gratuits** signalés et un lien pour obtenir chaque clé. Les valeurs sont écrites dans `.env` et appliquées sans redémarrage. Les clés ne sont jamais réaffichées. Pour désactiver cette page : `VIDEO_AGENT_SETTINGS_UI=false`.
-- **🗓 Programmées** : les publications en attente, annulables.
-- **📁 Historique** : les vidéos déjà générées.
+- **Créer** : description avec exemples, format visuel (9:16, 16:9, 1:1, 4:5), durée, style, modèle, voix-off, sous-titres, musique, photos réelles, options avancées. La progression des 12 étapes s'affiche en direct, puis l'aperçu, les téléchargements et la publication.
+- **Mes vidéos** : bibliothèque avec miniatures, ouverture et suppression.
+- **Publications** : publications passées et programmées, annulables.
+- **Comptes connectés** : chaque utilisateur connecte ses comptes YouTube, TikTok, LinkedIn, Facebook et Instagram (connexion officielle de chaque réseau, jetons chiffrés).
+- **Abonnement** : offre, utilisation du mois, passage à une offre payante (Stripe) et portail de facturation.
+- **Mon compte** : nom, langue, thème, mot de passe, suppression du compte.
+- **Administration** (administrateurs) : statistiques, utilisateurs (offre, rôle) et **clés des services** (LLM, banques d'images, voix…), écrites dans `.env` et appliquées sans redémarrage.
 
-Les badges en haut à droite indiquent l'état des fournisseurs. Un point bleu signale un service gratuit, un point vert un service payant configuré.
+**Durée** : jusqu'à 10 minutes selon l'offre. Le rendu prend environ 1 minute pour 30 s de vidéo en 1080×1920 sur 4 cœurs.
 
-Les tâches sont mises en file et exécutées une à la fois, car le rendu sollicite fortement le processeur. Le serveur écoute sur `127.0.0.1` par défaut et refuse les requêtes d'écriture venant d'un autre site. Pour y accéder depuis un autre appareil (téléphone, autre PC), définissez d'abord `VIDEO_AGENT_WEB_PASSWORD` (ou dans **Réglages → Sécurité**) : le navigateur demandera ce mot de passe, avec un nom d'utilisateur libre. Sans mot de passe, le serveur affiche un avertissement s'il écoute sur le réseau.
+API (JSON, session par cookie) : `POST /api/auth/{signup|login|logout}`, `GET|PATCH|DELETE /api/me`, `GET /api/options`, `GET|POST /api/jobs`, `GET|DELETE /api/jobs/:id`, `GET /api/jobs/:id/events` (SSE), `GET /api/jobs/:id/video[?download=1]`, `GET /api/jobs/:id/captions`, `POST /api/jobs/:id/publish`, `GET|DELETE /api/publications[/:id]`, `GET /api/connections`, `POST /api/connections/:provider/start`, `GET /api/billing`, `POST /api/billing/{checkout|portal}`, `POST /api/stripe/webhook`, `GET|PUT /api/admin/settings`, `GET /api/admin/{users|stats}`.
 
-**Durée** : jusqu'à 10 minutes. Pour les vidéos longues, l'agent ajoute des scènes (chaque type de scène répétable apparaît au plus 3 fois), puis allonge les scènes. Avec un LLM, chaque scène reçoit un texte différent ; sans LLM, les textes génériques se répètent davantage. Le rendu prend environ 1 minute pour 10 s de vidéo en 1080p sur 4 cœurs.
-
-API : `GET /api/options`, `GET|PUT /api/settings`, `GET|POST /api/jobs`, `GET|DELETE /api/jobs/:id`, `GET /api/jobs/:id/events` (SSE), `GET /api/jobs/:id/video[?download=1]`, `GET /api/jobs/:id/poster`, `GET /api/jobs/:id/files/{storyboard.json|script.md|subtitles.srt|subtitles.vtt}`.
+---
 
 ## 9. Ajouter un provider
 
@@ -416,13 +415,13 @@ L'architecture conteneurisée contient tout le nécessaire : Node.js, Chrome hea
 ```
 ┌──────────────────────── docker compose ────────────────────────┐
 │  web  (toujours actif)                cli  (à la demande)      │
-│  ├─ interface web + API  :3210        ├─ génération / rendu    │
-│  ├─ file de rendu                     ├─ publish / captions    │
-│  └─ planificateur de publications     └─ auth (port 8765)      │
+│  ├─ site + application + API :3210    ├─ génération / rendu    │
+│  ├─ base intégrée (PGlite)            ├─ publish / captions    │
+│  └─ rendu et publications             └─ auth (port 8765)      │
 │                 même image : video-agent:latest                 │
 └───────────────┬───────────────┬───────────────┬────────────────┘
           ./output        ./assets       ./.video-agent      ./.env
-       (vidéos, jobs)   (vos médias)   (jetons OAuth)   (configuration)
+       (vidéos, jobs)   (vos médias)  (base, secret)   (configuration)
 ```
 
 ```bash
@@ -446,6 +445,7 @@ docker compose down                  # arrêt
 - **Sécurité** : l'interface n'est exposée que sur `127.0.0.1` de l'hôte. Pour l'ouvrir au réseau, remplacez `127.0.0.1:` par `0.0.0.0:` dans `ports` **et** définissez `VIDEO_AGENT_WEB_PASSWORD` ; sur un serveur public, ajoutez un reverse proxy HTTPS devant.
 - **Ressources** : `shm_size: 1gb` est requis par Chrome. Réglez `VIDEO_AGENT_RENDER_CONCURRENCY` selon les cœurs alloués à Docker.
 - **Planificateur** : il tourne dans le service `web`, qui doit rester démarré (`restart: unless-stopped`) pour que les publications programmées partent à l'heure.
+- **Production** : ce `docker-compose.yml` sert à l'usage local. Pour un serveur public, utilisez `docker-compose.prod.yml` (§ 16).
 
 ## 14. Visuels : photos, vidéos et images IA
 
@@ -503,6 +503,65 @@ Si le retour automatique sur `localhost` n'est pas possible (machine distante, r
 > ⚠️ Les plateformes imposent leurs propres règles : vérification ou audit des applications, quotas d'envoi, droits sur la musique et les images. Les médias des banques intégrées et la musique synthétisée sont libres de droits. Si vous utilisez votre propre musique, assurez-vous d'en avoir les droits.
 
 ---
+
+## 16. SaaS : déploiement en production
+
+Video Agent est une application multi-clients : chaque client a son compte, ses vidéos, ses comptes sociaux et son offre.
+
+```
+             Internet (HTTPS)
+                    │
+            ┌───────▼────────┐   certificat Let's Encrypt automatique
+            │     Caddy      │
+            └───────┬────────┘
+            ┌───────▼────────┐   site, application, API, webhooks Stripe, retours OAuth
+            │      web       │──────────┐
+            └───────┬────────┘          │
+            ┌───────▼────────┐  ┌───────▼────────┐
+            │   PostgreSQL   │◄─┤  worker × N    │  rendu Remotion (1 vidéo à la fois chacun)
+            └────────────────┘  └───────┬────────┘  + publications programmées
+                                volume « videos » partagé (web ↔ workers)
+```
+
+**Mise en ligne sur un VPS** (Ubuntu, 4 cœurs / 8 Go recommandés, Docker installé) :
+
+```bash
+git clone https://github.com/SotissiRZ/video-agent.git && cd video-agent
+cp .env.example .env
+# Dans .env, au minimum :
+#   DOMAIN=app.example.com            (enregistrement DNS A vers l'IP du serveur)
+#   PUBLIC_URL=https://app.example.com
+#   APP_SECRET=<openssl rand -hex 32>
+#   POSTGRES_PASSWORD=<openssl rand -hex 16>
+#   + PEXELS_API_KEY, GROQ_API_KEY (ou autre LLM)…
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Ouvrez `https://app.example.com/app`, créez le premier compte (administrateur), puis complétez les clés dans **Administration › Services**. Pour fermer les inscriptions publiques : `SIGNUP_MODE=closed`.
+
+**Offres et quotas** (remis à zéro le 1er du mois) :
+
+| Offre | Vidéos / mois | Minutes / mois | Durée max | Publication | Filigrane |
+|---|---|---|---|---|---|
+| Gratuit | 3 | 3 | 1 min | non | « Made with Video Agent » |
+| Créateur | 30 | 60 | 3 min | oui | non |
+| Pro | 120 | 300 | 10 min | oui | non |
+
+Les limites sont définies dans `src/saas/plans.ts` ; les prix affichés dans `PLAN_CREATOR_PRICE` et `PLAN_PRO_PRICE`. Un administrateur peut aussi changer l'offre d'un client depuis **Administration**.
+
+**Paiement Stripe** :
+1. Créez deux produits avec un prix mensuel ; copiez leurs identifiants `price_…` dans `STRIPE_PRICE_CREATOR` et `STRIPE_PRICE_PRO`.
+2. `STRIPE_SECRET_KEY` : clé secrète (`sk_live_…` ou `sk_test_…`).
+3. Webhook vers `https://app.example.com/api/stripe/webhook` avec les événements `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted` ; copiez le secret de signature dans `STRIPE_WEBHOOK_SECRET`.
+4. Activez le **portail client** dans Stripe (Paramètres › Facturation › Portail client) pour les changements d'offre, factures et résiliations.
+
+**Comptes sociaux des clients** : créez une application développeur par réseau (YouTube/Google Cloud, TikTok, LinkedIn, Meta) et déclarez l'URL de retour `https://app.example.com/api/connections/<youtube|tiktok|linkedin|meta>/callback`. Renseignez seulement les identifiants de l'application (`*_CLIENT_ID`, `*_CLIENT_SECRET`, `META_APP_ID`, `META_APP_SECRET`) : chaque client connecte ensuite ses propres comptes. Les jetons sont chiffrés (AES-256-GCM, clé dérivée de `APP_SECRET`). Les réseaux exigent une **validation de l'application** avant d'ouvrir l'accès au public (Google : vérification OAuth ; TikTok : audit Content Posting ; Meta : App Review pour `pages_manage_posts`, `instagram_content_publish`, `publish_video`).
+
+**Montée en charge** : `WORKERS=3 docker compose -f docker-compose.prod.yml up -d` lance 3 workers (≈ 2 cœurs et 2 Go de RAM chacun). Les vidéos en attente sont réparties automatiquement (`FOR UPDATE SKIP LOCKED`) ; si un worker s'arrête pendant un rendu, la vidéo passe en échec au bout de 2 minutes et ne compte pas dans le quota.
+
+**Sauvegardes** : la base (`docker compose -f docker-compose.prod.yml exec postgres pg_dump -U videoagent videoagent > backup.sql`) et le volume `videos`.
+
+**Sécurité** : mots de passe hachés (scrypt), sessions en cookie `HttpOnly` / `SameSite=Lax` (`Secure` en HTTPS), vérification de l'origine des requêtes, limitation des tentatives de connexion, en-têtes CSP stricts, chaque requête limitée aux données de l'utilisateur connecté, webhooks Stripe signés.
 
 ## Développement
 

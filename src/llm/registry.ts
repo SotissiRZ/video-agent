@@ -3,6 +3,7 @@ import { ConfigError } from '../core/errors';
 import { AnthropicProvider } from './providers/anthropic';
 import { OllamaProvider } from './providers/ollama';
 import { OpenAICompatibleProvider } from './providers/openai-compatible';
+import { FallbackLLM } from './fallback';
 import type { LLMProvider } from './types';
 
 export type LLMFactory = (config: AppConfig) => LLMProvider | null;
@@ -57,11 +58,10 @@ export const resolveLLM = (config: AppConfig, requested?: string): LLMProvider |
   const id = requested ?? config.env.VIDEO_AGENT_LLM_PROVIDER;
   if (id === 'local' || id === 'none' || id === 'procedural') return null;
   if (id === 'auto') {
-    for (const candidate of AUTO_ORDER) {
-      const provider = factories.get(candidate)?.(config);
-      if (provider) return provider;
-    }
-    return null;
+    // Every configured provider, in order: the next one takes over if one fails (no credit…).
+    const chain = AUTO_ORDER.map((candidate) => factories.get(candidate)?.(config)).filter((p): p is LLMProvider => Boolean(p));
+    if (!chain.length) return null;
+    return chain.length === 1 ? chain[0]! : new FallbackLLM(chain);
   }
   const factory = factories.get(id);
   if (!factory) throw new ConfigError(`Unknown LLM provider "${id}"`, `Available: auto, local, ${listLLMProviders().join(', ')}`);

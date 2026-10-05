@@ -35,6 +35,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
+    "@electric-sql/pglite": "^0.5.8",
     "@fontsource/inter": "^5.3.0",
     "@fontsource/montserrat": "^5.3.0",
     "@remotion/bundler": "^4.0.532",
@@ -44,6 +45,7 @@
     "@remotion/transitions": "^4.0.532",
     "commander": "^15.0.0",
     "dotenv": "^18.0.5",
+    "pg": "^8.23.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "remotion": "^4.0.532",
@@ -51,6 +53,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.4",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "tsup": "^8.5.1",
     "tsx": "^4.23.15",

@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import type { AppConfig } from '../config/config';
 import { describeSecrets } from '../config/config';
 import { errorMessage } from '../core/errors';
+import { FallbackLLM } from '../llm/fallback';
 import { resolveLLM } from '../llm/registry';
 import { resolveImageProvider } from '../providers/image/registry';
 import { resolveStockProviders } from '../providers/stock/registry';
@@ -36,7 +37,7 @@ export const providerStatus = (config: AppConfig) => {
   return {
     stock: stock.error ? `error: ${stock.error}` : stock.value!.map((p) => p.id).join(', ') || 'none',
     platforms: platformStatus(config).filter((p) => p.configured).map((p) => p.id).join(', ') || 'none',
-    llm: llm.error ? `error: ${llm.error}` : llm.value ? `${llm.value.id} (${llm.value.model})` : 'procedural (no LLM configured)',
+    llm: llm.error ? `error: ${llm.error}` : llm.value instanceof FallbackLLM ? llm.value.chain.join(' → ') : llm.value ? `${llm.value.id} (${llm.value.model})` : 'procedural (no LLM configured)',
     voice: voice.error ? `error: ${voice.error}` : voice.value?.id ?? 'none',
     image: image.error ? `error: ${image.error}` : image.value?.id ?? 'none',
     video: video.error ? `error: ${video.error}` : video.value?.id ?? 'none',

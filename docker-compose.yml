@@ -1,13 +1,14 @@
-# Video Agent en conteneurs.
+# Video Agent en local (un seul conteneur, base de données intégrée, rendu dans le même processus).
+# Pour la production (HTTPS, PostgreSQL, workers) : voir docker-compose.prod.yml.
 #
 #   cp .env.example .env              # puis renseignez vos clés
-#   docker compose up -d web          # interface : http://localhost:3210
+#   docker compose up -d web          # http://localhost:3210 (le premier compte créé est administrateur)
 #   docker compose run --rm cli "Crée une vidéo verticale de 30 secondes pour promouvoir Sirago…"
 #   docker compose run --rm cli publish output/<job> --to tiktok,instagram
 #   docker compose run --rm --service-ports cli auth youtube --save
 #
 # Les vidéos sont écrites dans ./output, vos médias sont lus dans ./assets,
-# les jetons OAuth renouvelés sont conservés dans ./.video-agent.
+# la base de données et les jetons sont conservés dans ./.video-agent.
 #
 # LLM local gratuit (Ollama) : ajoutez dans .env
 #   COMPOSE_PROFILES=ollama

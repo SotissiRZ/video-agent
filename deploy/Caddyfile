@@ -1,0 +1,12 @@
+# Reverse proxy HTTPS (certificat Let's Encrypt automatique pour $DOMAIN).
+{$DOMAIN} {
+	encode zstd gzip
+	# Vidéos jusqu'à plusieurs centaines de Mo, flux SSE de progression : pas de mise en tampon.
+	reverse_proxy web:3210 {
+		flush_interval -1
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+}
