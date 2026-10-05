@@ -391,6 +391,7 @@ Contenu de `output/<job>/` :
 | `Video Agent is not built yet` | Lancez `npm run build`, ou utilisez `npm run dev -- "…"`. |
 | Échec du téléchargement de Chrome Headless Shell (403, proxy, hors-ligne) | Indiquez un Chromium existant : `VIDEO_AGENT_BROWSER_EXECUTABLE=/chemin/vers/chrome-headless-shell`. Le Chromium de Playwright est détecté automatiquement. |
 | Linux : `error while loading shared libraries` au rendu | Installez les bibliothèques listées dans les [Prérequis](#3-prérequis). |
+| Docker sous Windows : `entrypoint.sh: not found` ou `\r: command not found` | Fins de ligne Windows (CRLF). Le dépôt force maintenant LF (`.gitattributes`). Sur un clone existant : `git rm --cached -r . -q` puis `git reset --hard`, puis `docker compose build --no-cache`. |
 | Rendu lent | Comptez environ 1 min pour 30 s en 1080x1920 sur 4 cœurs. Vérifiez `VIDEO_AGENT_RENDER_GL=auto` (le mode `swangle` est ~3,5 fois plus lent), augmentez `VIDEO_AGENT_RENDER_CONCURRENCY` jusqu'au nombre de cœurs, gardez `VIDEO_AGENT_X264_PRESET=veryfast`, ou utilisez `--no-render` pour itérer sur le storyboard. |
 | `LLM concept failed, using procedural concept` | Clé invalide, quota atteint ou réponse non conforme. La vidéo est quand même produite. Vérifiez avec `video-agent providers`. |
 | Aucune photo/vidéo réelle dans la vidéo | Ajoutez au moins une clé gratuite (`PEXELS_API_KEY`…) ou des fichiers dans `assets/`. `video-agent doctor` affiche les sources actives, `credits.md` celles utilisées. |
