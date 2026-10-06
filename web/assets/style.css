@@ -286,6 +286,15 @@ dialog.viewer::backdrop { background: rgba(10, 14, 24, 0.55); }
 .cues { width: 100%; border-collapse: collapse; font-size: 14px; }
 .cues td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
 .cue-time { white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-nums; width: 1%; }
+.credits-card { margin-top: 20px; padding: 20px; display: flex; gap: 20px; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; }
+.credits-info { display: flex; gap: 14px; align-items: flex-start; min-width: 0; flex: 1 1 320px; }
+.credits-info h2 { margin: 0 0 4px; font-size: 17px; }
+.credits-info .hint { margin: 0; }
+.credits-info .icon-wrap { flex: none; width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary); }
+.credits-balance { margin: 10px 0 0; font-size: 14px; }
+.credits-buy { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.credits-buy .field { margin: 0; min-width: 190px; }
+.credits-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .btn-whatsapp { background: #25d366; color: #06291a; border-color: transparent; }
 .btn-whatsapp:hover { background: #1fbe5b; }
 .africa { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
@@ -460,4 +469,9 @@ dialog.viewer::backdrop { background: rgba(10, 14, 24, 0.55); }
   .site-header .actions { gap: 4px; }
   .toasts { left: 16px; right: 16px; }
   .toast { min-width: 0; }
+  #newVideoBtn span { display: none; }
+  #newVideoBtn { padding: 0 10px; }
+  .credits-card { padding: 16px; }
+  .credits-buy, .credits-buy .field, .credits-actions, .credits-actions .btn { width: 100%; min-width: 0; }
+  .credits-actions .btn { white-space: normal; height: auto; min-height: 40px; padding-top: 8px; padding-bottom: 8px; text-align: left; }
 }

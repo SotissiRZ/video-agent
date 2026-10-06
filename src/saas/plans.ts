@@ -56,12 +56,12 @@ export interface Usage {
   songs: number;
 }
 
-/** Videos started this month (failed and cancelled ones are not counted) and rendered seconds. */
+/** Videos started this month (failed and cancelled ones, and those paid with a credit, are not counted) and rendered seconds. */
 export const getUsage = async (db: Db, userId: string, now = new Date()): Promise<Usage> => {
   const start = periodStart(now);
   const row = await db.one<{ videos: string | number; seconds: string | number | null }>(
     `SELECT count(*) AS videos, coalesce(sum(duration_sec), 0) AS seconds FROM jobs
-     WHERE user_id = $1 AND created_at >= $2 AND status IN ('queued', 'running', 'completed')`,
+     WHERE user_id = $1 AND created_at >= $2 AND status IN ('queued', 'running', 'completed') AND NOT paid_with_credit`,
     [userId, start.toISOString()],
   );
   const songRow = await db.one<{ songs: string | number }>(
@@ -79,8 +79,9 @@ export type QuotaError = { code: 'videos' | 'minutes' | 'duration' | 'songs'; li
 
 /** Can this user start one more video of (about) this duration? */
 export const checkQuota = (plan: Plan, usage: Usage, requestedDurationSec?: number): QuotaError | null => {
-  if (usage.videos >= plan.videosPerMonth) return { code: 'videos', limit: plan.videosPerMonth };
+  // Duration first: extra-video credits lift the monthly limits, never this one.
   if (requestedDurationSec && requestedDurationSec > plan.maxDurationSec) return { code: 'duration', limit: plan.maxDurationSec };
+  if (usage.videos >= plan.videosPerMonth) return { code: 'videos', limit: plan.videosPerMonth };
   const expected = Math.min(requestedDurationSec ?? 30, plan.maxDurationSec);
   if (usage.seconds + expected > plan.minutesPerMonth * 60) return { code: 'minutes', limit: plan.minutesPerMonth };
   return null;

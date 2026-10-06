@@ -112,6 +112,10 @@ export const SETTING_GROUPS: SettingGroup[] = [
       { key: 'PLAN_PRO_PRICE_XOF', label: 'Prix Pro (FCFA / 30 jours)' },
       { key: 'PLAN_CREATOR_PRICE_MAD', label: 'Prix Créateur (MAD / 30 jours)' },
       { key: 'PLAN_PRO_PRICE_MAD', label: 'Prix Pro (MAD / 30 jours)' },
+      { key: 'CREDIT_PACK_VIDEOS', label: 'Vidéos par pack supplémentaire', help: 'Vidéos utilisables au-delà du quota mensuel, sans date d’expiration.' },
+      { key: 'CREDIT_PACK_PRICE_XOF', label: 'Prix d’un pack (FCFA)' },
+      { key: 'CREDIT_PACK_PRICE_MAD', label: 'Prix d’un pack (MAD)' },
+      { key: 'PASS_REMINDER_DAYS', label: 'Rappel avant la fin d’un pass (jours)', help: 'E-mail envoyé avant l’expiration, puis le jour où le pass expire. 0 = désactivé.' },
     ],
   },
   {
