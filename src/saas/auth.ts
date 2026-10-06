@@ -19,9 +19,11 @@ export interface User {
   current_period_end: Date | string | null;
   created_at: Date | string;
   email_verified_at: Date | string | null;
+  /** Extra videos available beyond the monthly quota. */
+  credits: number;
 }
 
-const USER_COLUMNS = 'id, email, name, role, locale, plan, stripe_customer_id, subscription_status, current_period_end, created_at, email_verified_at';
+const USER_COLUMNS = 'id, email, name, role, locale, plan, stripe_customer_id, subscription_status, current_period_end, created_at, email_verified_at, credits';
 
 /** Error with a stable code the UI translates. */
 export class AuthError extends VideoAgentError {

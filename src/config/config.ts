@@ -210,6 +210,12 @@ const EnvSchema = z.object({
   PLAN_PRO_PRICE_XOF: int(25000, 200, 100_000_000),
   PLAN_CREATOR_PRICE_MAD: int(190, 5, 1_000_000),
   PLAN_PRO_PRICE_MAD: int(490, 5, 1_000_000),
+  /** Pack of extra videos, beyond the monthly quota (credits never expire). */
+  CREDIT_PACK_VIDEOS: int(10, 1, 1000),
+  CREDIT_PACK_PRICE_XOF: int(5000, 200, 100_000_000),
+  CREDIT_PACK_PRICE_MAD: int(90, 5, 1_000_000),
+  /** E-mail reminder this many days before a prepaid pass ends (0 = off). */
+  PASS_REMINDER_DAYS: int(3, 0, 30),
   /** Prices shown on the pricing page (Stripe remains the source of truth for billing). */
   PLAN_CREATOR_PRICE: z.preprocess(emptyToUndefined, z.string().default('19 €')),
   PLAN_PRO_PRICE: z.preprocess(emptyToUndefined, z.string().default('49 €')),

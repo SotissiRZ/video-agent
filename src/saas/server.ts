@@ -22,7 +22,7 @@ import { STYLES } from '../remotion/contract/styles';
 import { listTemplates } from '../templates/registry';
 import { AuthError, changePassword, consumeEmailToken, createEmailToken, createSession, destroySession, findUserByEmail, getUser, login, markEmailVerified, parseCookies, RateLimiter, resetPassword, SESSION_COOKIE, sessionCookie, signup, userForSession, type User } from './auth';
 import { buildEmail, createMailer, type Mailer } from './mail';
-import { createPayment, CURRENCY, enabledProviders, handleGeniusPayWebhook, handleYouCanPayWebhook, listPayments, localPrices, PAYMENT_PROVIDERS, publicPayment, refreshPayment } from './payments';
+import { createPayment, CURRENCY, enabledProviders, handleGeniusPayWebhook, handleYouCanPayWebhook, listPayments, localPrices, PAYMENT_PROVIDERS, publicPayment, refreshPayment, creditPack } from './payments';
 import { billingEnabled, createCheckout, createPortal, handleStripeEvent, stripeClient, verifyStripeSignature, type StripeFetch } from './billing';
 import {
   defaultExchanger,
@@ -42,7 +42,8 @@ import { resolveAppSecret, verifyPassword, Vault } from './crypto';
 import { connectDatabase, type Db } from './db';
 import { clientIp, HttpError, json, readBuffer, readJson, readRaw, redirect, sendFile, SECURITY_HEADERS } from './http';
 import { deleteLogo, getBrandKit, MAX_LOGO_BYTES, publicBrandKit, saveBrandKit, saveLogo } from './brand';
-import { createJob, deleteJob, getJob, JOB_ID, listJobs, publicJob, queuePosition, requestCancel, userJobsDir, type JobRow } from './jobs';
+import { sendPassReminders } from './reminders';
+import { createJob, deleteJob, getJob, JOB_ID, listJobs, publicJob, queuePosition, refundCredits, requestCancel, useCredit, userJobsDir, type JobRow } from './jobs';
 import { checkQuota, getPlan, getUsage, listPlans, PLAN_IDS, planOfUser } from './plans';
 import { cancelPublication, createPublication, listPublications, publicPublication } from './publications';
 import { Worker } from './worker';
@@ -103,6 +104,8 @@ export interface SaasOptions {
   stripe?: StripeFetch;
   exchanger?: CodeExchanger;
   mailer?: Mailer;
+  /** Hourly pass expiry reminders (default: on). */
+  reminders?: boolean;
   /** fetch used for GeniusPay / YouCan Pay calls. */
   paymentFetch?: typeof fetch;
   workerOptions?: Partial<ConstructorParameters<typeof Worker>[0]>;
@@ -115,7 +118,7 @@ export interface SaasApp {
   close: () => Promise<void>;
 }
 
-const userView = (user: User) => ({ id: user.id, email: user.email, emailVerified: Boolean(user.email_verified_at), name: user.name, role: user.role, locale: user.locale, plan: user.plan, subscriptionStatus: user.subscription_status ?? undefined, currentPeriodEnd: user.current_period_end ? new Date(user.current_period_end).toISOString() : undefined });
+const userView = (user: User) => ({ id: user.id, email: user.email, emailVerified: Boolean(user.email_verified_at), credits: user.credits ?? 0, name: user.name, role: user.role, locale: user.locale, plan: user.plan, subscriptionStatus: user.subscription_status ?? undefined, currentPeriodEnd: user.current_period_end ? new Date(user.current_period_end).toISOString() : undefined });
 
 export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptions): Promise<SaasApp> => {
   let config = initialConfig;
@@ -142,6 +145,18 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
   const runWorker = options.embeddedWorker ?? (config.env.VIDEO_AGENT_EMBEDDED_WORKER === 'auto' ? db.kind === 'pglite' : config.env.VIDEO_AGENT_EMBEDDED_WORKER === 'true');
   const worker = runWorker ? new Worker({ db, vault, config: () => config, logger, deps: options.deps, ...options.workerOptions }) : undefined;
   worker?.start();
+
+  // Pass reminders, hourly. Links need the public address of the site.
+  const remind = async () => {
+    if (!config.env.PUBLIC_URL) return;
+    const sent = await sendPassReminders(db, config, mailer, config.env.PUBLIC_URL.replace(/\/$/, ''), logger).catch((err) => {
+      logger.warn(`pass reminders: ${errorMessage(err)}`);
+      return 0;
+    });
+    if (sent) logger.info(`pass reminders: ${sent} e-mail(s) sent`);
+  };
+  const reminderTimers = options.reminders === false ? [] : [setTimeout(() => void remind(), 30_000), setInterval(() => void remind(), 3600_000)];
+  for (const timer of reminderTimers) timer.unref?.();
 
   const llm = () => {
     if (options.deps?.llm !== undefined) return options.deps.llm;
@@ -238,6 +253,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         retentionDays: config.env.VIDEO_AGENT_RETENTION_DAYS,
         plans: listPlans(config).map(({ stripePriceId, ...p }) => ({ ...p, purchasable: Boolean(stripePriceId) || (p.id !== 'free' && enabledProviders(config).length > 0), localPrices: p.id === 'free' ? {} : localPrices(config, p.id) })),
         paymentProviders: enabledProviders(config).map((p) => ({ id: p, currency: CURRENCY[p] })),
+        creditPack: enabledProviders(config).length ? creditPack(config) : null,
       });
     }
     // Local gateways: signed webhooks, each payment confirmed with the gateway before activation.
@@ -369,9 +385,11 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         const body = parse(CreateJobSchema, await readJson(req));
         const plan = planOfUser(config, user);
         const quota = checkQuota(plan, await getUsage(db, user.id), body.durationSec);
-        if (quota) throw new HttpError(402, 'Quota atteint', `quota_${quota.code}`, { limit: quota.limit, plan: plan.id });
+        // Beyond the monthly quota, an extra-video credit is used (never for a video longer than the plan allows).
+        const withCredit = Boolean(quota && quota.code !== 'duration' && (await useCredit(db, user.id)));
+        if (quota && !withCredit) throw new HttpError(402, 'Quota atteint', `quota_${quota.code}`, { limit: quota.limit, plan: plan.id, credits: user.credits });
         const { prompt, ...rest } = body;
-        const job = await createJob(db, config, user.id, prompt, { ...rest, style: rest.style === 'auto' ? undefined : rest.style, template: rest.template === 'auto' ? undefined : rest.template });
+        const job = await createJob(db, config, user.id, prompt, { ...rest, style: rest.style === 'auto' ? undefined : rest.style, template: rest.template === 'auto' ? undefined : rest.template }, withCredit);
         worker?.poke();
         return json(res, 201, publicJob(job));
       }
@@ -385,7 +403,9 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
           fs.rmSync(job.dir, { recursive: true, force: true });
           return json(res, 200, { removed: true });
         }
-        return json(res, 200, { cancelled: await requestCancel(db, user.id, job.id) });
+        const cancelled = await requestCancel(db, user.id, job.id);
+        if (cancelled && job.paid_with_credit) await refundCredits(db);
+        return json(res, 200, { cancelled });
       }
       if (sub === 'events' && method === 'GET') return streamJob(req, res, user.id, job.id);
       if (sub === 'video' && job.video_file) return sendFile(req, res, job.video_file, { download: url.searchParams.get('download') === '1' });
@@ -476,11 +496,11 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         return json(res, 200, { url: await createCheckout(config, stripe(), full!, body.plan, baseUrl(req)) });
       }
       if (id === 'pay' && method === 'POST') {
-        const body = parse(z.object({ plan: z.enum(PLAN_IDS), provider: z.enum(PAYMENT_PROVIDERS), months: z.number().int().min(1).max(12).optional() }), await readJson(req));
+        const body = parse(z.object({ plan: z.enum(PLAN_IDS).optional(), packs: z.number().int().min(1).max(10).optional(), provider: z.enum(PAYMENT_PROVIDERS), months: z.number().int().min(1).max(12).optional() }).refine((b) => Boolean(b.plan) !== Boolean(b.packs), 'plan or packs'), await readJson(req));
         const payment = await createPayment(
           db,
           config,
-          { user, plan: body.plan, provider: body.provider, months: body.months, baseUrl: baseUrl(req), clientIp: clientIp(req, config.env.VIDEO_AGENT_TRUST_PROXY) },
+          { user, plan: body.plan, packs: body.packs, provider: body.provider, months: body.months, baseUrl: baseUrl(req), clientIp: clientIp(req, config.env.VIDEO_AGENT_TRUST_PROXY) },
           options.paymentFetch,
         );
         return json(res, 200, payment);
@@ -584,6 +604,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     db,
     worker,
     close: async () => {
+      for (const timer of reminderTimers) clearTimeout(timer);
       await worker?.stop();
       if (!options.db) await db.close();
     },

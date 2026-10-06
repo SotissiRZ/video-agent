@@ -191,6 +191,20 @@ export const MIGRATIONS: string[] = [
   CREATE UNIQUE INDEX payments_provider_ref ON payments(provider, provider_ref);
   CREATE INDEX payments_user ON payments(user_id, created_at DESC);
   `,
+  // 4. Extra-video credits, and pass expiry reminders.
+  `
+  ALTER TABLE users ADD COLUMN credits integer NOT NULL DEFAULT 0;
+  ALTER TABLE jobs ADD COLUMN paid_with_credit boolean NOT NULL DEFAULT false;
+  ALTER TABLE jobs ADD COLUMN credit_refunded boolean NOT NULL DEFAULT false;
+  ALTER TABLE payments ADD COLUMN credits integer;
+  CREATE TABLE reminders (
+    user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind text NOT NULL,
+    period_end timestamptz NOT NULL,
+    sent_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, kind, period_end)
+  );
+  `,
 ];
 
 /** Apply pending migrations (serialized with an advisory lock: several containers may start together). */

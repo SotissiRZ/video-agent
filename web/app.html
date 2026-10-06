@@ -92,6 +92,7 @@
           <div class="plan"><b id="usagePlan"></b><a href="#billing" class="small" data-i18n="usage.upgrade" id="usageUpgrade"></a></div>
           <div class="row"><span data-i18n="billing.videos"></span><span id="usageVideos"></span></div>
           <div class="progress"><span id="usageBar"></span></div>
+          <div class="row small" id="usageCreditsRow" hidden><span data-i18n="credits.extra"></span><b id="usageCredits"></b></div>
         </div>
         <div class="user-box">
           <div class="avatar" id="avatar"></div>
@@ -343,6 +344,20 @@
             <div class="card stat"><div class="meter"><div class="row"><span class="k" data-i18n="billing.minutes"></span><b id="meterMinutesText"></b></div><div class="progress"><span id="meterMinutes"></span></div></div></div>
           </div>
           <div class="plans" id="billingPlans"></div>
+          <div class="card credits-card" id="creditsCard" hidden>
+            <div class="credits-info">
+              <div class="icon-wrap"><i data-icon="plus"></i></div>
+              <div>
+                <h2 data-i18n="credits.title"></h2>
+                <p class="hint" id="creditsDesc"></p>
+                <p class="credits-balance"><span data-i18n="credits.balance"></span> <b id="creditsBalance"></b></p>
+              </div>
+            </div>
+            <div class="credits-buy">
+              <label class="field"><span class="label" data-i18n="credits.quantity"></span><select class="select" id="creditsPacks"></select></label>
+              <div class="credits-actions" id="creditsActions"></div>
+            </div>
+          </div>
           <div class="card" id="paymentsCard" hidden style="margin-top: 20px">
             <div class="card-header"><h2 data-i18n="billing.history"></h2></div>
             <div class="card-body" style="padding: 8px 6px 6px">
