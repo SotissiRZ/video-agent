@@ -23,6 +23,15 @@ describe('configuration', () => {
     expect(c.env.VIDEO_AGENT_DEFAULT_FPS).toBe(30);
   });
 
+  it('normalizes enum values without changing their canonical casing', () => {
+    const c = loadConfig({
+      env: { TIKTOK_PRIVACY: 'PUBLIC_TO_EVERYONE', LINKEDIN_VISIBILITY: 'PUBLIC' },
+      dotenvDir: false,
+    });
+    expect(c.env.TIKTOK_PRIVACY).toBe('PUBLIC_TO_EVERYONE');
+    expect(c.env.LINKEDIN_VISIBILITY).toBe('PUBLIC');
+  });
+
   it('rejects invalid values with a helpful error', () => {
     expect(() => loadConfig({ env: { VIDEO_AGENT_LLM_PROVIDER: 'skynet' }, dotenvDir: false })).toThrow(/VIDEO_AGENT_LLM_PROVIDER/);
     expect(() => loadConfig({ env: { VIDEO_AGENT_PORT: 'abc' }, dotenvDir: false })).toThrow(/Invalid configuration/);

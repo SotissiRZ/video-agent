@@ -29,7 +29,11 @@ const bool = (def: boolean) =>
 const int = (def: number, min: number, max: number) =>
   z.preprocess((v) => (emptyToUndefined(v) === undefined ? def : Number(v)), z.number().int().min(min).max(max));
 const enumWithDefault = <T extends readonly [string, ...string[]]>(values: T, def: T[number]) =>
-  z.preprocess((v) => (emptyToUndefined(v) === undefined ? def : String(v).toLowerCase()), z.enum(values));
+  z.preprocess((v) => {
+    if (emptyToUndefined(v) === undefined) return def;
+    const normalized = String(v).toLowerCase();
+    return values.find((value) => value.toLowerCase() === normalized) ?? normalized;
+  }, z.enum(values));
 
 const EnvSchema = z.object({
   // --- LLM -------------------------------------------------------------
