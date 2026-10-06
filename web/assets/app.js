@@ -1,7 +1,7 @@
 // Video Agent web app: authentication, video creation, library, publishing, billing, admin.
 import { $, api, ApiError, errorText, escapeHtml, getTheme, icon, initChrome, onLanguageChange, post, renderIcons, savedLang, setLang, setTheme, toast } from './common.js';
 import { formatDate, formatDuration, getLang, SETTINGS_EN, STYLE_NAMES, t, TEMPLATE_NAMES } from './i18n.js';
-import { renderPlans } from './plans.js';
+import { formatMoney, renderPlans } from './plans.js';
 
 const STEPS = ['analyze', 'concept', 'script', 'storyboard', 'scenes', 'assets', 'animations', 'subtitles', 'audio', 'project', 'render', 'output'];
 const PLATFORMS = { youtube: 'YouTube', tiktok: 'TikTok', instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn' };
@@ -667,42 +667,94 @@ $('logoRemove').addEventListener('click', async () => {
 });
 
 // ---- Billing ----------------------------------------------------------------------------------
+const PAY_STATUS = { pending: 'info', paid: 'success', failed: 'danger', cancelled: '' };
+const payBadge = (status) => `<span class="badge ${PAY_STATUS[status] ?? ''}"><span class="dot"></span>${escapeHtml(t(`pay.status.${status}`))}</span>`;
+
+/** Back from the payment page: ask the server (which asks the gateway) until the pass is active. */
+const followPayment = async (ref) => {
+  toast(t('billing.paymentPending'));
+  for (let i = 0; i < 10; i++) {
+    try {
+      const r = await post(`/api/billing/payments/${encodeURIComponent(ref)}/refresh`);
+      if (r.payment.status === 'paid') {
+        state.me = r.account;
+        renderShell();
+        toast(t('billing.paymentDone'), 'success');
+        return loadBilling();
+      }
+      if (r.payment.status === 'failed' || r.payment.status === 'cancelled') return toast(t('billing.paymentFailed'), 'error');
+    } catch {
+      /* keep trying */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  toast(t('billing.paymentSlow'));
+  loadBilling();
+};
+
 const loadBilling = async (params) => {
   if (params?.get('checkout') === 'success') toast(t('billing.success'), 'success');
   if (params?.get('checkout') === 'cancel') toast(t('billing.cancelled'));
-  if (params?.get('checkout')) history.replaceState(null, '', '#billing');
+  const payment = params?.get('payment');
+  if (payment === 'success' && params.get('ref')) void followPayment(params.get('ref'));
+  if (payment === 'error') toast(t('billing.paymentFailed'), 'error');
+  if (params?.get('checkout') || payment) history.replaceState(null, '', '#billing');
   await refreshMe().catch(() => undefined);
   const { user, plan, usage, billing } = state.me;
-  $('billingDisabled').hidden = billing;
-  $('portalBtn').hidden = !billing || !user.subscriptionStatus;
+  const providers = state.me.paymentProviders ?? [];
+  const prepaid = user.subscriptionStatus === 'prepaid';
+  $('billingDisabled').hidden = billing || providers.length > 0;
+  $('portalBtn').hidden = !billing || !user.subscriptionStatus || prepaid;
   $('billingPlan').textContent = t(`plan.${plan.id}`);
-  $('billingRenew').textContent = user.currentPeriodEnd && plan.id !== 'free' ? t('billing.renews', { date: formatDate(user.currentPeriodEnd, false) }) : t(`plan.${plan.id}.desc`);
+  const expired = prepaid && user.currentPeriodEnd && new Date(user.currentPeriodEnd) < new Date();
+  $('billingRenew').textContent = expired
+    ? t('billing.expired', { date: formatDate(user.currentPeriodEnd, false) })
+    : user.currentPeriodEnd && plan.id !== 'free'
+      ? t(prepaid ? 'billing.activeUntil' : 'billing.renews', { date: formatDate(user.currentPeriodEnd, false) })
+      : t(`plan.${plan.id}.desc`);
   const minutes = Math.round((usage.seconds / 60) * 10) / 10;
   $('meterVideosText').textContent = `${usage.videos} / ${plan.videosPerMonth}`;
   $('meterVideos').style.width = `${Math.min(100, (usage.videos / plan.videosPerMonth) * 100)}%`;
   $('meterMinutesText').textContent = `${minutes} / ${plan.minutesPerMonth}`;
   $('meterMinutes').style.width = `${Math.min(100, (minutes / plan.minutesPerMonth) * 100)}%`;
   const plans = state.publicConfig?.plans ?? [];
-  const order = plans.map((p) => p.id);
+  const stripeSubscriber = Boolean(user.subscriptionStatus) && !prepaid;
   $('billingPlans').innerHTML = renderPlans(plans, {
     current: plan.id,
     action: (p) => {
-      if (p.id === plan.id) return { label: t('plan.current'), disabled: true };
-      if (p.id === 'free') return user.subscriptionStatus ? { label: t('billing.manage'), attrs: 'data-portal' } : null;
-      if (!billing || !p.purchasable) return { label: t('plan.contact'), disabled: true };
-      if (user.subscriptionStatus && order.indexOf(p.id) !== order.indexOf(plan.id)) return { label: t('plan.choose', { name: t(`plan.${p.id}`) }), attrs: 'data-portal' };
-      return { label: t('plan.choose', { name: t(`plan.${p.id}`) }), attrs: `data-checkout="${p.id}"` };
+      if (p.id === 'free') return p.id === plan.id ? { label: t('plan.current'), disabled: true } : stripeSubscriber ? { label: t('billing.manage'), attrs: 'data-portal' } : null;
+      if (stripeSubscriber) return p.id === plan.id ? { label: t('plan.current'), disabled: true } : { label: t('plan.choose', { name: t(`plan.${p.id}`) }), attrs: 'data-portal' };
+      const actions = [];
+      // Local passes: one button per gateway (a running pass of this plan is extended).
+      for (const provider of providers) {
+        const label = p.id === plan.id && prepaid ? `${t('billing.renew')} · ${t(provider.id === 'geniuspay' ? 'billing.payMobile' : 'billing.payCard')}` : t(provider.id === 'geniuspay' ? 'billing.payMobile' : 'billing.payCard');
+        actions.push({ label, icon: provider.id === 'geniuspay' ? 'phone' : 'card', attrs: `data-pay="${p.id}" data-provider="${provider.id}"`, primary: actions.length === 0 });
+      }
+      if (billing && !prepaid) actions.push({ label: t('billing.payStripe'), icon: 'card', attrs: `data-checkout="${p.id}"`, primary: actions.length === 0 });
+      if (!actions.length) return p.id === plan.id ? { label: t('plan.current'), disabled: true } : { label: t('plan.contact'), disabled: true };
+      return actions;
     },
   });
+  const payments = await api('/api/billing/payments').catch(() => []);
+  $('paymentsCard').hidden = !payments.length;
+  $('paymentRows').innerHTML = payments
+    .map((p) => `<tr><td>${escapeHtml(formatDate(p.createdAt))}</td><td>${escapeHtml(t(`plan.${p.plan}`))} · ${p.months * 30} j</td><td>${escapeHtml(t(`pay.provider.${p.provider}`))}</td><td>${escapeHtml(formatMoney(p.amount, p.currency))}</td><td>${payBadge(p.status)}</td></tr>`)
+    .join('');
 };
 
 $('billingPlans').addEventListener('click', async (e) => {
   const checkout = e.target.closest('[data-checkout]');
   const portal = e.target.closest('[data-portal]');
+  const pay = e.target.closest('[data-pay]');
   try {
+    if (pay) {
+      pay.disabled = true;
+      location.href = (await post('/api/billing/pay', { plan: pay.dataset.pay, provider: pay.dataset.provider })).url;
+    }
     if (checkout) location.href = (await post('/api/billing/checkout', { plan: checkout.dataset.checkout })).url;
     if (portal) location.href = (await post('/api/billing/portal')).url;
   } catch (err) {
+    if (pay) pay.disabled = false;
     toast(errorText(err), 'error');
   }
 });
@@ -766,6 +818,7 @@ const loadAdmin = async () => {
       ['admin.stats.paying', stats.paying],
       ['admin.stats.videos', stats.videos_month],
       ['admin.stats.queue', `${stats.queued} / ${stats.running}`],
+      ...(stats.revenue_xof || stats.revenue_mad ? [['admin.revenue', [stats.revenue_xof ? formatMoney(stats.revenue_xof, 'XOF') : '', stats.revenue_mad ? formatMoney(stats.revenue_mad, 'MAD') : ''].filter(Boolean).join(' · ')]] : []),
     ]
       .map(([k, v]) => `<div class="card stat"><div class="k">${escapeHtml(t(k))}</div><div class="v">${escapeHtml(String(v))}</div></div>`)
       .join('');
@@ -781,6 +834,12 @@ const loadAdmin = async () => {
         <td>${escapeHtml(formatDate(u.createdAt, false))}</td>
       </tr>`,
     )
+    .join('');
+  const payments = await api('/api/admin/payments').catch(() => []);
+  $('adminPaymentsCard').hidden = !payments.length;
+  $('adminPaymentRows').innerHTML = payments
+    .slice(0, 50)
+    .map((p) => `<tr><td>${escapeHtml(formatDate(p.createdAt))}</td><td>${escapeHtml(p.email ?? '')}</td><td>${escapeHtml(t(`plan.${p.plan}`))}</td><td>${escapeHtml(t(`pay.provider.${p.provider}`))}</td><td>${escapeHtml(formatMoney(p.amount, p.currency))}</td><td>${payBadge(p.status)}</td></tr>`)
     .join('');
   if (settings.error) {
     $('adminSettings').innerHTML = `<div class="alert warning">${escapeHtml(settings.error)}</div>`;

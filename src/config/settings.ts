@@ -98,6 +98,22 @@ export const SETTING_GROUPS: SettingGroup[] = [
     ],
   },
   {
+    id: 'payments',
+    title: 'Paiements (pass de 30 jours)',
+    description: 'GeniusPay : Wave, Orange Money, MTN, Moov et cartes en FCFA. YouCan Pay : cartes et CashPlus en dirhams. Webhooks : <PUBLIC_URL>/api/payments/geniuspay/webhook et /api/payments/youcanpay/webhook.',
+    fields: [
+      { key: 'GENIUSPAY_API_KEY', label: 'GeniusPay : clé API (pk_…)', secret: true, link: 'https://geniuspay.ci/dashboard', help: 'pk_sandbox_… pour tester, pk_live_… pour encaisser.' },
+      { key: 'GENIUSPAY_API_SECRET', label: 'GeniusPay : secret API (sk_…)', secret: true },
+      { key: 'GENIUSPAY_WEBHOOK_SECRET', label: 'GeniusPay : secret du webhook', secret: true, help: 'Obligatoire : sans lui, les paiements ne peuvent pas être confirmés automatiquement.' },
+      { key: 'YOUCANPAY_PRIVATE_KEY', label: 'YouCan Pay : clé privée (pri_…)', secret: true, link: 'https://youcanpay.com', help: 'Sert aussi à vérifier la signature des webhooks.' },
+      { key: 'YOUCANPAY_SANDBOX', label: 'YouCan Pay : mode test', options: opt(['false', 'Non (paiements réels)'], ['true', 'Oui (sandbox)']) },
+      { key: 'PLAN_CREATOR_PRICE_XOF', label: 'Prix Créateur (FCFA / 30 jours)' },
+      { key: 'PLAN_PRO_PRICE_XOF', label: 'Prix Pro (FCFA / 30 jours)' },
+      { key: 'PLAN_CREATOR_PRICE_MAD', label: 'Prix Créateur (MAD / 30 jours)' },
+      { key: 'PLAN_PRO_PRICE_MAD', label: 'Prix Pro (MAD / 30 jours)' },
+    ],
+  },
+  {
     id: 'security',
     title: 'Sécurité',
     description: 'Mot de passe facultatif devant tout le site (préproduction) : le navigateur le demande avant même la page de connexion.',

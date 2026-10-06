@@ -31,6 +31,16 @@ export const listPlans = (config: AppConfig): Plan[] => [
 
 export const getPlan = (config: AppConfig, id: string | null | undefined): Plan => listPlans(config).find((p) => p.id === id) ?? listPlans(config)[0]!;
 
+/** Status of plans bought as prepaid passes (mobile money, cards without recurring billing). */
+export const PREPAID = 'prepaid';
+
+/** Plan a user is entitled to now: an expired prepaid pass falls back to the free plan. */
+export const planOfUser = (config: AppConfig, user: { plan: string | null; subscription_status?: string | null; current_period_end?: Date | string | null } | undefined, now = new Date()): Plan => {
+  if (!user) return getPlan(config, 'free');
+  if (user.subscription_status === PREPAID && (!user.current_period_end || new Date(user.current_period_end).getTime() < now.getTime())) return getPlan(config, 'free');
+  return getPlan(config, user.plan);
+};
+
 export const planForPrice = (config: AppConfig, priceId: string | undefined): PlanId | undefined =>
   priceId ? listPlans(config).find((p) => p.stripePriceId && p.stripePriceId === priceId)?.id : undefined;
 

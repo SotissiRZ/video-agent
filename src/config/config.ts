@@ -193,6 +193,20 @@ const EnvSchema = z.object({
   STRIPE_WEBHOOK_SECRET: optionalString,
   STRIPE_PRICE_CREATOR: optionalString,
   STRIPE_PRICE_PRO: optionalString,
+  /** GeniusPay (Côte d'Ivoire): Wave, Orange Money, MTN, Moov, cards — prepaid passes in XOF. */
+  GENIUSPAY_API_KEY: optionalString,
+  GENIUSPAY_API_SECRET: optionalString,
+  /** Secret used to sign the webhooks (set when the webhook is created in GeniusPay). */
+  GENIUSPAY_WEBHOOK_SECRET: optionalString,
+  /** YouCan Pay (Morocco): cards, CashPlus — prepaid passes in MAD. */
+  YOUCANPAY_PRIVATE_KEY: optionalString,
+  /** Sandbox mode (also detected from a pri_sandbox… key). */
+  YOUCANPAY_SANDBOX: bool(false),
+  /** Prices of the 30-day passes (whole units: FCFA, dirhams). */
+  PLAN_CREATOR_PRICE_XOF: int(10000, 200, 100_000_000),
+  PLAN_PRO_PRICE_XOF: int(25000, 200, 100_000_000),
+  PLAN_CREATOR_PRICE_MAD: int(190, 5, 1_000_000),
+  PLAN_PRO_PRICE_MAD: int(490, 5, 1_000_000),
   /** Prices shown on the pricing page (Stripe remains the source of truth for billing). */
   PLAN_CREATOR_PRICE: z.preprocess(emptyToUndefined, z.string().default('19 €')),
   PLAN_PRO_PRICE: z.preprocess(emptyToUndefined, z.string().default('49 €')),
@@ -300,6 +314,8 @@ export const describeSecrets = (env: Env): Record<string, boolean> => ({
   APP_SECRET: Boolean(env.APP_SECRET),
   STRIPE_SECRET_KEY: Boolean(env.STRIPE_SECRET_KEY),
   STRIPE_WEBHOOK_SECRET: Boolean(env.STRIPE_WEBHOOK_SECRET),
+  GENIUSPAY_API_KEY: Boolean(env.GENIUSPAY_API_KEY),
+  YOUCANPAY_PRIVATE_KEY: Boolean(env.YOUCANPAY_PRIVATE_KEY),
   YOUTUBE_REFRESH_TOKEN: Boolean(env.YOUTUBE_REFRESH_TOKEN),
   TIKTOK_REFRESH_TOKEN: Boolean(env.TIKTOK_REFRESH_TOKEN || env.TIKTOK_ACCESS_TOKEN),
   FACEBOOK_PAGE_ACCESS_TOKEN: Boolean(env.FACEBOOK_PAGE_ACCESS_TOKEN),

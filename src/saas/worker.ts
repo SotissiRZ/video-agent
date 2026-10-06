@@ -19,7 +19,7 @@ import type { Vault } from './crypto';
 import type { Db } from './db';
 import { getBrandKit } from './brand';
 import { claimNextJob, failStaleJobs, purgeOldJobs, type JobRow } from './jobs';
-import { getPlan } from './plans';
+import { planOfUser } from './plans';
 import { claimDuePublication, finishPublication, type PublicationRow } from './publications';
 
 export interface WorkerOptions {
@@ -115,8 +115,8 @@ export class Worker {
   private async render(job: JobRow): Promise<void> {
     const { db, logger } = this.o;
     const config = this.o.config();
-    const user = await db.one<{ plan: string }>('SELECT plan FROM users WHERE id = $1', [job.user_id]);
-    const plan = getPlan(config, user?.plan);
+    const user = await db.one<{ plan: string; subscription_status: string | null; current_period_end: Date | string | null }>('SELECT plan, subscription_status, current_period_end FROM users WHERE id = $1', [job.user_id]);
+    const plan = planOfUser(config, user);
     const controller = new AbortController();
     const steps = { ...job.steps };
     let progress = { overall: 0, step: '', message: '' };

@@ -171,6 +171,26 @@ export const MIGRATIONS: string[] = [
     updated_at timestamptz NOT NULL DEFAULT now()
   );
   `,
+  // 3 — one-off payments (prepaid passes through GeniusPay / YouCan Pay)
+  `
+  CREATE TABLE payments (
+    id text PRIMARY KEY,
+    user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider text NOT NULL,
+    plan text NOT NULL,
+    months integer NOT NULL DEFAULT 1,
+    amount bigint NOT NULL,
+    currency text NOT NULL,
+    status text NOT NULL DEFAULT 'pending',
+    provider_ref text,
+    checkout_url text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    paid_at timestamptz,
+    raw jsonb
+  );
+  CREATE UNIQUE INDEX payments_provider_ref ON payments(provider, provider_ref);
+  CREATE INDEX payments_user ON payments(user_id, created_at DESC);
+  `,
 ];
 
 /** Apply pending migrations (serialized with an advisory lock: several containers may start together). */

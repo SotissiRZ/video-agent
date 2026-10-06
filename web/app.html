@@ -330,6 +330,15 @@
             <div class="card stat"><div class="meter"><div class="row"><span class="k" data-i18n="billing.minutes"></span><b id="meterMinutesText"></b></div><div class="progress"><span id="meterMinutes"></span></div></div></div>
           </div>
           <div class="plans" id="billingPlans"></div>
+          <div class="card" id="paymentsCard" hidden style="margin-top: 20px">
+            <div class="card-header"><h2 data-i18n="billing.history"></h2></div>
+            <div class="card-body" style="padding: 8px 6px 6px">
+              <div class="table-wrap"><table class="table">
+                <thead><tr><th data-i18n="billing.date"></th><th data-i18n="admin.plan"></th><th data-i18n="billing.method"></th><th data-i18n="billing.amount"></th><th data-i18n="schedule.status"></th></tr></thead>
+                <tbody id="paymentRows"></tbody>
+              </table></div>
+            </div>
+          </div>
         </section>
 
         <!-- ---------------- Account ---------------- -->
@@ -374,6 +383,15 @@
                   <tbody id="adminUsers"></tbody>
                 </table>
               </div>
+            </div>
+          </div>
+          <div class="card" id="adminPaymentsCard" hidden style="margin-bottom: 20px">
+            <div class="card-header"><h2 data-i18n="admin.payments"></h2></div>
+            <div class="card-body" style="padding: 8px 6px 6px">
+              <div class="table-wrap"><table class="table">
+                <thead><tr><th data-i18n="billing.date"></th><th data-i18n="admin.user"></th><th data-i18n="admin.plan"></th><th data-i18n="billing.method"></th><th data-i18n="billing.amount"></th><th data-i18n="schedule.status"></th></tr></thead>
+                <tbody id="adminPaymentRows"></tbody>
+              </table></div>
             </div>
           </div>
           <div class="page-header" style="margin-bottom: 14px"><div><h2 data-i18n="admin.services"></h2><p id="adminServicesText"></p></div></div>

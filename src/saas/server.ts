@@ -21,6 +21,7 @@ import { STYLES } from '../remotion/contract/styles';
 import { listTemplates } from '../templates/registry';
 import { AuthError, changePassword, consumeEmailToken, createEmailToken, createSession, destroySession, findUserByEmail, getUser, login, markEmailVerified, parseCookies, RateLimiter, resetPassword, SESSION_COOKIE, sessionCookie, signup, userForSession, type User } from './auth';
 import { buildEmail, createMailer, type Mailer } from './mail';
+import { createPayment, CURRENCY, enabledProviders, handleGeniusPayWebhook, handleYouCanPayWebhook, listPayments, localPrices, PAYMENT_PROVIDERS, publicPayment, refreshPayment } from './payments';
 import { billingEnabled, createCheckout, createPortal, handleStripeEvent, stripeClient, verifyStripeSignature, type StripeFetch } from './billing';
 import {
   defaultExchanger,
@@ -41,7 +42,7 @@ import { connectDatabase, type Db } from './db';
 import { clientIp, HttpError, json, readBuffer, readJson, readRaw, redirect, sendFile, SECURITY_HEADERS } from './http';
 import { deleteLogo, getBrandKit, MAX_LOGO_BYTES, publicBrandKit, saveBrandKit, saveLogo } from './brand';
 import { createJob, deleteJob, getJob, JOB_ID, listJobs, publicJob, queuePosition, requestCancel, userJobsDir, type JobRow } from './jobs';
-import { checkQuota, getPlan, getUsage, listPlans, PLAN_IDS } from './plans';
+import { checkQuota, getPlan, getUsage, listPlans, PLAN_IDS, planOfUser } from './plans';
 import { cancelPublication, createPublication, listPublications, publicPublication } from './publications';
 import { Worker } from './worker';
 
@@ -101,6 +102,8 @@ export interface SaasOptions {
   stripe?: StripeFetch;
   exchanger?: CodeExchanger;
   mailer?: Mailer;
+  /** fetch used for GeniusPay / YouCan Pay calls. */
+  paymentFetch?: typeof fetch;
   workerOptions?: Partial<ConstructorParameters<typeof Worker>[0]>;
 }
 
@@ -170,9 +173,9 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
   };
 
   const accountSummary = async (user: User) => {
-    const plan = getPlan(config, user.plan);
+    const plan = planOfUser(config, user);
     const usage = await getUsage(db, user.id);
-    return { user: userView(user), plan, usage, billing: billingEnabled(config), requireVerification: config.env.REQUIRE_EMAIL_VERIFICATION, mail: mailer.kind };
+    return { user: userView(user), plan, usage, billing: billingEnabled(config), paymentProviders: enabledProviders(config).map((p) => ({ id: p, currency: CURRENCY[p] })), requireVerification: config.env.REQUIRE_EMAIL_VERIFICATION, mail: mailer.kind };
   };
 
   const capabilities = () => {
@@ -232,8 +235,18 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         billing: billingEnabled(config),
         company: { name: config.env.COMPANY_NAME, address: config.env.COMPANY_ADDRESS, email: config.env.CONTACT_EMAIL, url: config.env.PUBLIC_URL ?? '' },
         retentionDays: config.env.VIDEO_AGENT_RETENTION_DAYS,
-        plans: listPlans(config).map(({ stripePriceId, ...p }) => ({ ...p, purchasable: Boolean(stripePriceId) })),
+        plans: listPlans(config).map(({ stripePriceId, ...p }) => ({ ...p, purchasable: Boolean(stripePriceId) || (p.id !== 'free' && enabledProviders(config).length > 0), localPrices: p.id === 'free' ? {} : localPrices(config, p.id) })),
+        paymentProviders: enabledProviders(config).map((p) => ({ id: p, currency: CURRENCY[p] })),
       });
+    }
+    // Local gateways: signed webhooks, each payment confirmed with the gateway before activation.
+    if (resource === 'payments' && sub === 'webhook' && method === 'POST' && (id === 'geniuspay' || id === 'youcanpay')) {
+      const raw = await readRaw(req, 256 * 1024);
+      const result =
+        id === 'geniuspay'
+          ? await handleGeniusPayWebhook(db, config, raw, req.headers['x-geniuspay-signature'] as string | undefined, options.paymentFetch)
+          : await handleYouCanPayWebhook(db, config, raw, req.headers['x-youcanpay-signature'] as string | undefined, options.paymentFetch);
+      return json(res, 200, { received: true, ...result });
     }
     if (resource === 'stripe' && id === 'webhook' && method === 'POST') {
       const raw = await readRaw(req, 1024 * 1024);
@@ -336,7 +349,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     }
 
     if (resource === 'options' && method === 'GET') {
-      const plan = getPlan(config, user.plan);
+      const plan = planOfUser(config, user);
       return json(res, 200, {
         templates: listTemplates().map(({ id: tid, name, description }) => ({ id: tid, name, description })),
         styles: Object.values(STYLES).map(({ id: sid, label, description, theme }) => ({ id: sid, label, description, colors: [theme.palette.background, theme.palette.primary, theme.palette.accent] })),
@@ -353,7 +366,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       if (!id && method === 'POST') {
         if (config.env.REQUIRE_EMAIL_VERIFICATION && !user.email_verified_at) throw new HttpError(403, 'Confirmez votre adresse e-mail pour créer des vidéos', 'email_unverified');
         const body = parse(CreateJobSchema, await readJson(req));
-        const plan = getPlan(config, user.plan);
+        const plan = planOfUser(config, user);
         const quota = checkQuota(plan, await getUsage(db, user.id), body.durationSec);
         if (quota) throw new HttpError(402, 'Quota atteint', `quota_${quota.code}`, { limit: quota.limit, plan: plan.id });
         const { prompt, ...rest } = body;
@@ -385,7 +398,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       if (sub === 'publications' && method === 'GET') return json(res, 200, (await listPublications(db, user.id, job.id)).map(publicPublication));
       if (sub === 'publish' && method === 'POST') {
         if (job.status !== 'completed' || !job.video_file) throw new HttpError(409, 'La vidéo doit être générée avant publication', 'job_not_completed');
-        const plan = getPlan(config, user.plan);
+        const plan = planOfUser(config, user);
         if (!plan.publish) throw new HttpError(402, 'La publication est disponible avec une offre payante', 'plan_publish');
         const body = parse(PublishSchema, await readJson(req));
         const allowed = new Set(publishablePlatforms(vault, await listConnections(db, user.id)));
@@ -442,7 +455,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       }
       if (id && isProvider(id)) {
         if (sub === 'start' && method === 'POST') {
-          if (!getPlan(config, user.plan).publish) throw new HttpError(402, 'La publication est disponible avec une offre payante', 'plan_publish');
+          if (!planOfUser(config, user).publish) throw new HttpError(402, 'La publication est disponible avec une offre payante', 'plan_publish');
           return json(res, 200, { url: await startConnection(db, config, user.id, id, baseUrl(req)) });
         }
         if (!sub && method === 'PATCH') {
@@ -460,6 +473,22 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         if (body.plan === 'free') throw new HttpError(400, 'Offre gratuite : rien à payer');
         const full = await db.one<{ id: string; email: string; stripe_customer_id: string | null }>('SELECT id, email, stripe_customer_id FROM users WHERE id = $1', [user.id]);
         return json(res, 200, { url: await createCheckout(config, stripe(), full!, body.plan, baseUrl(req)) });
+      }
+      if (id === 'pay' && method === 'POST') {
+        const body = parse(z.object({ plan: z.enum(PLAN_IDS), provider: z.enum(PAYMENT_PROVIDERS), months: z.number().int().min(1).max(12).optional() }), await readJson(req));
+        const payment = await createPayment(
+          db,
+          config,
+          { user, plan: body.plan, provider: body.provider, months: body.months, baseUrl: baseUrl(req), clientIp: clientIp(req, config.env.VIDEO_AGENT_TRUST_PROXY) },
+          options.paymentFetch,
+        );
+        return json(res, 200, payment);
+      }
+      if (id === 'payments' && !sub && method === 'GET') return json(res, 200, (await listPayments(db, user.id)).map(publicPayment));
+      if (id === 'payments' && sub && extra === 'refresh' && method === 'POST') {
+        const payment = await refreshPayment(db, config, user.id, sub, options.paymentFetch);
+        if (!payment) throw new HttpError(404, 'Paiement introuvable', 'not_found');
+        return json(res, 200, { payment: publicPayment(payment), account: await accountSummary((await getUser(db, user.id))!) });
       }
       if (id === 'portal' && method === 'POST') {
         const full = await db.one<{ id: string; email: string; stripe_customer_id: string | null }>('SELECT id, email, stripe_customer_id FROM users WHERE id = $1', [user.id]);
@@ -492,10 +521,13 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         await db.query('UPDATE users SET plan = coalesce($2, plan), role = coalesce($3, role) WHERE id = $1', [sub, body.plan ?? null, body.role ?? null]);
         return json(res, 200, { ok: true });
       }
+      if (id === 'payments' && method === 'GET') return json(res, 200, (await listPayments(db, undefined, 200)).map(publicPayment));
       if (id === 'stats' && method === 'GET') {
         const row = await db.one<Record<string, string | number>>(
           `SELECT (SELECT count(*) FROM users) AS users,
-                  (SELECT count(*) FROM users WHERE plan <> 'free') AS paying,
+                  (SELECT count(*) FROM users WHERE plan <> 'free' AND (subscription_status IS DISTINCT FROM 'prepaid' OR current_period_end > now())) AS paying,
+                  (SELECT coalesce(sum(amount), 0) FROM payments WHERE status = 'paid' AND currency = 'XOF' AND paid_at >= date_trunc('month', now())) AS revenue_xof,
+                  (SELECT coalesce(sum(amount), 0) FROM payments WHERE status = 'paid' AND currency = 'MAD' AND paid_at >= date_trunc('month', now())) AS revenue_mad,
                   (SELECT count(*) FROM jobs WHERE created_at >= date_trunc('month', now())) AS videos_month,
                   (SELECT count(*) FROM jobs WHERE status = 'queued') AS queued,
                   (SELECT count(*) FROM jobs WHERE status = 'running') AS running`,
@@ -510,7 +542,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     const url = new URL(req.url ?? '/', 'http://localhost');
     const parts = url.pathname.split('/').filter(Boolean);
     try {
-      const isWebhook = url.pathname === '/api/stripe/webhook';
+      const isWebhook = url.pathname === '/api/stripe/webhook' || /^\/api\/payments\/(geniuspay|youcanpay)\/webhook$/.test(url.pathname);
       // Staging gate (optional): HTTP Basic password in front of everything.
       const password = config.env.VIDEO_AGENT_WEB_PASSWORD;
       if (password && url.pathname !== '/api/health' && !isWebhook && !checkBasic(req.headers.authorization, password)) {
