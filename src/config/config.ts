@@ -226,14 +226,14 @@ const EnvSchema = z.object({
 
   /** Outgoing e-mail (password reset, verification): smtp(s)://user:password@host:port. Empty = links written to the logs. */
   SMTP_URL: optionalString,
-  /** Sender, e.g. "Video Agent <no-reply@example.com>". */
-  MAIL_FROM: z.preprocess(emptyToUndefined, z.string().default('Video Agent <no-reply@localhost>')),
+  /** Sender, e.g. "SOVID AI <no-reply@example.com>". */
+  MAIL_FROM: z.preprocess(emptyToUndefined, z.string().default('SOVID AI <no-reply@localhost>')),
   /** Videos can be created only once the e-mail address is confirmed. */
   REQUIRE_EMAIL_VERIFICATION: bool(false),
   /** Delete videos older than this many days (0 = keep forever). */
   VIDEO_AGENT_RETENTION_DAYS: int(0, 0, 3650),
   /** Legal pages (terms, privacy, legal notice). */
-  COMPANY_NAME: z.preprocess(emptyToUndefined, z.string().default('Video Agent')),
+  COMPANY_NAME: z.preprocess(emptyToUndefined, z.string().default('SOVID AI')),
   COMPANY_ADDRESS: z.preprocess(emptyToUndefined, z.string().default('')),
   CONTACT_EMAIL: z.preprocess(emptyToUndefined, z.string().default('')),
 
@@ -257,7 +257,8 @@ export const findPackageRoot = (start: string): string => {
     const pkg = path.join(dir, 'package.json');
     if (fs.existsSync(pkg)) {
       try {
-        if (JSON.parse(fs.readFileSync(pkg, 'utf8')).name === 'video-agent') return dir;
+        const name = JSON.parse(fs.readFileSync(pkg, 'utf8')).name;
+        if (name === 'video-agent' || name === 'sovid-ai') return dir;
       } catch {
         /* keep searching */
       }

@@ -104,7 +104,7 @@ export const createPayment = async (db: Db, config: AppConfig, input: CreatePaym
   const id = `pay_${newId().replace(/-/g, '')}`;
   await db.query('INSERT INTO payments (id, user_id, provider, plan, months, amount, currency, credits) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)', [id, user.id, provider, plan, months, amount, currency, credits]);
   const returnUrl = (status: string) => `${input.baseUrl}/app#billing?payment=${status}&ref=${id}`;
-  const description = credits ? `Video Agent — ${credits} vidéos supplémentaires` : `Video Agent — ${getPlan(config, plan).name} (${months * PASS_DAYS} jours)`;
+  const description = credits ? `SOVID AI — ${credits} vidéos supplémentaires` : `SOVID AI — ${getPlan(config, plan).name} (${months * PASS_DAYS} jours)`;
 
   try {
     if (provider === 'geniuspay') {

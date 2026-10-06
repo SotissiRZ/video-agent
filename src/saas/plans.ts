@@ -18,7 +18,7 @@ export interface Plan {
   maxDurationSec: number;
   /** Publishing to social networks. */
   publish: boolean;
-  /** "Made with Video Agent" badge on the video. */
+  /** "Made with SOVID AI" badge on the video. */
   badge: boolean;
   /** Price shown on the pricing page. */
   price: string;

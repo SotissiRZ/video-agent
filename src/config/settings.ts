@@ -148,16 +148,25 @@ export const SETTING_GROUPS: SettingGroup[] = [
 
 const FIELDS = new Map(SETTING_GROUPS.flatMap((g) => g.fields.map((f) => [f.key, f] as const)));
 
-/** View for the browser: secrets are reported as configured/not configured only. */
+/** View for the browser: secrets stay in the environment and are not editable from the UI. */
 export const settingsView = (config: AppConfig) =>
   SETTING_GROUPS.map((g) => ({
     ...g,
-    fields: g.fields.map((f) => {
-      const raw = config.env[f.key];
-      const value = raw === undefined || raw === null ? '' : Array.isArray(raw) ? raw.join(',') : String(raw);
-      return { ...f, configured: value !== '', value: f.secret ? '' : value };
-    }),
-  }));
+    configuredFields: g.fields
+      .filter((f) => f.secret || f.credential)
+      .filter((f) => {
+        const raw = config.env[f.key];
+        return raw !== undefined && raw !== null && String(raw) !== '';
+      })
+      .map((f) => f.label),
+    fields: g.fields
+      .filter((f) => !f.secret)
+      .map((f) => {
+        const raw = config.env[f.key];
+        const value = raw === undefined || raw === null ? '' : Array.isArray(raw) ? raw.join(',') : String(raw);
+        return { ...f, configured: value !== '', value };
+      }),
+  })).filter((g) => g.fields.length > 0);
 
 /**
  * Write settings into the .env file after validating the resulting configuration.

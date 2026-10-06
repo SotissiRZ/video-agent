@@ -1,4 +1,4 @@
-# Video Agent en local (un seul conteneur, base de données intégrée, rendu dans le même processus).
+# SOVID AI en local (un seul conteneur, base de données intégrée, rendu dans le même processus).
 # Pour la production (HTTPS, PostgreSQL, workers) : voir docker-compose.prod.yml.
 #
 #   cp .env.example .env              # puis renseignez vos clés

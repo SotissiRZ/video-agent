@@ -1,4 +1,4 @@
-# 🎬 Video Agent
+# 🎬 SOVID AI
 
 **Génération de vidéos et de chansons par IA.** Décrivez une vidéo pour obtenir un MP4 rendu localement avec [Remotion](https://www.remotion.dev), ou passez en mode Chanson dans l'application web pour faire rédiger, relire et valider des paroles avant de générer un MP3 chanté avec ElevenLabs Music.
 
@@ -420,7 +420,7 @@ Contenu de `output/<job>/` :
 | Symptôme | Solution |
 |---|---|
 | `Node.js … 20.3 ou plus récente est requise` | Installez Node.js LTS (`winget install OpenJS.NodeJS.LTS`, `brew install node@22`, nvm…). |
-| `Video Agent is not built yet` | Lancez `npm run build`, ou utilisez `npm run dev -- "…"`. |
+| `SOVID AI is not built yet` | Lancez `npm run build`, ou utilisez `npm run dev -- "…"`. |
 | Échec du téléchargement de Chrome Headless Shell (403, proxy, hors-ligne) | Indiquez un Chromium existant : `VIDEO_AGENT_BROWSER_EXECUTABLE=/chemin/vers/chrome-headless-shell`. Le Chromium de Playwright est détecté automatiquement. |
 | Linux : `error while loading shared libraries` au rendu | Installez les bibliothèques listées dans les [Prérequis](#3-prérequis). |
 | Docker sous Windows : `entrypoint.sh: not found` ou `\r: command not found` | Fins de ligne Windows (CRLF). Le dépôt force maintenant LF (`.gitattributes`). Sur un clone existant : `git rm --cached -r . -q` puis `git reset --hard`, puis `docker compose build --no-cache`. |
@@ -539,7 +539,7 @@ Si le retour automatique sur `localhost` n'est pas possible (machine distante, r
 
 ## 16. SaaS : déploiement en production
 
-Video Agent est une application multi-clients : chaque client a son compte, ses vidéos, ses comptes sociaux et son offre.
+SOVID AI est une application multi-clients : chaque client a son compte, ses vidéos, ses comptes sociaux et son offre. La commande CLI reste `video-agent` pour préserver la compatibilité des installations existantes.
 
 ```
              Internet (HTTPS)
@@ -576,7 +576,7 @@ Ouvrez `https://app.example.com/app`, créez le premier compte (administrateur),
 
 | Offre | Vidéos / mois | Minutes / mois | Chansons / mois | Durée max vidéo | Publication | Filigrane |
 |---|---|---|---|---|---|---|
-| Gratuit | 3 | 3 | 1 | 1 min | non | « Made with Video Agent » |
+| Gratuit | 3 | 3 | 1 | 1 min | non | « Made with SOVID AI » |
 | Créateur | 30 | 60 | 10 | 3 min | oui | non |
 | Pro | 120 | 300 | 40 | 10 min | oui | non |
 
@@ -691,4 +691,4 @@ Voir [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licence
 
-Code de Video Agent : MIT. **Remotion a sa propre licence** : gratuite pour les particuliers, les associations et les entreprises de 3 personnes au plus, licence d'entreprise payante au-delà. Voir [remotion.dev/license](https://www.remotion.dev/license).
+Code de SOVID AI : MIT. **Remotion a sa propre licence** : gratuite pour les particuliers, les associations et les entreprises de 3 personnes au plus, licence d'entreprise payante au-delà. Voir [remotion.dev/license](https://www.remotion.dev/license).

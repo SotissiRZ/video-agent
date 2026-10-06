@@ -34,6 +34,8 @@ let db: Db;
 let config: AppConfig;
 let close: () => Promise<void>;
 let envFile: string;
+let failSongLyricsGeneration = false;
+let failSongAudioGeneration = false;
 
 const waitFor = async <T>(fn: () => Promise<T | undefined>, timeoutMs = 15_000): Promise<T> => {
   const start = Date.now();
@@ -85,8 +87,14 @@ beforeAll(async () => {
         },
       }),
     },
-    songLyricsGenerator: async () => ({ title: 'Joyeux anniversaire', lyrics: '[Verse 1]\nLe soleil se lève pour toi\n[Chorus]\nJoyeux anniversaire Aïcha\n' }),
-    songGenerator: async () => Buffer.from('fake mp3'),
+    songLyricsGenerator: async () => {
+      if (failSongLyricsGeneration) throw new Error('provider unavailable');
+      return { title: 'Joyeux anniversaire', lyrics: '[Verse 1]\nLe soleil se lève pour toi\n[Chorus]\nJoyeux anniversaire Aïcha\n' };
+    },
+    songGenerator: async () => {
+      if (failSongAudioGeneration) throw new Error('[elevenlabs-music] HTTP 402: {"detail":{"status":"paid_plan_required"}}');
+      return Buffer.from('fake mp3');
+    },
     stripe: async (p) => {
       if (p === '/checkout/sessions') return { url: 'https://checkout.stripe.test/s' };
       if (p.startsWith('/subscriptions/')) return { id: 'sub_1', customer: 'cus_1', status: 'active', items: { data: [{ price: { id: 'price_creator' }, current_period_end: 2_000_000_000 }] } };
@@ -192,7 +200,7 @@ describe('videos', () => {
     // Free plan: duration capped at 60 s and badge in the video.
     expect(done.durationSec).toBeLessThanOrEqual(61);
     const storyboard = await (await alice.req('GET', `/api/jobs/${jobId}/files/storyboard.json`)).json();
-    expect(storyboard.brand.badge).toBe('Made with Video Agent');
+    expect(storyboard.brand.badge).toBe('Made with SOVID AI');
     expect(await (await alice.req('GET', `/api/jobs/${jobId}/video`)).text()).toBe('fake video');
 
     const mallory = new Client(base);
@@ -220,6 +228,34 @@ describe('videos', () => {
     expect(refused.body).toMatchObject({ code: 'quota_videos', limit: 3 });
     expect((await eve.json('POST', '/api/jobs', {})).status).toBe(400);
     await waitFor(async () => ((await eve.json('GET', '/api/jobs')).body as Array<{ status: string }>).every((j) => j.status === 'completed' || j.status === 'failed') || undefined);
+  }, 30_000);
+
+  it('retries a failed video as a new owner-scoped job', async () => {
+    const owner = new Client(base);
+    await owner.json('POST', '/api/auth/signup', { email: 'retry-video@example.com', password: 'motdepasse8' });
+    const original = (await owner.json('POST', '/api/jobs', { prompt: 'Une vidéo de 10 secondes pour un café', durationSec: 10 })).body;
+    await waitFor(async () => {
+      const result = await owner.json('GET', `/api/jobs/${original.id}`);
+      return result.body.status === 'completed' ? result.body : undefined;
+    });
+    expect((await owner.json('POST', `/api/jobs/${original.id}/retry`)).body.code).toBe('job_not_retryable');
+    await db.query("UPDATE jobs SET status = 'failed', error = 'test failure', finished_at = now(), video_file = NULL WHERE id = $1", [original.id]);
+    const retryResponse = await owner.json('POST', `/api/jobs/${original.id}/retry`);
+    expect(retryResponse.status).toBe(201);
+    const retry = retryResponse.body;
+    expect(retry.id).not.toBe(original.id);
+    expect(retry).toMatchObject({ prompt: original.prompt, status: 'queued' });
+    const stranger = new Client(base);
+    await stranger.json('POST', '/api/auth/signup', { email: 'retry-stranger@example.com', password: 'motdepasse8' });
+    expect((await stranger.json('POST', `/api/jobs/${original.id}/retry`)).status).toBe(404);
+    const finishedRetry = await waitFor(async () => {
+      const result = await owner.json('GET', `/api/jobs/${retry.id}`);
+      return ['completed', 'failed'].includes(result.body.status) ? result.body : undefined;
+    });
+    expect((await owner.json('DELETE', `/api/jobs/${retry.id}?remove=1`)).body.removed).toBe(true);
+    expect((await owner.json('GET', `/api/jobs/${retry.id}`)).status).toBe(404);
+    if (finishedRetry.status === 'failed') expect(finishedRetry.error).toBeDefined();
+    expect((await owner.json('DELETE', `/api/jobs/${original.id}?remove=1`)).body.removed).toBe(true);
   }, 30_000);
 
   it('publishes on connected accounts with a paid plan (tokens stored encrypted)', async () => {
@@ -275,6 +311,19 @@ describe('videos', () => {
 });
 
 describe('songs', () => {
+  it('returns an actionable error when lyric providers fail', async () => {
+    const singer = new Client(base);
+    await singer.json('POST', '/api/auth/signup', { email: 'lyrics-error@example.com', password: 'motdepasse6' });
+    failSongLyricsGeneration = true;
+    try {
+      const response = await singer.json('POST', '/api/songs', { prompt: 'Chanson anniversaire', style: 'Afrobeats', mood: 'Joyful and celebratory' });
+      expect(response.status).toBe(503);
+      expect(response.body.code).toBe('song_lyrics_provider_failed');
+    } finally {
+      failSongLyricsGeneration = false;
+    }
+  });
+
   it('keeps lyrics editable until explicit generation, isolates audio, and enforces the separate quota', async () => {
     const singer = new Client(base);
     await singer.json('POST', '/api/auth/signup', { email: 'singer@example.com', password: 'motdepasse6' });
@@ -300,6 +349,46 @@ describe('songs', () => {
     await other.json('POST', '/api/auth/signup', { email: 'another-singer@example.com', password: 'motdepasse7' });
     expect((await other.json('GET', `/api/songs/${draft.body.id}`)).status).toBe(404);
     expect((await other.req('GET', finished.audioUrl)).status).toBe(404);
+  }, 30_000);
+
+  it('shows a friendly paid-plan error, retries failed audio, and deletes songs only for their owner', async () => {
+    const singer = new Client(base);
+    await singer.json('POST', '/api/auth/signup', { email: 'song-retry@example.com', password: 'motdepasse6' });
+    const draft = await singer.json('POST', '/api/songs', { prompt: 'Une chanson de fête', style: 'Afrobeats', mood: 'Joyful and celebratory' });
+
+    failSongAudioGeneration = true;
+    try {
+      await singer.json('POST', `/api/songs/${draft.body.id}/generate`);
+      const failed = await waitFor(async () => {
+        const result = await singer.json('GET', `/api/songs/${draft.body.id}`);
+        return result.body.status === 'failed' ? result.body : undefined;
+      });
+      expect(failed.error).toBe('paid_plan_required');
+      expect(JSON.stringify(failed)).not.toContain('HTTP 402');
+      expect(JSON.stringify(failed)).not.toContain('"detail"');
+    } finally {
+      failSongAudioGeneration = false;
+    }
+
+    const retried = await singer.json('POST', `/api/songs/${draft.body.id}/generate`);
+    expect(retried.status).toBe(202);
+    const completed = await waitFor(async () => {
+      const result = await singer.json('GET', `/api/songs/${draft.body.id}`);
+      return result.body.status === 'completed' ? result.body : undefined;
+    });
+    expect(completed.status).toBe('completed');
+
+    const stranger = new Client(base);
+    await stranger.json('POST', '/api/auth/signup', { email: 'song-stranger@example.com', password: 'motdepasse6' });
+    expect((await stranger.json('DELETE', `/api/songs/${draft.body.id}`)).status).toBe(404);
+    expect((await singer.json('DELETE', `/api/songs/${draft.body.id}`)).body.removed).toBe(true);
+    expect((await singer.json('GET', `/api/songs/${draft.body.id}`)).status).toBe(404);
+
+    const active = await singer.json('POST', '/api/songs', { prompt: 'Une chanson en cours', style: 'Pop', mood: 'Joyful and celebratory' });
+    await db.query("UPDATE songs SET status = 'running' WHERE id = $1", [active.body.id]);
+    expect((await singer.json('DELETE', `/api/songs/${active.body.id}`)).body.code).toBe('song_running');
+    await db.query("UPDATE songs SET status = 'failed' WHERE id = $1", [active.body.id]);
+    expect((await singer.json('DELETE', `/api/songs/${active.body.id}`)).body.removed).toBe(true);
   }, 30_000);
 });
 
@@ -348,11 +437,18 @@ describe('admin settings', () => {
     await admin.json('POST', '/api/auth/login', { email: 'admin@example.com', password: 'motdepasse1' });
     const get = await admin.json('GET', '/api/admin/settings');
     expect(get.body.groups.map((g: { id: string }) => g.id)).toContain('stock');
+    const fields = get.body.groups.flatMap((group: { fields: Array<{ key: string; secret?: boolean }> }) => group.fields);
+    expect(fields.some((field: { secret?: boolean }) => field.secret)).toBe(false);
+    expect(fields.some((field: { key: string }) => field.key === 'OPENAI_COMPATIBLE_BASE_URL')).toBe(true);
+    expect(get.body.groups.every((group: { fields: unknown[] }) => group.fields.length > 0)).toBe(true);
     const put = await admin.json('PUT', '/api/admin/settings', { PIXABAY_API_KEY: 'px' });
     expect(put.status).toBe(200);
     expect(put.body.providers.stock).toContain('pixabay');
+    expect(put.body.groups.find((group: { id: string }) => group.id === 'stock').configuredFields).toContain('Clé Pixabay');
     expect(fs.readFileSync(envFile, 'utf8')).toContain('PIXABAY_API_KEY=px');
-    expect(JSON.stringify((await admin.json('GET', '/api/admin/settings')).body)).not.toContain('"px"');
+    const settingsJson = JSON.stringify((await admin.json('GET', '/api/admin/settings')).body);
+    expect(settingsJson).not.toContain('"px"');
+    expect(settingsJson).not.toContain('PIXABAY_API_KEY');
     const bob = new Client(base);
     await bob.json('POST', '/api/auth/login', { email: 'bob@example.com', password: 'motdepasse2' });
     expect((await bob.json('PUT', '/api/admin/settings', { GROQ_API_KEY: 'x' })).status).toBe(403);

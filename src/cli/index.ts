@@ -308,7 +308,7 @@ program
   .action(async (flags: { port?: number; host?: string }) => {
     const cfg = config();
     const { url, app } = await startSaasServer(cfg, { port: flags.port, host: flags.host, webRoot: path.join(packageRoot, 'web') });
-    process.stdout.write(`🎬 Video Agent : ${url}\n`);
+    process.stdout.write(`🎬 SOVID AI : ${url}\n`);
     process.stdout.write(`   Base de données : ${app.db.kind === 'pglite' ? `intégrée (${path.join(cfg.paths.data, 'db')})` : 'PostgreSQL'} · rendu : ${app.worker ? 'dans ce processus' : 'workers séparés ("video-agent worker")'}\n`);
     const shutdown = () => void app.close().finally(() => process.exit(0));
     process.once('SIGINT', shutdown);

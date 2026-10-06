@@ -12,7 +12,7 @@ import type { AgentDependencies } from '../agent/orchestrator';
 import { providerStatus } from '../agent/doctor';
 import { loadConfig, type AppConfig } from '../config/config';
 import { saveSettings, settingsView } from '../config/settings';
-import { errorMessage, VideoAgentError } from '../core/errors';
+import { errorMessage, summarizeError, VideoAgentError } from '../core/errors';
 import { OUTPUT_FORMATS, SUPPORTED_FPS } from '../core/formats';
 import { createLogger, type Logger } from '../core/logger';
 import { resolveLLM } from '../llm/registry';
@@ -48,7 +48,7 @@ import { createJob, deleteJob, getJob, JOB_ID, listJobs, publicJob, queuePositio
 import { checkQuota, checkSongQuota, getPlan, getUsage, listPlans, PLAN_IDS, planOfUser } from './plans';
 import { cancelPublication, createPublication, listPublications, publicPublication } from './publications';
 import { Worker } from './worker';
-import { createSongDraft, getSong, listSongs, publicSong, SONG_ID, songDirectory, updateSongLyrics, type SongRow } from './songs';
+import { createSongDraft, deleteSong, getSong, listSongs, publicSong, SONG_ID, songDirectory, updateSongLyrics, type SongRow } from './songs';
 
 export const CreateJobSchema = z.object({
   prompt: z.string().trim().min(3).max(4000),
@@ -188,6 +188,11 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     } catch {
       return null;
     }
+  };
+  const songLyricsProviderError = (err: unknown) => {
+    const details = errorMessage(err).split(' | ').map((message) => summarizeError(message, 180)).join(' | ');
+    logger.warn(`song lyric provider failed: ${details}`);
+    return new HttpError(503, 'Les fournisseurs IA de paroles sont indisponibles. Vérifiez leur configuration, leurs crédits et leur connexion réseau.', 'song_lyrics_provider_failed');
   };
   const baseUrl = (req: http.IncomingMessage) => {
     if (config.env.PUBLIC_URL) return config.env.PUBLIC_URL.replace(/\/$/, '');
@@ -460,17 +465,22 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
           try {
             lyrics = SongLyricsSchema.parse(await options.songLyricsGenerator(body));
           } catch (err) {
-            if (!(err instanceof z.ZodError)) throw err;
-            throw new HttpError(502, 'Le fournisseur IA a renvoyé des paroles invalides. Réessayez.', 'song_lyrics_invalid');
+            if (err instanceof z.ZodError) throw new HttpError(502, 'Le fournisseur IA a renvoyé des paroles invalides. Réessayez.', 'song_lyrics_invalid');
+            throw songLyricsProviderError(err);
           }
         } else {
-          const generated = await lyricProvider!.generate({
-            system: 'You are a professional songwriter. Write original, singable lyrics based only on the user brief. Return valid JSON with title and lyrics. Use clear section labels such as [Verse 1], [Chorus], [Verse 2], [Bridge]. Keep the lyrics in the language requested or used by the user. Do not mention that these are AI-generated.',
-            messages: [{ role: 'user', content: `Brief: ${body.prompt}\nMusical style: ${body.style}\nMood: ${body.mood}` }],
-            maxTokens: 1600,
-            temperature: 0.8,
-            json: { name: 'song_lyrics', schema: { type: 'object', properties: { title: { type: 'string' }, lyrics: { type: 'string' } }, required: ['title', 'lyrics'], additionalProperties: false } },
-          });
+          let generated: Awaited<ReturnType<NonNullable<typeof lyricProvider>['generate']>>;
+          try {
+            generated = await lyricProvider!.generate({
+              system: 'You are a professional songwriter. Write original, singable lyrics based only on the user brief. Return valid JSON with title and lyrics. Use clear section labels such as [Verse 1], [Chorus], [Verse 2], [Bridge]. Keep the lyrics in the language requested or used by the user. Do not mention that these are AI-generated.',
+              messages: [{ role: 'user', content: `Brief: ${body.prompt}\nMusical style: ${body.style}\nMood: ${body.mood}` }],
+              maxTokens: 1600,
+              temperature: 0.8,
+              json: { name: 'song_lyrics', schema: { type: 'object', properties: { title: { type: 'string' }, lyrics: { type: 'string' } }, required: ['title', 'lyrics'], additionalProperties: false } },
+            });
+          } catch (err) {
+            throw songLyricsProviderError(err);
+          }
           try {
             lyrics = SongLyricsSchema.parse(JSON.parse(generated.text.replace(/^```(?:json)?\s*|\s*```$/g, '')));
           } catch (err) {
@@ -484,6 +494,12 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       if (!id) throw new HttpError(405, 'method not allowed');
       const song = await songFor(user, id);
       if (!sub && method === 'GET') return json(res, 200, publicSong(song));
+      if (!sub && method === 'DELETE') {
+        const removed = await deleteSong(db, user.id, song.id);
+        if (!removed.length) throw new HttpError(409, 'Une chanson en cours de génération ne peut pas être supprimée.', 'song_running');
+        fs.rmSync(songDirectory(config, user.id, song.id), { recursive: true, force: true });
+        return json(res, 200, { removed: true });
+      }
       if (sub === 'lyrics' && method === 'PUT') {
         const body = parse(SongUpdateSchema, await readJson(req));
         const updated = await updateSongLyrics(db, user.id, song.id, body.title, body.lyrics);
@@ -533,6 +549,23 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       if (!id) throw new HttpError(405, 'method not allowed');
       const job = await jobFor(user, id);
       if (!sub && method === 'GET') return json(res, 200, { ...publicJob(job), queuePosition: await queuePosition(db, job) });
+      if (sub === 'retry' && method === 'POST') {
+        if (job.status !== 'failed') throw new HttpError(409, 'Seules les vidéos en échec peuvent être relancées.', 'job_not_retryable');
+        if (config.env.REQUIRE_EMAIL_VERIFICATION && !user.email_verified_at) throw new HttpError(403, 'Confirmez votre adresse e-mail pour générer des vidéos', 'email_unverified');
+        const requestedDuration = Number(job.options.durationSec) || job.duration_sec || 30;
+        const plan = planOfUser(config, user);
+        const quota = checkQuota(plan, await getUsage(db, user.id), requestedDuration);
+        const withCredit = Boolean(quota && quota.code !== 'duration' && (await useCredit(db, user.id)));
+        if (quota && !withCredit) throw new HttpError(402, 'Quota atteint', `quota_${quota.code}`, { limit: quota.limit, plan: plan.id, credits: user.credits });
+        const options = {
+          ...job.options,
+          style: job.options.style === 'auto' ? undefined : job.options.style,
+          template: job.options.template === 'auto' ? undefined : job.options.template,
+        };
+        const retried = await createJob(db, config, user.id, job.prompt, options, withCredit);
+        worker?.poke();
+        return json(res, 201, publicJob(retried));
+      }
       if (!sub && method === 'DELETE') {
         if (url.searchParams.get('remove') === '1') {
           const removed = await deleteJob(db, user.id, job.id);
@@ -704,7 +737,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       // Staging gate (optional): HTTP Basic password in front of everything.
       const password = config.env.VIDEO_AGENT_WEB_PASSWORD;
       if (password && url.pathname !== '/api/health' && !isWebhook && !checkBasic(req.headers.authorization, password)) {
-        res.writeHead(401, { 'www-authenticate': 'Basic realm="Video Agent", charset="UTF-8"', 'content-type': 'text/plain; charset=utf-8' });
+        res.writeHead(401, { 'www-authenticate': 'Basic realm="SOVID AI", charset="UTF-8"', 'content-type': 'text/plain; charset=utf-8' });
         return void res.end('Authentification requise');
       }
       // CSRF: state-changing requests must come from our own pages (the webhook is server-to-server).
@@ -725,7 +758,8 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       const page = pages[url.pathname] ?? decodeURIComponent(url.pathname.slice(1));
       const file = path.resolve(webRoot, page);
       if (!file.startsWith(webRoot + path.sep)) return json(res, 403, { error: 'forbidden' });
-      return sendFile(req, res, file, { cache: /\.(css|js|svg|woff2|png|jpg|webp)$/.test(file) ? 'public, max-age=300' : 'no-cache' });
+      const cache = /\.(css|js)$/.test(file) ? 'no-cache' : /\.(svg|woff2|png|jpg|webp)$/.test(file) ? 'public, max-age=300' : 'no-cache';
+      return sendFile(req, res, file, { cache });
     } catch (err) {
       if (res.headersSent) return void res.end();
       if (err instanceof HttpError) return json(res, err.status, { error: err.message, code: err.code, ...err.extra });

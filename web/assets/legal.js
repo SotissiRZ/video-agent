@@ -102,7 +102,7 @@ const TEXT = {
   },
 };
 
-let company = { name: 'Video Agent', address: '', email: '', url: '' };
+let company = { name: 'SOVID AI', address: '', email: '', url: '' };
 let retention = 0;
 
 const render = () => {

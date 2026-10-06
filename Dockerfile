@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # =============================================================================
-# Video Agent — image Docker (Debian, glibc : requis par le FFmpeg embarqué de Remotion)
+# SOVID AI — image Docker (Debian, glibc : requis par le FFmpeg embarqué de Remotion)
 #
 #   docker compose up -d web                 # interface web + API + planificateur
 #   docker compose run --rm cli "Crée une vidéo…"

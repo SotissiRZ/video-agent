@@ -34,7 +34,7 @@ export interface WorkerOptions {
   publisherFactory?: (platform: PlatformId, userId: string) => Publisher;
 }
 
-export const BADGE_TEXT = 'Made with Video Agent';
+export const BADGE_TEXT = 'Made with SOVID AI';
 
 export class Worker {
   readonly id = `${os.hostname()}-${process.pid}-${crypto.randomBytes(3).toString('hex')}`;

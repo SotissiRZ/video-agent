@@ -36,12 +36,21 @@ export const publicSong = (song: SongRow) => ({
   mood: song.mood,
   durationSec: song.duration_sec,
   status: song.status,
-  error: song.error ?? undefined,
+  error: song.error ? songErrorCode(song.error) : undefined,
   createdAt: iso(song.created_at),
   finishedAt: iso(song.finished_at),
   audioUrl: song.audio_file ? `/api/songs/${song.id}/audio` : undefined,
   downloadUrl: song.audio_file ? `/api/songs/${song.id}/audio?download=1` : undefined,
 });
+
+export const songErrorCode = (message: string): string => {
+  if (/paid_plan_required|paid plan|required.*plan|http 402/i.test(message)) return 'paid_plan_required';
+  if (/401|unauthorized|invalid.*api.?key/i.test(message)) return 'provider_auth';
+  if (/429|rate.?limit|quota/i.test(message)) return 'provider_limit';
+  if (/timeout|timed out|econnreset|network/i.test(message)) return 'provider_unavailable';
+  if (/redémarrage du serveur|server restart|interrupted by a server restart/i.test(message)) return 'interrupted';
+  return 'generation_failed';
+};
 
 export const SONG_ID = /^[a-f0-9-]{36}$/;
 
@@ -82,4 +91,10 @@ export const updateSongLyrics = async (db: Db, userId: string, id: string, title
     `UPDATE songs SET title = $3, lyrics = $4, status = 'draft', error = NULL, updated_at = now()
      WHERE id = $1 AND user_id = $2 AND status IN ('draft', 'failed') RETURNING *`,
     [id, userId, title, lyrics],
+  );
+
+export const deleteSong = (db: Db, userId: string, id: string): Promise<{ id: string }[]> =>
+  db.query<{ id: string }>(
+    "DELETE FROM songs WHERE id = $1 AND user_id = $2 AND status NOT IN ('queued', 'running') RETURNING id",
+    [id, userId],
   );

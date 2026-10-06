@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Video Agent</title>
+  <title>SOVID AI</title>
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
   <script src="/assets/boot.js"></script>
   <link rel="stylesheet" href="/assets/style.css" />
@@ -12,7 +12,7 @@
   <!-- ============================== Auth ============================== -->
   <div id="authView" class="auth" hidden>
     <div class="auth-top">
-      <a class="brand" href="/"><i data-icon="logo" data-size="26"></i>Video Agent</a>
+      <a class="brand" href="/"><i data-icon="logo" data-size="26"></i>SOVID AI</a>
       <div class="input-group">
         <div class="segmented" data-lang-switch></div>
         <button type="button" class="btn btn-ghost btn-icon" data-theme-toggle></button>
@@ -62,6 +62,7 @@
         <label class="field"><span class="label" data-i18n="auth.name"></span><input class="input" name="name" autocomplete="name" maxlength="100" /></label>
         <label class="field"><span class="label" data-i18n="auth.email"></span><input class="input" type="email" name="email" autocomplete="email" required /></label>
         <label class="field"><span class="label" data-i18n="auth.password"></span><input class="input" type="password" name="password" autocomplete="new-password" minlength="8" required /><span class="hint" data-i18n="auth.passwordHint"></span></label>
+        <label class="field"><span class="label" data-i18n="auth.confirmPassword"></span><input class="input" type="password" name="confirmPassword" autocomplete="new-password" required /></label>
         <div class="alert danger" data-error hidden></div>
         <p class="hint" data-i18n-html="auth.consent"></p>
         <button class="btn btn-primary btn-lg btn-block" type="submit" data-i18n="auth.signup"></button>
@@ -73,7 +74,7 @@
   <!-- ============================== App ============================== -->
   <div id="appView" class="app" hidden>
     <aside class="sidebar" id="sidebar">
-      <a class="brand" href="/"><i data-icon="logo" data-size="26"></i>Video Agent</a>
+      <a class="brand" href="/"><i data-icon="logo" data-size="26"></i>SOVID AI</a>
       <nav class="nav">
         <a href="#create" data-page="create"><i data-icon="film"></i><span data-i18n="nav.create"></span></a>
         <a href="#songs" data-page="songs"><i data-icon="mic"></i><span data-i18n="nav.songs"></span></a>
@@ -122,7 +123,7 @@
         </div>
         <!-- ---------------- Create ---------------- -->
         <section class="page" id="page-create">
-          <div class="create-layout">
+          <div class="create-layout form-layout">
             <form class="card" id="createForm" novalidate>
               <div class="card-header"><div><h2 data-i18n="create.title"></h2><p data-i18n="create.subtitle"></p></div></div>
               <div class="card-body form-stack">
@@ -137,17 +138,32 @@
                   <button type="button" class="chip" data-example="create.ex.tutorial.text" data-i18n="create.ex.tutorial"></button>
                   <button type="button" class="chip" data-example="create.ex.story.text" data-i18n="create.ex.story"></button>
                 </div>
-                <div class="examples">
-                  <span class="hint" data-i18n="create.business"></span>
-                  <button type="button" class="chip" data-example="biz.restaurant.text" data-i18n="biz.restaurant"></button>
-                  <button type="button" class="chip" data-example="biz.shop.text" data-i18n="biz.shop"></button>
-                  <button type="button" class="chip" data-example="biz.pharmacy.text" data-i18n="biz.pharmacy"></button>
-                  <button type="button" class="chip" data-example="biz.school.text" data-i18n="biz.school"></button>
-                  <button type="button" class="chip" data-example="biz.realestate.text" data-i18n="biz.realestate"></button>
-                  <button type="button" class="chip" data-example="biz.event.text" data-i18n="biz.event"></button>
-                  <button type="button" class="chip" data-example="biz.transport.text" data-i18n="biz.transport"></button>
-                  <button type="button" class="chip" data-example="biz.beauty.text" data-i18n="biz.beauty"></button>
-                </div>
+                <label class="field">
+                  <span class="label" data-i18n="create.business"></span>
+                  <select class="select" id="businessModel">
+                    <option value="" selected data-i18n="biz.choose"></option>
+                    <option value="biz.restaurant.text" data-i18n="biz.restaurant"></option>
+                    <option value="biz.shop.text" data-i18n="biz.shop"></option>
+                    <option value="biz.pharmacy.text" data-i18n="biz.pharmacy"></option>
+                    <option value="biz.school.text" data-i18n="biz.school"></option>
+                    <option value="biz.realestate.text" data-i18n="biz.realestate"></option>
+                    <option value="biz.event.text" data-i18n="biz.event"></option>
+                    <option value="biz.transport.text" data-i18n="biz.transport"></option>
+                    <option value="biz.beauty.text" data-i18n="biz.beauty"></option>
+                    <option value="biz.tech.text" data-i18n="biz.tech"></option>
+                    <option value="biz.agriculture.text" data-i18n="biz.agriculture"></option>
+                    <option value="biz.health.text" data-i18n="biz.health"></option>
+                    <option value="biz.tourism.text" data-i18n="biz.tourism"></option>
+                    <option value="biz.construction.text" data-i18n="biz.construction"></option>
+                    <option value="biz.automotive.text" data-i18n="biz.automotive"></option>
+                    <option value="biz.finance.text" data-i18n="biz.finance"></option>
+                    <option value="biz.telecom.text" data-i18n="biz.telecom"></option>
+                    <option value="biz.sports.text" data-i18n="biz.sports"></option>
+                    <option value="biz.ngo.text" data-i18n="biz.ngo"></option>
+                    <option value="biz.professional.text" data-i18n="biz.professional"></option>
+                    <option value="biz.other.text" data-i18n="biz.other"></option>
+                  </select>
+                </label>
                 <div class="field">
                   <span class="label" data-i18n="create.format"></span>
                   <div class="formats">
@@ -214,9 +230,11 @@
                   <div style="min-width: 0">
                     <div class="input-group"><span id="jobBadge"></span><span class="hint" id="jobQueue"></span></div>
                     <h2 id="jobTitle" style="margin-top: 8px"></h2>
-                    <p id="jobPrompt"></p>
                   </div>
-                  <button type="button" class="btn btn-secondary btn-sm" id="cancelJob" data-i18n="job.cancel"></button>
+                  <div class="input-group">
+                    <button type="button" class="btn btn-secondary btn-sm" id="retryJob" data-i18n="job.retry" hidden></button>
+                    <button type="button" class="btn btn-secondary btn-sm" id="cancelJob" data-i18n="job.cancel"></button>
+                  </div>
                 </div>
                 <div class="card-body">
                   <div id="jobProgress">
@@ -269,8 +287,8 @@
 
         <!-- ---------------- Songs ---------------- -->
         <section class="page" id="page-songs">
-          <div class="page-header"><div><h1 data-i18n="songs.title"></h1><p data-i18n="songs.subtitle"></p></div></div>
-          <div class="grid-2">
+          <div class="page-header song-page-header"><div><h1 data-i18n="songs.title"></h1><p data-i18n="songs.subtitle"></p></div></div>
+          <div class="song-workspace">
             <form class="card" id="songBriefForm" novalidate>
               <div class="card-header"><div><h2 data-i18n="songs.briefTitle"></h2><p data-i18n="songs.briefSubtitle"></p></div></div>
               <div class="card-body form-stack">
@@ -305,7 +323,7 @@
               </div>
             </div>
           </div>
-          <div style="margin-top: 24px"><h2 data-i18n="songs.history"></h2><div class="video-grid" id="songHistory"></div><div class="card" id="songsEmpty" hidden><div class="empty-state"><div class="icon-wrap"><i data-icon="mic"></i></div><h3 data-i18n="songs.empty"></h3></div></div></div>
+          <div class="song-history"><h2 data-i18n="songs.history"></h2><div class="video-grid" id="songHistory"></div><div class="card" id="songsEmpty" hidden><div class="empty-state"><div class="icon-wrap"><i data-icon="mic"></i></div><h3 data-i18n="songs.empty"></h3></div></div></div>
         </section>
 
         <!-- ---------------- Library ---------------- -->
@@ -348,7 +366,7 @@
         <!-- ---------------- Brand kit ---------------- -->
         <section class="page" id="page-brand">
           <div class="page-header"><div><h1 data-i18n="brand.title"></h1><p data-i18n="brand.subtitle"></p></div></div>
-          <div class="grid-2">
+          <div class="grid-2 form-layout">
             <form class="card" id="brandForm">
               <div class="card-header"><h2 data-i18n="brand.identity"></h2></div>
               <div class="card-body form-stack">
@@ -415,7 +433,7 @@
         <!-- ---------------- Account ---------------- -->
         <section class="page" id="page-account">
           <div class="page-header"><div><h1 data-i18n="account.title"></h1><p data-i18n="account.subtitle"></p></div></div>
-          <div class="grid-2">
+          <div class="grid-2 form-layout account-layout">
             <form class="card" id="profileForm">
               <div class="card-header"><h2 data-i18n="account.profile"></h2></div>
               <div class="card-body form-stack">
@@ -426,17 +444,19 @@
               </div>
               <div class="card-footer"><button class="btn btn-primary" type="submit" data-i18n="common.save"></button></div>
             </form>
-            <form class="card" id="passwordForm">
-              <div class="card-header"><h2 data-i18n="account.security"></h2></div>
-              <div class="card-body form-stack">
-                <label class="field"><span class="label" data-i18n="account.current"></span><input class="input" type="password" name="current" autocomplete="current-password" required /></label>
-                <label class="field"><span class="label" data-i18n="account.new"></span><input class="input" type="password" name="next" autocomplete="new-password" minlength="8" required /><span class="hint" data-i18n="auth.passwordHint"></span></label>
+            <div class="account-security-stack">
+              <form class="card" id="passwordForm">
+                <div class="card-header"><h2 data-i18n="account.security"></h2></div>
+                <div class="card-body form-stack">
+                  <label class="field"><span class="label" data-i18n="account.current"></span><input class="input" type="password" name="current" autocomplete="current-password" required /></label>
+                  <label class="field"><span class="label" data-i18n="account.new"></span><input class="input" type="password" name="next" autocomplete="new-password" minlength="8" required /><span class="hint" data-i18n="auth.passwordHint"></span></label>
+                </div>
+                <div class="card-footer"><button class="btn btn-primary" type="submit" data-i18n="account.change"></button></div>
+              </form>
+              <div class="card">
+                <div class="card-header"><div><h2 data-i18n="account.danger"></h2><p data-i18n="account.deleteText"></p></div></div>
+                <div class="card-footer"><button class="btn btn-danger-ghost" type="button" id="deleteAccount"><i data-icon="trash" data-size="16"></i><span data-i18n="account.delete"></span></button></div>
               </div>
-              <div class="card-footer"><button class="btn btn-primary" type="submit" data-i18n="account.change"></button></div>
-            </form>
-            <div class="card">
-              <div class="card-header"><div><h2 data-i18n="account.danger"></h2><p data-i18n="account.deleteText"></p></div></div>
-              <div class="card-footer"><button class="btn btn-danger-ghost" type="button" id="deleteAccount"><i data-icon="trash" data-size="16"></i><span data-i18n="account.delete"></span></button></div>
             </div>
           </div>
         </section>
@@ -466,7 +486,7 @@
             </div>
           </div>
           <div class="page-header" style="margin-bottom: 14px"><div><h2 data-i18n="admin.services"></h2><p id="adminServicesText"></p></div></div>
-          <div class="grid-2" id="adminSettings"></div>
+          <div class="grid-2 form-layout masonry-layout" id="adminSettings"></div>
         </section>
       </main>
     </div>

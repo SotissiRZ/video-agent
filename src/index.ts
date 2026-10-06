@@ -1,5 +1,5 @@
 /**
- * Public library API — use Video Agent programmatically or extend it.
+ * Public library API — use SOVID AI programmatically or extend it.
  *
  *   import { VideoAgent, loadConfig, registerTemplate } from 'video-agent';
  *   const agent = new VideoAgent(loadConfig());

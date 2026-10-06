@@ -1,15 +1,46 @@
-// Video Agent web app: authentication, video creation, library, publishing, billing, admin.
-import { $, api, ApiError, errorText, escapeHtml, getTheme, icon, initChrome, onLanguageChange, post, renderIcons, savedLang, setLang, setTheme, toast } from './common.js';
+// SOVID AI web app: authentication, video creation, library, publishing, billing, admin.
+import { $, api, ApiError, errorText, escapeHtml, friendlyText, getTheme, icon, initChrome, onLanguageChange, post, renderIcons, savedLang, setLang, setTheme, toast } from './common.js';
 import { formatDate, formatDuration, getLang, SETTINGS_EN, STYLE_NAMES, t, TEMPLATE_NAMES } from './i18n.js';
 import { formatMoney, renderPlans } from './plans.js';
 import { openFile } from './viewer.js';
 
 const STEPS = ['analyze', 'concept', 'script', 'storyboard', 'scenes', 'assets', 'animations', 'subtitles', 'audio', 'project', 'render', 'output'];
 const PLATFORMS = { youtube: 'YouTube', tiktok: 'TikTok', instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn' };
-const PROVIDER_INFO = { youtube: { name: 'YouTube', icon: 'youtube' }, tiktok: { name: 'TikTok', icon: 'tiktok' }, linkedin: { name: 'LinkedIn', icon: 'linkedin' }, meta: { name: 'Facebook + Instagram', icon: 'meta' } };
+const PROVIDER_INFO = {
+  youtube: { name: 'YouTube', icon: 'youtube', setupUrl: 'https://console.cloud.google.com/apis/credentials' },
+  tiktok: { name: 'TikTok', icon: 'tiktok', setupUrl: 'https://developers.tiktok.com/' },
+  linkedin: { name: 'LinkedIn', icon: 'linkedin', setupUrl: 'https://www.linkedin.com/developers/apps' },
+  meta: { name: 'Facebook + Instagram', icon: 'meta', setupUrl: 'https://developers.facebook.com/apps/' },
+};
 const PAGES = ['create', 'songs', 'library', 'schedule', 'connections', 'brand', 'billing', 'account', 'admin'];
 
 const state = { me: null, publicConfig: null, options: null, connections: null, job: null, source: null, publishJobId: null, brand: null, song: null, songPoll: null };
+
+const addPasswordVisibilityControls = () => {
+  document.querySelectorAll('input[type="password"]').forEach((input) => {
+    if (input.parentElement.classList.contains('password-input-group') || input.parentElement.querySelector('[data-toggle-password]')) return;
+    const group = document.createElement('div');
+    group.className = 'input-group password-input-group';
+    input.before(group);
+    group.append(input);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn btn-ghost btn-icon btn-sm password-toggle';
+    button.setAttribute('aria-label', t('admin.showPassword'));
+    button.setAttribute('aria-pressed', 'false');
+    button.title = t('admin.showPassword');
+    button.innerHTML = icon('eye', 16);
+    button.addEventListener('click', () => {
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      button.innerHTML = icon(show ? 'eyeOff' : 'eye', 16);
+      button.setAttribute('aria-pressed', String(show));
+      button.setAttribute('aria-label', t(show ? 'admin.hidePassword' : 'admin.showPassword'));
+      button.title = t(show ? 'admin.hidePassword' : 'admin.showPassword');
+    });
+    group.append(button);
+  });
+};
 
 // ---- Routing ------------------------------------------------------------------------------
 const route = () => {
@@ -52,7 +83,7 @@ const showAuth = (mode) => {
   $('firstUserNote').hidden = !cfg?.firstUser;
   $('signupClosed').hidden = cfg?.signupOpen !== false;
   $('signupForm').querySelector('button[type=submit]').disabled = cfg?.signupOpen === false;
-  document.title = `${t({ login: 'auth.login', signup: 'auth.signup', forgot: 'auth.forgot.title', reset: 'auth.reset.title' }[mode])} · Video Agent`;
+  document.title = `${t({ login: 'auth.login', signup: 'auth.signup', forgot: 'auth.forgot.title', reset: 'auth.reset.title' }[mode])} · SOVID AI`;
 };
 
 const bindAuthForm = (form, path, extra = () => ({})) =>
@@ -61,6 +92,13 @@ const bindAuthForm = (form, path, extra = () => ({})) =>
     const error = form.querySelector('[data-error]');
     error.hidden = true;
     const data = Object.fromEntries(new FormData(form));
+    if (form.id === 'signupForm' && data.password !== data.confirmPassword) {
+      error.textContent = t('auth.passwordMismatch');
+      error.hidden = false;
+      form.querySelector('[name="confirmPassword"]').focus();
+      return;
+    }
+    delete data.confirmPassword;
     const button = form.querySelector('button[type=submit]');
     button.disabled = true;
     try {
@@ -105,7 +143,7 @@ const startApp = async () => {
   if (!savedLang() && state.me.user.locale !== getLang()) setLang(state.me.user.locale, false);
   $('authView').hidden = true;
   $('appView').hidden = false;
-  document.title = 'Video Agent';
+  document.title = 'SOVID AI';
   renderShell();
   await loadOptions();
   loadConnectionsData().catch(() => undefined);
@@ -169,9 +207,10 @@ const showSong = (song) => {
   $('songSaveLyrics').hidden = !editable;
   $('songGenerate').hidden = song.status === 'completed';
   $('songGenerate').disabled = running;
+  $('songGenerate').querySelector('[data-i18n]').textContent = t(song.status === 'failed' ? 'songs.retry' : 'songs.generate');
   $('songRunStatus').textContent = t(SONG_STATUS[song.status] ?? 'songs.status.draft');
   $('songGenerateError').hidden = !song.error;
-  $('songGenerateError').textContent = song.error ?? '';
+  $('songGenerateError').textContent = song.error ? t(`songs.error.${song.error}`) : '';
   $('songAudioResult').hidden = song.status !== 'completed' || !song.audioUrl;
   if (song.audioUrl) {
     if ($('songAudio').dataset.song !== song.id) {
@@ -186,10 +225,11 @@ const showSong = (song) => {
 const loadSongs = async () => {
   const songs = await api('/api/songs');
   $('songsEmpty').hidden = songs.length > 0;
-  $('songHistory').innerHTML = songs.map((song) => `<button type="button" class="video-card" data-song-id="${escapeHtml(song.id)}">
+  $('songHistory').innerHTML = songs.map((song) => `<div class="video-card" role="button" tabindex="0" data-song-id="${escapeHtml(song.id)}">
     <div class="thumb">${icon('mic', 28)}<span class="badge ${song.status === 'completed' ? 'success' : song.status === 'failed' ? 'danger' : 'info'}">${escapeHtml(t(SONG_STATUS[song.status] ?? 'songs.status.draft'))}</span></div>
-    <div class="meta"><div class="title">${escapeHtml(song.title)}</div><div class="sub">${escapeHtml(song.style)} · ${escapeHtml(song.mood)}</div></div>
-  </button>`).join('');
+    <div class="meta"><div class="title">${escapeHtml(song.title)}</div><div class="sub"><span>${escapeHtml(song.style)} · ${escapeHtml(song.mood)}</span>
+      ${['queued', 'running'].includes(song.status) ? '' : `<button type="button" class="btn btn-ghost btn-icon btn-sm" data-song-delete="${escapeHtml(song.id)}" title="${escapeHtml(t('common.delete'))}" aria-label="${escapeHtml(t('common.delete'))}">${icon('trash', 15)}</button>`}</div></div>
+  </div>`).join('');
   if (state.song) {
     const latest = songs.find((song) => song.id === state.song.id);
     if (latest) showSong(latest);
@@ -271,13 +311,39 @@ $('songGenerate').addEventListener('click', async () => {
 });
 
 $('songHistory').addEventListener('click', async (e) => {
-  const button = e.target.closest('[data-song-id]');
-  if (!button) return;
+  const del = e.target.closest('[data-song-delete]');
+  if (del) {
+    e.stopPropagation();
+    if (!confirm(t('songs.deleteConfirm'))) return;
+    try {
+      await api(`/api/songs/${encodeURIComponent(del.dataset.songDelete)}`, { method: 'DELETE' });
+      if (state.song?.id === del.dataset.songDelete) {
+        clearTimeout(state.songPoll);
+        state.song = null;
+        $('songEditorCard').hidden = true;
+        $('songAudio').pause();
+        $('songAudio').removeAttribute('src');
+      }
+      await loadSongs();
+      toast(t('songs.deleted'), 'success');
+    } catch (err) {
+      toast(errorText(err), 'error');
+    }
+    return;
+  }
+  const card = e.target.closest('[data-song-id]');
+  if (!card) return;
   try {
-    showSong(await api(`/api/songs/${encodeURIComponent(button.dataset.songId)}`));
+    showSong(await api(`/api/songs/${encodeURIComponent(card.dataset.songId)}`));
     if (['queued', 'running'].includes(state.song.status)) pollSong(state.song.id);
   } catch (err) {
     toast(errorText(err), 'error');
+  }
+});
+$('songHistory').addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.closest('[data-song-id]') && !e.target.closest('[data-song-delete]')) {
+    e.preventDefault();
+    e.target.closest('[data-song-id]').click();
   }
 });
 
@@ -369,6 +435,14 @@ document.querySelectorAll('[data-example]').forEach((b) =>
   }),
 );
 
+$('businessModel').addEventListener('change', (e) => {
+  const model = e.currentTarget.value;
+  if (!model) return;
+  $('prompt').value = t(model);
+  $('prompt').focus();
+  e.currentTarget.value = '';
+});
+
 $('createForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('createError').hidden = true;
@@ -428,8 +502,7 @@ const openJobFromParams = async (params) => {
 };
 
 const friendlyWarning = (w) => {
-  const m = /^LLM (?:concept|script|captions) failed, using procedural \w+: (.*)$/.exec(w);
-  return m ? t('job.warn.llm', { detail: m[1] }) : w;
+  return friendlyText(w);
 };
 
 const showJob = (job) => {
@@ -440,8 +513,8 @@ const showJob = (job) => {
   $('jobBadge').innerHTML = `<span class="badge ${STATUS_BADGE[job.status] ?? ''}">${running ? '<span class="spinner" style="width:10px;height:10px;border-width:1.5px"></span>' : '<span class="dot"></span>'}${escapeHtml(t(`job.status.${job.status}`))}</span>`;
   $('jobQueue').textContent = job.status === 'queued' && job.queuePosition ? t('job.queue', { n: job.queuePosition }) : job.createdAt ? formatDate(job.createdAt) : '';
   $('jobTitle').textContent = job.title || t(`job.status.${job.status}`);
-  $('jobPrompt').textContent = job.prompt;
   $('cancelJob').hidden = !running;
+  $('retryJob').hidden = job.status !== 'failed';
   const pct = Math.round((job.overall || 0) * 100);
   $('jobProgress').hidden = job.status === 'completed';
   $('jobBar').style.width = `${pct}%`;
@@ -454,7 +527,7 @@ const showJob = (job) => {
     return `<li class="${st}"><span class="marker">${mark}</span><span class="name">${escapeHtml(t(`step.${id}`))}</span><span class="detail" title="${escapeHtml(s?.message ?? '')}">${escapeHtml(s?.message ?? '')}</span></li>`;
   }).join('');
   $('jobError').hidden = !job.error;
-  $('jobError').innerHTML = job.error ? `${icon('alert', 16)}<span>${escapeHtml(t('job.failed', { error: job.error }))}</span>` : '';
+  $('jobError').innerHTML = job.error ? `${icon('alert', 16)}<span>${escapeHtml(t('job.failed', { error: friendlyText(job.error) }))}</span>` : '';
 
   const done = job.status === 'completed' && job.videoUrl;
   $('jobResult').hidden = !done;
@@ -495,6 +568,22 @@ $('cancelJob').addEventListener('click', async () => {
   if (!state.job) return;
   await api(`/api/jobs/${state.job.id}`, { method: 'DELETE' }).catch((err) => toast(errorText(err), 'error'));
 });
+$('retryJob').addEventListener('click', async () => {
+  if (!state.job || state.job.status !== 'failed') return;
+  $('retryJob').disabled = true;
+  try {
+    const job = await post(`/api/jobs/${encodeURIComponent(state.job.id)}/retry`);
+    history.replaceState(null, '', `#create?job=${job.id}`);
+    showJob(job);
+    follow(job.id);
+    loadLibrary().catch((err) => toast(errorText(err), 'error'));
+    refreshMe().catch(() => undefined);
+  } catch (err) {
+    toast(errorText(err), 'error');
+  } finally {
+    $('retryJob').disabled = false;
+  }
+});
 
 // ---- Publishing ------------------------------------------------------------------------------
 const loadConnectionsData = async () => {
@@ -532,7 +621,7 @@ const loadJobPublications = async (jobId) => {
 };
 
 const publicationLine = (p) =>
-  `<div class="outcome">${pubBadge(p.status)}<span class="grow">${escapeHtml(p.platforms.map((x) => PLATFORMS[x] ?? x).join(', '))} · ${escapeHtml(formatDate(p.at))}${p.error ? ` · ${escapeHtml(p.error)}` : ''}</span>${(p.outcomes ?? [])
+  `<div class="outcome">${pubBadge(p.status)}<span class="grow">${escapeHtml(p.platforms.map((x) => PLATFORMS[x] ?? x).join(', '))} · ${escapeHtml(formatDate(p.at))}${p.error ? ` · ${escapeHtml(friendlyText(p.error))}` : ''}</span>${(p.outcomes ?? [])
     .filter((o) => o.url)
     .map((o) => `<a class="btn btn-ghost btn-sm" href="${escapeHtml(o.url)}" target="_blank" rel="noopener">${escapeHtml(PLATFORMS[o.platform] ?? o.platform)} ${icon('external', 14)}</a>`)
     .join('')}</div>`;
@@ -598,7 +687,7 @@ const sendPublish = async (dryRun) => {
     const result = await post(`/api/jobs/${state.publishJobId}/publish`, { platforms, captions, at, dryRun });
     if (dryRun) {
       $('publishOutcomes').innerHTML = result.outcomes
-        .map((o) => `<div class="outcome">${icon(o.ok ? 'check' : 'alert', 16)}<b>${escapeHtml(PLATFORMS[o.platform])}</b><span class="grow muted">${escapeHtml(o.message ?? '')}${(o.warnings ?? []).map((w) => ` · ${escapeHtml(w)}`).join('')}</span></div>`)
+        .map((o) => `<div class="outcome">${icon(o.ok ? 'check' : 'alert', 16)}<b>${escapeHtml(PLATFORMS[o.platform])}</b><span class="grow muted">${escapeHtml(friendlyText(o.message))}${(o.warnings ?? []).map((w) => ` · ${escapeHtml(friendlyText(w))}`).join('')}</span></div>`)
         .join('');
     } else {
       toast(t(at ? 'publish.scheduled' : 'publish.queued'), 'success');
@@ -637,7 +726,12 @@ $('videoGrid').addEventListener('click', async (e) => {
   if (del) {
     e.stopPropagation();
     if (!confirm(t('library.delete'))) return;
-    await api(`/api/jobs/${del.dataset.delete}?remove=1`, { method: 'DELETE' }).catch((err) => toast(errorText(err), 'error'));
+    try {
+      await api(`/api/jobs/${del.dataset.delete}?remove=1`, { method: 'DELETE' });
+    } catch (err) {
+      toast(errorText(err), 'error');
+      return;
+    }
     if (state.job?.id === del.dataset.delete) {
       state.job = null;
       $('jobCard').hidden = true;
@@ -670,7 +764,7 @@ const loadSchedule = async () => {
         <td>${escapeHtml(formatDate(p.at))}</td>
         <td><a href="#create?job=${escapeHtml(p.jobId)}">${escapeHtml(p.jobTitle ?? p.jobId)}</a></td>
         <td><div class="input-group">${p.platforms.map((x) => `<span title="${escapeHtml(PLATFORMS[x] ?? x)}">${icon(x, 16)}</span>`).join('')}</div></td>
-        <td>${pubBadge(p.status)}${p.error ? `<div class="hint">${escapeHtml(p.error)}</div>` : ''}${(p.outcomes ?? []).filter((o) => !o.ok).map((o) => `<div class="hint">${escapeHtml(PLATFORMS[o.platform])} : ${escapeHtml(o.message ?? '')}</div>`).join('')}</td>
+        <td>${pubBadge(p.status)}${p.error ? `<div class="hint">${escapeHtml(friendlyText(p.error))}</div>` : ''}${(p.outcomes ?? []).filter((o) => !o.ok).map((o) => `<div class="hint">${escapeHtml(PLATFORMS[o.platform])} : ${escapeHtml(friendlyText(o.message))}</div>`).join('')}</td>
         <td style="text-align:right">${(p.outcomes ?? []).filter((o) => o.url).map((o) => `<a class="btn btn-ghost btn-sm" href="${escapeHtml(o.url)}" target="_blank" rel="noopener">${escapeHtml(t('pub.view'))} ${icon('external', 14)}</a>`).join('')}
           ${p.status === 'pending' ? `<button type="button" class="btn btn-secondary btn-sm" data-cancel-pub="${escapeHtml(p.id)}">${escapeHtml(t('common.cancel'))}</button>` : ''}</td>
       </tr>`,
@@ -690,7 +784,7 @@ const loadConnections = async (params) => {
     toast(t('conn.success'), 'success');
     history.replaceState(null, '', '#connections');
   } else if (params?.get('error')) {
-    toast(t('conn.failed', { error: params.get('error') }), 'error');
+    toast(t('conn.failed', { error: friendlyText(params.get('error')) }), 'error');
     history.replaceState(null, '', '#connections');
   }
   const data = await loadConnectionsData().catch(() => null);
@@ -712,7 +806,7 @@ const loadConnections = async (params) => {
           <span class="hint">${escapeHtml(c.instagram ? t('conn.instagram', { name: c.instagram }) : t('conn.noInstagram'))}</span></label>`;
       }
       const action = !available
-        ? `<span class="hint">${escapeHtml(t('conn.unavailable'))}</span>`
+        ? `<div class="provider-unavailable"><span class="hint">${escapeHtml(t('conn.unavailable'))}</span><a class="btn btn-secondary btn-sm" href="${escapeHtml(info.setupUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(t('conn.configureApp'))}${icon('external', 14)}</a><span class="hint">${escapeHtml(t('conn.configureHint'))}</span></div>`
         : c
           ? `<button type="button" class="btn btn-secondary btn-sm" data-connect="${id}" ${canPublish ? '' : 'disabled'}>${escapeHtml(t('conn.reconnect'))}</button><button type="button" class="btn btn-danger-ghost btn-sm" data-disconnect="${id}">${escapeHtml(t('conn.disconnect'))}</button>`
           : `<button type="button" class="btn btn-primary btn-sm" data-connect="${id}" ${canPublish ? '' : 'disabled'}>${icon('link', 15)}${escapeHtml(t('conn.connect'))}</button>`;
@@ -1022,9 +1116,26 @@ $('deleteAccount').addEventListener('click', async () => {
 });
 
 // ---- Admin ----------------------------------------------------------------------------------
+const renderAdminSettings = (settings) => {
+  if (settings.error) {
+    $('adminSettings').innerHTML = `<div class="alert warning">${escapeHtml(friendlyText(settings.error))}</div>`;
+    return;
+  }
+  $('adminSettings').innerHTML = settings.groups.map(renderSettingGroup).join('');
+};
+
+const adminResult = (request) => request.then((value) => ({ value })).catch((err) => ({ error: errorText(err) }));
+
 const loadAdmin = async () => {
-  const [stats, users, settings] = await Promise.all([api('/api/admin/stats').catch(() => null), api('/api/admin/users').catch(() => []), api('/api/admin/settings').catch((err) => ({ error: errorText(err) }))]);
-  if (stats) {
+  const [statsResult, usersResult, settingsResult] = await Promise.all([
+    adminResult(api('/api/admin/stats')),
+    adminResult(api('/api/admin/users')),
+    adminResult(api('/api/admin/settings')),
+  ]);
+  if ('error' in statsResult) {
+    $('adminStats').innerHTML = `<div class="alert danger">${escapeHtml(friendlyText(statsResult.error))}</div>`;
+  } else {
+    const stats = statsResult.value;
     $('adminStats').innerHTML = [
       ['admin.stats.users', stats.users],
       ['admin.stats.paying', stats.paying],
@@ -1036,29 +1147,30 @@ const loadAdmin = async () => {
       .join('');
   }
   const planIds = (state.publicConfig?.plans ?? []).map((p) => p.id);
-  $('adminUsers').innerHTML = users
-    .map(
-      (u) => `<tr>
+  $('adminUsers').innerHTML = 'error' in usersResult
+    ? `<tr><td colspan="5"><div class="alert danger">${escapeHtml(friendlyText(usersResult.error))}</div></td></tr>`
+    : usersResult.value
+      .map((u) => `<tr>
         <td><b>${escapeHtml(u.name || u.email.split('@')[0])}</b><div class="hint">${escapeHtml(u.email)}</div></td>
         <td><select class="select" data-user="${escapeHtml(u.id)}" data-field="plan">${planIds.map((p) => `<option value="${p}" ${u.plan === p ? 'selected' : ''}>${escapeHtml(t(`plan.${p}`))}</option>`).join('')}</select>${u.subscriptionStatus ? `<div class="hint">Stripe : ${escapeHtml(u.subscriptionStatus)}</div>` : ''}</td>
         <td><select class="select" data-user="${escapeHtml(u.id)}" data-field="role" ${u.id === state.me.user.id ? 'disabled' : ''}><option value="user" ${u.role === 'user' ? 'selected' : ''}>user</option><option value="admin" ${u.role === 'admin' ? 'selected' : ''}>admin</option></select></td>
         <td>${u.videosThisMonth}</td>
         <td>${escapeHtml(formatDate(u.createdAt, false))}</td>
-      </tr>`,
-    )
-    .join('');
-  const payments = await api('/api/admin/payments').catch(() => []);
-  $('adminPaymentsCard').hidden = !payments.length;
-  $('adminPaymentRows').innerHTML = payments
-    .slice(0, 50)
-    .map((p) => `<tr><td>${escapeHtml(formatDate(p.createdAt))}</td><td>${escapeHtml(p.email ?? '')}</td><td>${escapeHtml(p.credits ? t('credits.bought', { n: p.credits }) : t(`plan.${p.plan}`))}</td><td>${escapeHtml(t(`pay.provider.${p.provider}`))}</td><td>${escapeHtml(formatMoney(p.amount, p.currency))}</td><td>${payBadge(p.status)}</td></tr>`)
-    .join('');
-  if (settings.error) {
-    $('adminSettings').innerHTML = `<div class="alert warning">${escapeHtml(settings.error)}</div>`;
-    return;
+      </tr>`)
+      .join('');
+  const paymentsResult = await adminResult(api('/api/admin/payments'));
+  $('adminPaymentsCard').hidden = !('error' in paymentsResult) && !paymentsResult.value.length;
+  $('adminPaymentRows').innerHTML = 'error' in paymentsResult
+    ? `<tr><td colspan="6"><div class="alert danger">${escapeHtml(friendlyText(paymentsResult.error))}</div></td></tr>`
+    : paymentsResult.value
+      .slice(0, 50)
+      .map((p) => `<tr><td>${escapeHtml(formatDate(p.createdAt))}</td><td>${escapeHtml(p.email ?? '')}</td><td>${escapeHtml(p.credits ? t('credits.bought', { n: p.credits }) : t(`plan.${p.plan}`))}</td><td>${escapeHtml(t(`pay.provider.${p.provider}`))}</td><td>${escapeHtml(formatMoney(p.amount, p.currency))}</td><td>${payBadge(p.status)}</td></tr>`)
+      .join('');
+  const settings = 'error' in settingsResult ? { error: settingsResult.error } : settingsResult.value;
+  if (!settings.error) {
+    $('adminServicesText').innerHTML = escapeHtml(t('admin.servicesText', { file: '\u0000' })).replace('\u0000', `<code>${escapeHtml(settings.envFile)}</code>`);
   }
-  $('adminServicesText').innerHTML = escapeHtml(t('admin.servicesText', { file: '\u0000' })).replace('\u0000', `<code>${escapeHtml(settings.envFile)}</code>`);
-  $('adminSettings').innerHTML = settings.groups.map(renderSettingGroup).join('');
+  renderAdminSettings(settings);
 };
 
 $('adminUsers').addEventListener('change', async (e) => {
@@ -1077,10 +1189,11 @@ const en = () => getLang() === 'en';
 const groupText = (g) => (en() && SETTINGS_EN.groups[g.id] ? { title: SETTINGS_EN.groups[g.id][0], description: SETTINGS_EN.groups[g.id][1] } : { title: g.title, description: g.description });
 
 const renderSettingGroup = (g) => {
-  const configured = g.fields.filter((f) => f.configured && (f.secret || f.credential)).length;
+  const configuredFields = g.configuredFields ?? [];
+  const configured = configuredFields.length;
   const text = groupText(g);
   return `<form class="card settings-card" data-group="${escapeHtml(g.id)}">
-    <div class="card-header"><div><h2>${escapeHtml(text.title)}</h2><p>${escapeHtml(text.description)}</p></div>${configured ? `<span class="badge success">${escapeHtml(t('admin.configured', { n: configured }))}</span>` : ''}</div>
+    <div class="card-header"><div><h2>${escapeHtml(text.title)}</h2><p>${escapeHtml(text.description)}</p>${configured ? `<div class="settings-configured" aria-label="${escapeHtml(t('admin.configured'))}">${configuredFields.map((label) => `<span class="badge success">${escapeHtml(label)} · ${escapeHtml(t('admin.configuredKey'))}</span>`).join('')}</div>` : ''}</div>${configured ? `<span class="badge success">${escapeHtml(t('admin.configured', { n: configured }))}</span>` : ''}</div>
     <div class="card-body">${g.fields.map(renderSettingField).join('')}</div>
     <div class="card-footer"><button type="submit" class="btn btn-primary btn-sm">${escapeHtml(t('common.save'))}</button></div>
   </form>`;
@@ -1095,7 +1208,7 @@ const renderSettingField = (f) => {
     const opts = [...(values.includes(f.value) || !f.value ? [] : [{ value: f.value, label: f.value }]), ...f.options];
     input = `<select class="select" data-key="${escapeHtml(f.key)}">${opts.map((o) => `<option value="${escapeHtml(o.value)}" ${o.value === f.value ? 'selected' : ''}>${escapeHtml((en() && SETTINGS_EN.options[`${f.key}:${o.value}`]) || o.label)}</option>`).join('')}</select>`;
   } else if (f.secret) {
-    input = `<div class="input-group"><input class="input" type="password" autocomplete="off" data-key="${escapeHtml(f.key)}" placeholder="${escapeHtml(f.configured ? t('admin.keep') : t('admin.paste'))}" />${f.configured ? `<button type="button" class="btn btn-ghost btn-icon btn-sm" data-clear="${escapeHtml(f.key)}" title="${escapeHtml(t('common.delete'))}">${icon('x', 15)}</button>` : ''}</div>`;
+    input = `<div class="input-group"><div class="password-input-group"><input class="input" type="password" autocomplete="new-password" data-key="${escapeHtml(f.key)}" placeholder="${escapeHtml(f.configured ? t('admin.keep') : t('admin.paste'))}" /><button type="button" class="btn btn-ghost btn-icon btn-sm" data-toggle-password aria-label="${escapeHtml(t('admin.showPassword'))}" aria-pressed="false" title="${escapeHtml(t('admin.showPassword'))}">${icon('eye', 16)}</button></div>${f.configured ? `<button type="button" class="btn btn-ghost btn-icon btn-sm" data-clear="${escapeHtml(f.key)}" title="${escapeHtml(t('common.delete'))}">${icon('x', 15)}</button>` : ''}</div>`;
   } else {
     input = `<input class="input" data-key="${escapeHtml(f.key)}" value="${escapeHtml(f.value)}" placeholder="${escapeHtml(f.placeholder ?? '')}" />`;
   }
@@ -1103,28 +1216,41 @@ const renderSettingField = (f) => {
 };
 
 const putSettings = async (updates) => {
-  await api('/api/admin/settings', { method: 'PUT', body: JSON.stringify(updates) });
-  await loadOptions().catch(() => undefined);
-  await loadConnectionsData().catch(() => undefined);
-  loadAdmin();
+  const saved = await api('/api/admin/settings', { method: 'PUT', body: JSON.stringify(updates) });
+  renderAdminSettings(saved);
+  const results = await Promise.allSettled([loadOptions(), loadConnectionsData()]);
+  const failed = results.find((result) => result.status === 'rejected');
+  return failed?.status === 'rejected' ? errorText(failed.reason) : null;
 };
 $('adminSettings').addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.target.closest('form');
   const updates = Object.fromEntries([...form.querySelectorAll('[data-key]')].map((el) => [el.dataset.key, el.value]));
   try {
-    await putSettings(updates);
-    toast(t('common.saved'), 'success');
+    const refreshError = await putSettings(updates);
+    toast(refreshError ? t('admin.savedRefreshFailed', { error: refreshError }) : t('common.saved'), refreshError ? 'error' : 'success');
     if (updates.VIDEO_AGENT_WEB_PASSWORD) setTimeout(() => location.reload(), 1200);
   } catch (err) {
     toast(errorText(err), 'error');
   }
 });
 $('adminSettings').addEventListener('click', async (e) => {
+  const toggle = e.target.closest('[data-toggle-password]');
+  if (toggle) {
+    const input = toggle.parentElement.querySelector('input[data-key]');
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    toggle.innerHTML = icon(show ? 'eyeOff' : 'eye', 16);
+    toggle.setAttribute('aria-pressed', String(show));
+    toggle.setAttribute('aria-label', t(show ? 'admin.hidePassword' : 'admin.showPassword'));
+    toggle.title = t(show ? 'admin.hidePassword' : 'admin.showPassword');
+    return;
+  }
   const b = e.target.closest('[data-clear]');
   if (!b || !confirm(t('admin.clearConfirm', { key: b.dataset.clear }))) return;
   try {
-    await putSettings({ [b.dataset.clear]: null });
+    const refreshError = await putSettings({ [b.dataset.clear]: null });
+    toast(refreshError ? t('admin.savedRefreshFailed', { error: refreshError }) : t('common.saved'), refreshError ? 'error' : 'success');
   } catch (err) {
     toast(errorText(err), 'error');
   }
@@ -1147,6 +1273,7 @@ onLanguageChange((lang) => {
 // ---- Boot -----------------------------------------------------------------------------------------
 initChrome();
 renderIcons();
+addPasswordVisibilityControls();
 (async () => {
   state.publicConfig = await api('/api/public/config').catch(() => null);
   try {

@@ -18,6 +18,7 @@ const ICONS = {
   download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
   send: '<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/>',
   eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff: '<path d="m3 3 18 18"/><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"/><path d="M9.9 5.2A11 11 0 0 1 12 5c6.5 0 10 7 10 7a15 15 0 0 1-4 4.8M6.2 6.2C3.5 8 2 12 2 12s3.5 7 10 7c1 0 1.9-.2 2.8-.5"/>',
   edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>',
   file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>',
   x: '<path d="M18 6 6 18M6 6l12 12"/>',
@@ -136,7 +137,31 @@ export const api = async (path, init = {}) => {
 };
 export const post = (path, body) => api(path, { method: 'POST', body: JSON.stringify(body ?? {}) });
 
-/** Translated message for an API error (known codes), else the server message. */
+/** Replace provider diagnostics with a short, actionable message before showing text to users. */
+export const friendlyText = (value) => {
+  const message = String(value ?? '').trim();
+  if (!message) return t('common.error');
+  const lower = message.toLowerCase();
+  const paidPlan = /paid_plan_required|payment_required|paid plan|required.*subscription|http\s*402/.test(lower);
+  if (/voice-over disabled/.test(lower)) return t('job.warn.voiceDisabled');
+  if (/voice-over failed/.test(lower)) return t(paidPlan ? 'job.warn.voicePaid' : 'job.warn.voiceFailed');
+  if (/ai music unavailable/.test(lower)) return t(paidPlan ? 'job.warn.musicPaid' : 'job.warn.musicFallback');
+  if (/llm (concept|script|captions) failed/.test(lower)) return t('job.warn.llm');
+  if (paidPlan) {
+    if (/voice|elevenlabs/.test(lower) && !/music/.test(lower)) return t('job.warn.voicePaid');
+    if (/music/.test(lower)) return t('job.warn.musicPaid');
+    return t('error.paidPlan');
+  }
+  if (/failed to fetch|networkerror|network request failed|econnreset|econnrefused|enotfound|etimedout/.test(lower)) return t('error.network');
+  if (/\[[\w-]+\].*(http\s*[45]\d\d|request failed)|http\s*[45]\d\d|"request_id"|"detail"\s*:|"type"\s*:|stack trace| at \w+ \(/i.test(message) || /\[[\w-]+\]/.test(message)) {
+    if (/music/.test(lower)) return t('job.warn.musicFallback');
+    if (/voice/.test(lower)) return t('job.warn.voiceFailed');
+    return t('error.technical');
+  }
+  return message;
+};
+
+/** Translated message for an API error (known codes), else a safe server message. */
 export const errorText = (err) => {
   if (err instanceof ApiError && err.code) {
     const key = `err.${err.code}`;
@@ -144,7 +169,7 @@ export const errorText = (err) => {
     const text = t(key, params);
     if (text !== key) return text;
   }
-  return err?.message || t('common.error');
+  return friendlyText(err?.message);
 };
 
 // ---- Toasts ---------------------------------------------------------------------------

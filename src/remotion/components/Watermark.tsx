@@ -49,7 +49,7 @@ export const Watermark: React.FC<{ storyboard: Storyboard }> = ({ storyboard }) 
   );
 };
 
-/** Plan badge ("Made with Video Agent") in the top-right corner, away from the subtitles. */
+/** Plan badge ("Made with SOVID AI") in the top-right corner, away from the subtitles. */
 export const PlanBadge: React.FC<{ storyboard: Storyboard }> = ({ storyboard }) => {
   const layout = useLayout();
   const { brand, theme } = storyboard;

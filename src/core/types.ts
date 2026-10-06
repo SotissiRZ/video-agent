@@ -33,7 +33,7 @@ export interface VideoOptions {
   offline?: boolean;
   /** Upper bound for the duration (plan limit), applied after prompt parsing. */
   maxDurationSec?: number;
-  /** Small badge shown in a corner of the video (e.g. free plan: "Made with Video Agent"). */
+  /** Small badge shown in a corner of the video (e.g. free plan: "Made with SOVID AI"). */
   badge?: string;
   /** Brand kit: name used when the prompt names no brand, colours (#RRGGBB), logo file (absolute path). */
   brandName?: string;
