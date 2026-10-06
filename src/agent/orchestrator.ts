@@ -9,6 +9,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { synthesizeMusic } from '../audio/music';
+import { buildMusicPrompt } from '../providers/music/prompt';
+import { resolveMusicProvider } from '../providers/music/registry';
+import type { MusicProvider } from '../providers/music/types';
 import { AssetLibrary, importAsset } from '../assets/manager';
 import type { AppConfig } from '../config/config';
 import { errorMessage, StoryboardValidationError } from '../core/errors';
@@ -57,6 +60,8 @@ export interface AgentDependencies {
   /** `null` forces procedural planning. `undefined` = resolve from configuration. */
   llm?: LLMProvider | null;
   voice?: VoiceProvider | null;
+  /** AI music. `undefined` = from VIDEO_AGENT_MUSIC_PROVIDER. */
+  music?: MusicProvider | null;
   image?: ImageProvider | null;
   video?: VideoProvider | null;
   stock?: StockProvider[];
@@ -318,7 +323,7 @@ export class VideoAgent {
           if (sb.scenes.some((s) => s.voiceover)) sb = paceScenesToVoiceover(sb, { targetFrames: Math.round(targetSec * sb.format.fps), minFill: script ? 1 : undefined });
         }
         if (brief.music) {
-          const music = this.prepareMusic(sb, brief, paths, style.theme.motion, style.id === 'elegant');
+          const music = await this.prepareMusic(sb, brief, paths, style.theme.motion, style.id === 'elegant', warnings, progress, signal);
           if (music) {
             musicSource = music.source;
             sb = { ...sb, audio: { music: { src: music.src, volume: voiceProvider ? 0.3 : 0.45, duckedVolume: 0.1 } } };
@@ -475,7 +480,16 @@ export class VideoAgent {
     return { ...storyboard, scenes };
   }
 
-  private prepareMusic(storyboard: Storyboard, brief: VideoBrief, paths: JobPaths, mood: 'calm' | 'normal' | 'energetic', minor: boolean): { src: string; source: string } | undefined {
+  private async prepareMusic(
+    storyboard: Storyboard,
+    brief: VideoBrief,
+    paths: JobPaths,
+    mood: 'calm' | 'normal' | 'energetic',
+    minor: boolean,
+    warnings: string[],
+    progress: (p: number, msg?: string) => void,
+    signal?: AbortSignal,
+  ): Promise<{ src: string; source: string } | undefined> {
     const mode = this.config.env.VIDEO_AGENT_MUSIC;
     if (mode === 'none') return undefined;
     if (mode === 'assets' || mode === 'auto') {
@@ -483,11 +497,26 @@ export class VideoAgent {
         const track = AssetLibrary.load(this.config.paths.assets).music([brief.styleId, mood, ...brief.keywords]);
         if (track) return { src: importAsset(track.file, paths.publicDir, 'music'), source: `asset:${track.relative}` };
       } catch {
-        /* fall through to procedural */
+        /* fall through */
       }
       if (mode === 'assets') return undefined;
     }
     const durationSec = storyboard.format.durationInFrames / storyboard.format.fps;
+    // An original track composed for this video; procedural synthesis when unavailable.
+    const ai = this.deps.music !== undefined ? this.deps.music : safeResolve(() => resolveMusicProvider(this.config), warnings);
+    if (ai) {
+      try {
+        progress(0.9, `composition de la musique (${ai.id})`);
+        const prompt = buildMusicPrompt({ prompt: brief.prompt, mood, minor });
+        const track = await ai.generate({ prompt, durationSec: Math.min(ai.maxDurationSec, Math.ceil(durationSec) + 2), signal });
+        const file = `music/generated.${track.extension}`;
+        fs.writeFileSync(path.join(paths.publicDir, file), track.audio);
+        return { src: file, source: `ia:${ai.id}` };
+      } catch (err) {
+        if (signal?.aborted) throw err;
+        warnings.push(`AI music unavailable, using synthesized music: ${errorMessage(err)}`);
+      }
+    }
     const seed = [...brief.prompt].reduce((s, c) => (s + c.charCodeAt(0)) % 997, 0);
     fs.writeFileSync(path.join(paths.publicDir, 'music', 'procedural.wav'), synthesizeMusic({ durationSec, mood, minor, seed }));
     return { src: 'music/procedural.wav', source: `procedural (${mood})` };

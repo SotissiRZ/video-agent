@@ -15,6 +15,7 @@ export const IMAGE_PROVIDER_IDS = ['auto', 'none', 'cloudflare', 'huggingface', 
 export const VOICE_PROVIDER_IDS = ['auto', 'none', 'openai', 'elevenlabs', 'piper', 'system'] as const;
 export const VIDEO_PROVIDER_IDS = ['none', 'replicate'] as const;
 export const MUSIC_MODES = ['auto', 'procedural', 'assets', 'none'] as const;
+export const MUSIC_PROVIDER_IDS = ['none', 'auto', 'elevenlabs', 'stability', 'replicate'] as const;
 
 const emptyToUndefined = (v: unknown) => (typeof v === 'string' && v.trim() === '' ? undefined : v);
 const optionalString = z.preprocess(emptyToUndefined, z.string().trim().optional());
@@ -105,6 +106,8 @@ const EnvSchema = z.object({
 
   // --- Music -----------------------------------------------------------
   VIDEO_AGENT_MUSIC: enumWithDefault(MUSIC_MODES, 'auto'),
+  VIDEO_AGENT_MUSIC_PROVIDER: enumWithDefault(MUSIC_PROVIDER_IDS, 'none'),
+  REPLICATE_MUSIC_MODEL: z.preprocess(emptyToUndefined, z.string().default('meta/musicgen:671ac645ce5e552cc63a54a2bbff63fcf798043055d2dac5fc9e36a837eedcfb')),
 
   // --- Paths & defaults --------------------------------------------------
   VIDEO_AGENT_OUTPUT_DIR: z.preprocess(emptyToUndefined, z.string().default('output')),

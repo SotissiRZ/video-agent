@@ -92,6 +92,7 @@ export const SETTING_GROUPS: SettingGroup[] = [
     description: 'Valeurs par défaut des vidéos.',
     fields: [
       { key: 'VIDEO_AGENT_MUSIC', label: 'Musique', options: opt(['auto', 'Vos pistes (assets/music) sinon synthèse'], ['procedural', 'Synthèse automatique'], ['assets', 'Vos pistes uniquement'], ['none', 'Aucune']) },
+      { key: 'VIDEO_AGENT_MUSIC_PROVIDER', label: 'Musique composée par IA', options: opt(['none', 'Désactivée'], ['auto', 'Automatique (selon les clés)'], ['elevenlabs', 'ElevenLabs Music'], ['stability', 'Stable Audio (Stability AI)'], ['replicate', 'MusicGen (Replicate)']), help: 'Une musique originale, adaptée au sujet et à l’ambiance demandée, est composée pour chaque vidéo. Payant chez le fournisseur ; en cas d’échec la synthèse automatique prend le relais.' },
       { key: 'VIDEO_AGENT_SUBTITLES', label: 'Sous-titres par défaut', options: opt(['true', 'Oui'], ['false', 'Non']) },
       { key: 'VIDEO_AGENT_RENDER_CONCURRENCY', label: 'Images rendues en parallèle', placeholder: 'auto (moitié des cœurs)', help: 'Augmentez jusqu’au nombre de cœurs du processeur pour accélérer le rendu (plus de mémoire utilisée).' },
       { key: 'VIDEO_AGENT_X264_PRESET', label: 'Vitesse d’encodage MP4', options: opt(['veryfast', 'Rapide (recommandé)'], ['ultrafast', 'Très rapide (fichiers plus lourds)'], ['medium', 'Équilibré'], ['slow', 'Lent (fichiers plus légers)']) },
