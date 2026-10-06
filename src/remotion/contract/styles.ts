@@ -6,6 +6,10 @@ import type { Background, Entrance, Theme, TransitionType } from './storyboard';
 
 export const HEADING_FONT = 'Montserrat';
 export const BODY_FONT = 'Inter';
+/** Latin Extended (African languages) and Arabic faces, used glyph by glyph after the main font. */
+export const HEADING_FONT_EXT = 'Montserrat Ext';
+export const BODY_FONT_EXT = 'Inter Ext';
+export const ARABIC_FONT = 'Noto Sans Arabic';
 const FALLBACK = "'Segoe UI', 'Helvetica Neue', Arial, sans-serif";
 
 export interface StyleDefinition {
@@ -23,8 +27,8 @@ export interface StyleDefinition {
 
 const theme = (id: string, partial: Omit<Theme, 'id' | 'headingFont' | 'bodyFont'> & Partial<Theme>): Theme => ({
   id,
-  headingFont: `'${HEADING_FONT}', ${FALLBACK}`,
-  bodyFont: `'${BODY_FONT}', ${FALLBACK}`,
+  headingFont: `'${HEADING_FONT}', '${HEADING_FONT_EXT}', '${ARABIC_FONT}', ${FALLBACK}`,
+  bodyFont: `'${BODY_FONT}', '${BODY_FONT_EXT}', '${ARABIC_FONT}', ${FALLBACK}`,
   ...partial,
 });
 

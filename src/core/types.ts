@@ -50,6 +50,8 @@ export interface VideoRequest {
 export interface ParsedPrompt {
   raw: string;
   language: 'fr' | 'en';
+  /** Language explicitly asked for in the prompt ("en wolof"), a code of core/languages. */
+  locale?: string;
   durationSec?: number;
   format?: { id: string; width: number; height: number };
   fps?: number;
@@ -71,7 +73,10 @@ export interface ParsedPrompt {
 /** Fully resolved brief: the parsed prompt merged with options and configuration defaults. */
 export interface VideoBrief {
   prompt: string;
+  /** Base language: offline copywriting, captions. */
   language: 'fr' | 'en';
+  /** Language of the on-screen text, narration and voice (fr, en, ar, wo, sw...). */
+  locale: string;
   durationSec: number;
   fps: number;
   width: number;

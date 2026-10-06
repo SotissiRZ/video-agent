@@ -1,4 +1,5 @@
 /** LLM-backed creative planning (concept, then script), constrained by the template blueprint. */
+import { getLanguage } from '../core/languages';
 import type { PlannedScene, VideoBrief, VideoConcept } from '../core/types';
 import { generateJson } from '../llm/json';
 import type { LLMProvider } from '../llm/types';
@@ -6,7 +7,6 @@ import type { TemplateDefinition } from '../templates/types';
 import { CONCEPT_JSON_SCHEMA, ConceptSchema, SCRIPT_JSON_SCHEMA, ScriptSchema } from './schemas';
 import type { SceneSlot } from './slots';
 
-const LANGUAGE_NAMES: Record<string, string> = { fr: 'French', en: 'English' };
 
 const SYSTEM = `You are the creative director and copywriter of an automated video studio.
 You write short, high-impact copy for animated motion-design videos rendered with Remotion.
@@ -21,7 +21,9 @@ Rules:
 const briefSummary = (brief: VideoBrief, template: TemplateDefinition): string =>
   [
     `Brief: "${brief.prompt}"`,
-    `Language: ${LANGUAGE_NAMES[brief.language] ?? brief.language}`,
+    `Language: ${getLanguage(brief.locale)?.name ?? brief.locale}`,
+    brief.locale !== brief.language &&
+      `Write every headline, list item, call to action and narration in ${getLanguage(brief.locale)?.name ?? brief.locale} (the brief may be in another language). Keep brand names, URLs and phone numbers unchanged. Use the spelling native speakers use on social media; the narration is read by a text-to-speech voice, so avoid abbreviations.`,
     `Duration: ${brief.durationSec} seconds, format ${brief.width}x${brief.height} (${brief.formatId})`,
     brief.brand && `Brand / product: ${brief.brand}`,
     brief.audience && `Audience: ${brief.audience}`,

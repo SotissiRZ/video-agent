@@ -3,6 +3,7 @@
  * Natural French and English voices, very fast on CPU. The binary and voices are
  * pre-installed in the Docker image, or downloaded once into PIPER_DATA_DIR.
  */
+import { getLanguage } from '../../core/languages';
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -84,8 +85,13 @@ export class PiperVoiceProvider implements VoiceProvider {
     return this.installing;
   }
 
+  supports(language: string): boolean {
+    return ['fr', 'en'].includes(language) || Boolean(getLanguage(language)?.piper);
+  }
+
   private async voiceModel(language: string, signal?: AbortSignal): Promise<string> {
-    const voice = language === 'fr' ? this.o.voices.fr : this.o.voices.en;
+    const voice = language === 'fr' ? this.o.voices.fr : language === 'en' ? this.o.voices.en : getLanguage(language)?.piper;
+    if (!voice) throw new ProviderError(this.id, `no Piper voice for "${language}"`);
     if (voice.endsWith('.onnx')) {
       if (!fs.existsSync(voice)) throw new ProviderError(this.id, `voice model not found: ${voice}`);
       return voice;

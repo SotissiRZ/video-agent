@@ -8,6 +8,8 @@ import { FORMAT_PRESETS, resolveFormat } from '../core/formats';
 import type { ParsedPrompt } from '../core/types';
 
 /** Lower-case and strip accents. */
+import { detectRequestedLanguage } from '../core/languages';
+
 export const normalize = (s: string): string =>
   s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
@@ -247,12 +249,14 @@ export const parsePrompt = (raw: string): ParsedPrompt => {
   const text = raw.trim();
   const t = normalize(text);
   const language = detectLanguage(text);
+  const locale = detectRequestedLanguage(t);
   const location = parseLocation(text);
   const brand = parseBrand(text, location?.name);
   const { format, platform } = parseFormat(text);
   return {
     raw: text,
     language,
+    locale,
     durationSec: parseDuration(text),
     format,
     fps: parseFps(text),

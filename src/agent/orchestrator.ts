@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { synthesizeMusic } from '../audio/music';
+import { getLanguage } from '../core/languages';
 import { buildMusicPrompt } from '../providers/music/prompt';
 import { resolveMusicProvider } from '../providers/music/registry';
 import type { MusicProvider } from '../providers/music/types';
@@ -173,7 +174,7 @@ export class VideoAgent {
         return { brief, template: getTemplate(brief.templateId)!, style, structured };
       },
       ({ brief }) =>
-        `${brief.templateId} · ${brief.width}×${brief.height} · ${brief.durationSec}s · ${brief.fps} fps · style ${brief.styleId} · ${brief.language}` +
+        `${brief.templateId} · ${brief.width}×${brief.height} · ${brief.durationSec}s · ${brief.fps} fps · style ${brief.styleId} · ${brief.locale}` +
         (brief.brand ? ` · marque ${brief.brand}` : '') +
         (brief.audience ? ` · cible ${brief.audience}` : ''),
     );
@@ -227,6 +228,10 @@ export class VideoAgent {
         const r = await planner.script(brief, template, concept, slots, signal);
         if (r.warning) warnings.push(r.warning);
         scriptSource = r.source;
+        if (r.source === 'procedural' && brief.locale !== brief.language) {
+          warnings.push(`${getLanguage(brief.locale)?.name ?? brief.locale} needs an AI model (LLM) to write the texts: video written in ${brief.language === 'fr' ? 'French' : 'English'}.`);
+          brief.locale = brief.language;
+        }
         return r.value;
       },
       (s) => `${s.length} scènes écrites`,
@@ -307,7 +312,13 @@ export class VideoAgent {
     // ---- 9. Voice-over & music ---------------------------------------------------------
     let voiceProvider: VoiceProvider | null = null;
     if (brief.voice) {
-      voiceProvider = this.deps.voice !== undefined ? this.deps.voice : safeResolve(() => resolveVoiceProvider(this.config), warnings);
+      voiceProvider = this.deps.voice !== undefined ? this.deps.voice : safeResolve(() => resolveVoiceProvider(this.config, undefined, brief.locale), warnings);
+      if (voiceProvider?.supports?.(brief.locale) === false) {
+        const other = this.deps.voice !== undefined ? null : safeResolve(() => resolveVoiceProvider(this.config, 'auto', brief.locale), warnings);
+        const name = getLanguage(brief.locale)?.name ?? brief.locale;
+        warnings.push(other ? `voice ${voiceProvider.id} cannot speak ${name}: using ${other.id}` : `no voice available for ${name} (set HF_TOKEN for the experimental MMS voices): video without voice-over`);
+        voiceProvider = other;
+      }
     }
     let musicSource = 'none';
     storyboard = await step(
@@ -459,7 +470,7 @@ export class VideoAgent {
       progress(i / scenes.length, `Voix-off ${i + 1}/${scenes.length}`);
       const outFile = path.join(paths.publicDir, 'voice', `${scene.id}.wav`);
       try {
-        let { durationSec } = await provider.synthesize({ text, language: brief.language, outFile, signal });
+        let { durationSec } = await provider.synthesize({ text, language: brief.locale, outFile, signal });
         // TTS engines pad sentences with silence: trim it so the voice starts right on cue.
         if (fs.existsSync(outFile)) {
           const trimmed = trimWavSilence(fs.readFileSync(outFile));

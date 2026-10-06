@@ -1,5 +1,6 @@
 import type { AppConfig } from '../config/config';
 import { ConfigError } from '../core/errors';
+import { getLanguage } from '../core/languages';
 import { normalizeResolution, resolveFormat } from '../core/formats';
 import type { ParsedPrompt, VideoBrief, VideoOptions } from '../core/types';
 import { DEFAULT_STYLE_ID, STYLES } from '../remotion/contract/styles';
@@ -34,12 +35,18 @@ export const buildBrief = (parsed: ParsedPrompt, options: VideoOptions, config: 
   styleId ??= parsed.styleHints[0] ?? template.defaultStyle ?? DEFAULT_STYLE_ID;
 
   const configuredLanguage = env.VIDEO_AGENT_LANGUAGE === 'auto' ? undefined : env.VIDEO_AGENT_LANGUAGE;
-  const language = (options.language && options.language !== 'auto' ? options.language : configuredLanguage) ?? parsed.language;
-  if (language !== 'fr' && language !== 'en') notes.push(`language "${language}" not supported by offline copywriting; falling back to the LLM or English`);
+  const requested = (options.language && options.language !== 'auto' ? options.language : undefined) ?? parsed.locale ?? configuredLanguage ?? parsed.language;
+  const info = getLanguage(requested);
+  if (!info) notes.push(`unknown language "${requested}"; using ${parsed.language}`);
+  const locale = info?.code ?? parsed.language;
+  // The offline copywriter and captions use French or English; the LLM writes in the requested language.
+  const base = info?.base ?? parsed.language;
+  if (locale !== base) notes.push(`language ${info!.name}: written by the LLM`);
 
   const brief: VideoBrief = {
     prompt: parsed.raw,
-    language: language === 'fr' ? 'fr' : 'en',
+    language: base,
+    locale,
     durationSec,
     fps,
     width,

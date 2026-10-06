@@ -6,6 +6,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { ProviderError } from '../../core/errors';
 import { wavDurationSec } from '../../audio/wav';
+import { getLanguage } from '../../core/languages';
 import type { VoiceProvider, VoiceRequest, VoiceResult } from './types';
 
 const hasCommand = (cmd: string): boolean => {
@@ -40,6 +41,12 @@ export class SystemVoiceProvider implements VoiceProvider {
     private readonly voice?: string,
   ) {}
 
+  supports(language: string): boolean {
+    if (this.voice) return true; // the user's explicit choice
+    if (this.engine === 'espeak-ng' || this.engine === 'espeak') return Boolean(getLanguage(language)?.espeak);
+    return language === 'fr' || language === 'en';
+  }
+
   async synthesize(req: VoiceRequest): Promise<VoiceResult> {
     const text = req.text.replace(/\*/g, '');
     try {
@@ -49,7 +56,7 @@ export class SystemVoiceProvider implements VoiceProvider {
           break;
         case 'espeak-ng':
         case 'espeak':
-          await run(this.engine, ['-v', this.voice ?? req.language, '-s', '160', '-w', req.outFile, text], undefined, req.signal);
+          await run(this.engine, ['-v', this.voice ?? getLanguage(req.language)?.espeak ?? req.language, '-s', '160', '-w', req.outFile, text], undefined, req.signal);
           break;
         case 'sapi': {
           const script =

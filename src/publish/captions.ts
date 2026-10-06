@@ -2,6 +2,7 @@
  * Captions, titles and hashtags for each platform — written by the LLM when available,
  * otherwise generated from the concept. Saved as captions.json in the job (editable).
  */
+import { getLanguage } from '../core/languages';
 import { z } from 'zod';
 import type { VideoBrief, VideoConcept } from '../core/types';
 import { errorMessage, summarizeError } from '../core/errors';
@@ -151,6 +152,11 @@ Return {${platforms.map((p) => `"${p}": {"title","caption","hashtags"}`).join(',
   }
 };
 
-const brief = (ctx: CaptionContext) => (ctx.brief.language === 'fr' ? 'French' : 'English');
+const brief = (ctx: CaptionContext) => {
+  const base = ctx.brief.language === 'fr' ? 'French' : 'English';
+  const local = ctx.brief.locale && ctx.brief.locale !== ctx.brief.language ? getLanguage(ctx.brief.locale)?.name : undefined;
+  // Local-language videos: the post is in that language, with a short line in the base language for reach.
+  return local ? `${local} (end the caption with one short sentence in ${base})` : base;
+};
 
 export type { PostContent };

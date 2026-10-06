@@ -2,6 +2,7 @@
  * SaaS web server: marketing page, web app, JSON API (accounts, videos, publishing, billing,
  * admin). Multi-tenant: every query on user data is scoped to the signed-in user.
  */
+import { LANGUAGE_CODES } from '../core/languages';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -55,7 +56,7 @@ export const CreateJobSchema = z.object({
   fps: z.number().int().min(1).max(60).optional(),
   style: z.string().max(30).optional(),
   template: z.string().max(40).optional(),
-  language: z.enum(['auto', 'fr', 'en']).optional(),
+  language: z.enum(['auto', ...LANGUAGE_CODES] as [string, ...string[]]).optional(),
   outputFormat: z.enum(OUTPUT_FORMATS).optional(),
   voice: z.boolean().optional(),
   music: z.boolean().optional(),
