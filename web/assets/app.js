@@ -7,9 +7,9 @@ import { openFile } from './viewer.js';
 const STEPS = ['analyze', 'concept', 'script', 'storyboard', 'scenes', 'assets', 'animations', 'subtitles', 'audio', 'project', 'render', 'output'];
 const PLATFORMS = { youtube: 'YouTube', tiktok: 'TikTok', instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn' };
 const PROVIDER_INFO = { youtube: { name: 'YouTube', icon: 'youtube' }, tiktok: { name: 'TikTok', icon: 'tiktok' }, linkedin: { name: 'LinkedIn', icon: 'linkedin' }, meta: { name: 'Facebook + Instagram', icon: 'meta' } };
-const PAGES = ['create', 'library', 'schedule', 'connections', 'brand', 'billing', 'account', 'admin'];
+const PAGES = ['create', 'songs', 'library', 'schedule', 'connections', 'brand', 'billing', 'account', 'admin'];
 
-const state = { me: null, publicConfig: null, options: null, connections: null, job: null, source: null, publishJobId: null, brand: null };
+const state = { me: null, publicConfig: null, options: null, connections: null, job: null, source: null, publishJobId: null, brand: null, song: null, songPoll: null };
 
 // ---- Routing ------------------------------------------------------------------------------
 const route = () => {
@@ -23,6 +23,8 @@ const go = (hash) => {
 
 const onRoute = () => {
   const { page, params } = route();
+  clearTimeout(state.songPoll);
+  state.songPoll = null;
   if (!state.me) return showAuth(['login', 'signup', 'forgot', 'reset'].includes(page) ? page : 'login');
   if (['login', 'signup', 'forgot', 'reset'].includes(page)) return go('create');
   if (params.get('verified')) {
@@ -34,9 +36,9 @@ const onRoute = () => {
   document.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === `page-${name}`));
   document.querySelectorAll('.nav a[data-page]').forEach((a) => a.classList.toggle('active', a.dataset.page === name));
   $('topTitle').textContent = t(name === 'schedule' ? 'nav.schedule' : `nav.${name}`);
-  $('newVideoBtn').hidden = name === 'create';
+  $('newVideoBtn').hidden = name === 'create' || name === 'songs';
   $('appView').classList.remove('menu-open');
-  ({ create: () => openJobFromParams(params), library: loadLibrary, schedule: loadSchedule, connections: () => loadConnections(params), brand: loadBrand, billing: () => loadBilling(params), account: loadAccount, admin: loadAdmin })[name]?.();
+  ({ create: () => openJobFromParams(params), songs: loadSongs, library: loadLibrary, schedule: loadSchedule, connections: () => loadConnections(params), brand: loadBrand, billing: () => loadBilling(params), account: loadAccount, admin: loadAdmin })[name]?.();
 };
 window.addEventListener('hashchange', onRoute);
 
@@ -129,6 +131,7 @@ const renderShell = () => {
   $('usageUpgrade').hidden = plan.id === 'pro';
   $('usageVideos').textContent = `${usage.videos} / ${plan.videosPerMonth}`;
   $('usageBar').style.width = `${Math.min(100, (usage.videos / plan.videosPerMonth) * 100)}%`;
+  $('usageSongs').textContent = `${usage.songs} / ${plan.songsPerMonth}`;
   $('durationHint').textContent = t('create.duration.hint', { max: formatDuration(plan.maxDurationSec) });
   $('duration').max = String(plan.maxDurationSec);
   $('planNote').hidden = !plan.badge;
@@ -147,6 +150,133 @@ $('resendVerify').addEventListener('click', async () => {
 $('menuBtn').addEventListener('click', () => $('appView').classList.toggle('menu-open'));
 $('appView').addEventListener('click', (e) => {
   if (e.target === $('appView')) $('appView').classList.remove('menu-open');
+});
+
+// ---- Songs ---------------------------------------------------------------------------------
+const SONG_STATUS = { draft: 'songs.status.draft', queued: 'songs.status.queued', running: 'songs.status.running', completed: 'songs.status.completed', failed: 'songs.status.failed' };
+
+const showSong = (song) => {
+  state.song = song;
+  $('songEditorCard').hidden = false;
+  $('songTitle').value = song.title;
+  $('songLyrics').value = song.lyrics;
+  const running = song.status === 'queued' || song.status === 'running';
+  const editable = !running && song.status !== 'completed';
+  $('songTitle').disabled = !editable;
+  $('songLyrics').disabled = !editable;
+  $('songSaveLyrics').hidden = !editable;
+  $('songGenerate').hidden = song.status === 'completed';
+  $('songGenerate').disabled = running;
+  $('songRunStatus').textContent = t(SONG_STATUS[song.status] ?? 'songs.status.draft');
+  $('songGenerateError').hidden = !song.error;
+  $('songGenerateError').textContent = song.error ?? '';
+  $('songAudioResult').hidden = song.status !== 'completed' || !song.audioUrl;
+  if (song.audioUrl) {
+    if ($('songAudio').dataset.song !== song.id) {
+      $('songAudio').src = song.audioUrl;
+      $('songAudio').dataset.song = song.id;
+    }
+    $('songDownload').href = song.downloadUrl;
+    $('songDownload').setAttribute('download', `${song.title.replace(/[^\p{L}\p{N}-]+/gu, '-').replace(/^-|-$/g, '') || 'song'}.mp3`);
+  }
+};
+
+const loadSongs = async () => {
+  const songs = await api('/api/songs');
+  $('songsEmpty').hidden = songs.length > 0;
+  $('songHistory').innerHTML = songs.map((song) => `<button type="button" class="video-card" data-song-id="${escapeHtml(song.id)}">
+    <div class="thumb">${icon('mic', 28)}<span class="badge ${song.status === 'completed' ? 'success' : song.status === 'failed' ? 'danger' : 'info'}">${escapeHtml(t(SONG_STATUS[song.status] ?? 'songs.status.draft'))}</span></div>
+    <div class="meta"><div class="title">${escapeHtml(song.title)}</div><div class="sub">${escapeHtml(song.style)} · ${escapeHtml(song.mood)}</div></div>
+  </button>`).join('');
+  if (state.song) {
+    const latest = songs.find((song) => song.id === state.song.id);
+    if (latest) showSong(latest);
+  }
+  if (state.song && ['queued', 'running'].includes(state.song.status)) pollSong(state.song.id);
+};
+
+const pollSong = (id) => {
+  clearTimeout(state.songPoll);
+  state.songPoll = setTimeout(async () => {
+    try {
+      const song = await api(`/api/songs/${encodeURIComponent(id)}`);
+      showSong(song);
+      await loadSongs();
+      if (['queued', 'running'].includes(song.status)) pollSong(id);
+      else refreshMe().catch(() => undefined);
+    } catch (err) {
+      toast(errorText(err), 'error');
+    }
+  }, 2000);
+};
+
+$('songBriefForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('songDraftError').hidden = true;
+  const button = $('songDraftSubmit');
+  button.disabled = true;
+  try {
+    const song = await post('/api/songs', {
+      prompt: $('songPrompt').value.trim(),
+      style: $('songStyle').value,
+      mood: $('songMood').value,
+      durationSec: Number($('songDuration').value),
+    });
+    showSong(song);
+    await loadSongs();
+  } catch (err) {
+    $('songDraftError').textContent = errorText(err);
+    $('songDraftError').hidden = false;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$('songSaveLyrics').addEventListener('click', async () => {
+  if (!state.song) return;
+  $('songGenerateError').hidden = true;
+  try {
+    const song = await api(`/api/songs/${encodeURIComponent(state.song.id)}/lyrics`, {
+      method: 'PUT',
+      body: JSON.stringify({ title: $('songTitle').value.trim(), lyrics: $('songLyrics').value }),
+    });
+    showSong(song);
+    await loadSongs();
+    toast(t('songs.lyricsSaved'), 'success');
+  } catch (err) {
+    $('songGenerateError').textContent = errorText(err);
+    $('songGenerateError').hidden = false;
+  }
+});
+
+$('songGenerate').addEventListener('click', async () => {
+  if (!state.song) return;
+  $('songGenerateError').hidden = true;
+  $('songGenerate').disabled = true;
+  try {
+    const song = await api(`/api/songs/${encodeURIComponent(state.song.id)}/lyrics`, {
+      method: 'PUT',
+      body: JSON.stringify({ title: $('songTitle').value.trim(), lyrics: $('songLyrics').value }),
+    });
+    showSong(await post(`/api/songs/${encodeURIComponent(song.id)}/generate`));
+    pollSong(song.id);
+    refreshMe().catch(() => undefined);
+  } catch (err) {
+    $('songGenerateError').textContent = errorText(err);
+    $('songGenerateError').hidden = false;
+    $('songGenerate').disabled = false;
+  }
+});
+
+$('songHistory').addEventListener('click', async (e) => {
+  const button = e.target.closest('[data-song-id]');
+  if (!button) return;
+  try {
+    showSong(await api(`/api/songs/${encodeURIComponent(button.dataset.songId)}`));
+    if (['queued', 'running'].includes(state.song.status)) pollSong(state.song.id);
+  } catch (err) {
+    toast(errorText(err), 'error');
+  }
 });
 
 // ---- Create ----------------------------------------------------------------------------------
@@ -762,6 +892,8 @@ const loadBilling = async (params) => {
   $('meterVideos').style.width = `${Math.min(100, (usage.videos / plan.videosPerMonth) * 100)}%`;
   $('meterMinutesText').textContent = `${minutes} / ${plan.minutesPerMonth}`;
   $('meterMinutes').style.width = `${Math.min(100, (minutes / plan.minutesPerMonth) * 100)}%`;
+  $('meterSongsText').textContent = `${usage.songs} / ${plan.songsPerMonth}`;
+  $('meterSongs').style.width = `${Math.min(100, (usage.songs / plan.songsPerMonth) * 100)}%`;
   const plans = state.publicConfig?.plans ?? [];
   const stripeSubscriber = Boolean(user.subscriptionStatus) && !prepaid;
   $('billingPlans').innerHTML = renderPlans(plans, {
@@ -973,7 +1105,7 @@ onLanguageChange((lang) => {
   if (state.job?.status === 'completed') resetPublish(state.job.id);
   const page = route().page;
   $('topTitle').textContent = t(`nav.${PAGES.includes(page) ? page : 'create'}`);
-  ({ library: loadLibrary, schedule: loadSchedule, connections: loadConnections, brand: loadBrand, billing: loadBilling, account: loadAccount, admin: loadAdmin })[page]?.();
+  ({ songs: loadSongs, library: loadLibrary, schedule: loadSchedule, connections: loadConnections, brand: loadBrand, billing: loadBilling, account: loadAccount, admin: loadAdmin })[page]?.();
   if (lang !== state.me.user.locale) api('/api/me', { method: 'PATCH', body: JSON.stringify({ locale: lang }) }).then((me) => (state.me = me)).catch(() => undefined);
 });
 

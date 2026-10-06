@@ -16,6 +16,7 @@ import { errorMessage, VideoAgentError } from '../core/errors';
 import { OUTPUT_FORMATS, SUPPORTED_FPS } from '../core/formats';
 import { createLogger, type Logger } from '../core/logger';
 import { resolveLLM } from '../llm/registry';
+import { ElevenLabsSongProvider } from '../providers/music/elevenlabs-song';
 import { ensureCaptions, loadJob, publishJob, saveCaptions } from '../publish/service';
 import { PLATFORM_IDS, type Captions, type PlatformId } from '../publish/types';
 import { STYLES } from '../remotion/contract/styles';
@@ -43,9 +44,10 @@ import { connectDatabase, type Db } from './db';
 import { clientIp, HttpError, json, readBuffer, readJson, readRaw, redirect, sendFile, SECURITY_HEADERS } from './http';
 import { deleteLogo, getBrandKit, MAX_LOGO_BYTES, publicBrandKit, saveBrandKit, saveLogo } from './brand';
 import { createJob, deleteJob, getJob, JOB_ID, listJobs, publicJob, queuePosition, requestCancel, userJobsDir, type JobRow } from './jobs';
-import { checkQuota, getPlan, getUsage, listPlans, PLAN_IDS, planOfUser } from './plans';
+import { checkQuota, checkSongQuota, getPlan, getUsage, listPlans, PLAN_IDS, planOfUser } from './plans';
 import { cancelPublication, createPublication, listPublications, publicPublication } from './publications';
 import { Worker } from './worker';
+import { createSongDraft, getSong, listSongs, publicSong, SONG_ID, songDirectory, updateSongLyrics, type SongRow } from './songs';
 
 export const CreateJobSchema = z.object({
   prompt: z.string().trim().min(3).max(4000),
@@ -80,6 +82,17 @@ const LoginSchema = z.object({ email: z.string().max(254), password: z.string().
 const ProfileSchema = z.object({ name: z.string().max(100).optional(), locale: z.enum(['fr', 'en']).optional() });
 const PasswordSchema = z.object({ current: z.string().max(200), next: z.string().max(200) });
 const ConnectionPatchSchema = z.object({ privacy: z.enum(['public', 'unlisted', 'private']).optional(), mode: z.enum(['draft', 'direct']).optional(), pageId: z.string().max(100).optional() });
+const SongDraftSchema = z.object({
+  prompt: z.string().trim().min(3).max(2000),
+  style: z.string().trim().min(2).max(80),
+  mood: z.string().trim().min(2).max(80),
+  durationSec: z.number().int().min(30).max(120).default(90),
+});
+const SongLyricsSchema = z.object({
+  title: z.string().trim().min(1).max(120),
+  lyrics: z.string().trim().min(1).max(6000),
+});
+const SongUpdateSchema = SongLyricsSchema;
 
 const parse = <T>(schema: z.ZodType<T>, data: unknown): T => {
   const r = schema.safeParse(data);
@@ -105,6 +118,10 @@ export interface SaasOptions {
   mailer?: Mailer;
   /** fetch used for GeniusPay / YouCan Pay calls. */
   paymentFetch?: typeof fetch;
+  /** Test seam for the standalone song provider. */
+  songGenerator?: (request: { lyrics: string; style: string; mood: string; durationSec: number }) => Promise<Buffer>;
+  /** Test seam for song lyric drafting. */
+  songLyricsGenerator?: (request: { prompt: string; style: string; mood: string }) => Promise<{ title: string; lyrics: string }>;
   workerOptions?: Partial<ConstructorParameters<typeof Worker>[0]>;
 }
 
@@ -130,6 +147,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
   const loginLimiter = new RateLimiter(10, 15 * 60_000);
   const signupLimiter = new RateLimiter(20, 60 * 60_000);
   const mailLimiter = new RateLimiter(5, 60 * 60_000);
+  const songDraftLimiter = new RateLimiter(5, 60 * 60_000);
   const mailer = options.mailer ?? createMailer(config, logger);
   /** E-mails are sent in the background: a slow SMTP server must not delay the response. */
   const sendMail = (kind: 'verify' | 'reset', user: Pick<User, 'id' | 'email' | 'locale'>, link: string) =>
@@ -142,6 +160,11 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
   const runWorker = options.embeddedWorker ?? (config.env.VIDEO_AGENT_EMBEDDED_WORKER === 'auto' ? db.kind === 'pglite' : config.env.VIDEO_AGENT_EMBEDDED_WORKER === 'true');
   const worker = runWorker ? new Worker({ db, vault, config: () => config, logger, deps: options.deps, ...options.workerOptions }) : undefined;
   worker?.start();
+  const songTasks = new Set<Promise<void>>();
+  await db.query(
+    `UPDATE songs SET status = 'failed', error = 'La génération a été interrompue par un redémarrage du serveur. Relancez la chanson.', finished_at = now(), updated_at = now()
+     WHERE status = 'running' AND heartbeat_at < now() - interval '3 minutes'`,
+  );
 
   const llm = () => {
     if (options.deps?.llm !== undefined) return options.deps.llm;
@@ -220,6 +243,52 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     const job = await getJob(db, user.id, id);
     if (!job) throw new HttpError(404, 'Vidéo introuvable', 'not_found');
     return job;
+  };
+
+  const songFor = async (user: User, id: string): Promise<SongRow> => {
+    if (!SONG_ID.test(id)) throw new HttpError(400, 'Identifiant de chanson invalide', 'invalid_song_id');
+    const song = await getSong(db, user.id, id);
+    if (!song) throw new HttpError(404, 'Chanson introuvable', 'not_found');
+    return song;
+  };
+
+  const generateSong = async (song: SongRow): Promise<void> => {
+    const currentConfig = config;
+    const generate = options.songGenerator ?? (currentConfig.env.ELEVENLABS_API_KEY
+      ? (input: { lyrics: string; style: string; mood: string; durationSec: number }) =>
+          new ElevenLabsSongProvider(currentConfig.env.ELEVENLABS_API_KEY!).generate(input)
+      : undefined);
+    if (!generate) {
+      await db.query("UPDATE songs SET status = 'failed', error = $2, finished_at = now(), updated_at = now() WHERE id = $1", [song.id, 'La clé ElevenLabs Music n’est pas configurée.']);
+      return;
+    }
+    const dir = songDirectory(currentConfig, song.user_id, song.id);
+    const audioFile = path.join(dir, 'song.mp3');
+    const temporaryFile = `${audioFile}.tmp`;
+    const heartbeat = setInterval(() => {
+      void db.query("UPDATE songs SET heartbeat_at = now() WHERE id = $1 AND status = 'running'", [song.id]).catch((err) => logger.warn(`song ${song.id} heartbeat failed: ${errorMessage(err)}`));
+    }, 30_000);
+    try {
+      const audio = await generate({ lyrics: song.lyrics, style: song.style, mood: song.mood, durationSec: song.duration_sec });
+      if (!audio.length) throw new Error('ElevenLabs a renvoyé un fichier audio vide.');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.rmSync(temporaryFile, { force: true });
+      fs.writeFileSync(temporaryFile, audio, { flag: 'wx' });
+      fs.renameSync(temporaryFile, audioFile);
+      const saved = await db.query<{ id: string }>(
+        "UPDATE songs SET status = 'completed', audio_file = $2, error = NULL, finished_at = now(), updated_at = now() WHERE id = $1 RETURNING id",
+        [song.id, audioFile],
+      );
+      if (!saved.length) fs.rmSync(dir, { recursive: true, force: true });
+    } catch (err) {
+      fs.rmSync(temporaryFile, { force: true });
+      fs.rmSync(audioFile, { force: true });
+      const message = errorMessage(err);
+      await db.query("UPDATE songs SET status = 'failed', error = $2, finished_at = now(), updated_at = now() WHERE id = $1", [song.id, message]);
+      logger.warn(`song ${song.id} failed: ${message}`);
+    } finally {
+      clearInterval(heartbeat);
+    }
   };
 
   const api = async (req: http.IncomingMessage, res: http.ServerResponse, url: URL, parts: string[]): Promise<void> => {
@@ -360,6 +429,74 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         maxDurationSec: plan.maxDurationSec,
         capabilities: capabilities(),
       });
+    }
+
+    if (resource === 'songs') {
+      if (!id && method === 'GET') return json(res, 200, (await listSongs(db, user.id)).map(publicSong));
+      if (!id && method === 'POST') {
+        if (config.env.REQUIRE_EMAIL_VERIFICATION && !user.email_verified_at) throw new HttpError(403, 'Confirmez votre adresse e-mail pour créer des chansons', 'email_unverified');
+        const body = parse(SongDraftSchema, await readJson(req));
+        const lyricProvider = llm();
+        if (!options.songLyricsGenerator && !lyricProvider) throw new HttpError(503, 'Configurez un fournisseur de rédaction IA pour créer les paroles.', 'song_lyrics_unavailable');
+        if (!songDraftLimiter.take(user.id)) throw new HttpError(429, 'Trop de brouillons de chanson, réessayez plus tard', 'too_many_song_drafts');
+        let lyrics: z.infer<typeof SongLyricsSchema>;
+        if (options.songLyricsGenerator) {
+          try {
+            lyrics = SongLyricsSchema.parse(await options.songLyricsGenerator(body));
+          } catch (err) {
+            if (!(err instanceof z.ZodError)) throw err;
+            throw new HttpError(502, 'Le fournisseur IA a renvoyé des paroles invalides. Réessayez.', 'song_lyrics_invalid');
+          }
+        } else {
+          const generated = await lyricProvider!.generate({
+            system: 'You are a professional songwriter. Write original, singable lyrics based only on the user brief. Return valid JSON with title and lyrics. Use clear section labels such as [Verse 1], [Chorus], [Verse 2], [Bridge]. Keep the lyrics in the language requested or used by the user. Do not mention that these are AI-generated.',
+            messages: [{ role: 'user', content: `Brief: ${body.prompt}\nMusical style: ${body.style}\nMood: ${body.mood}` }],
+            maxTokens: 1600,
+            temperature: 0.8,
+            json: { name: 'song_lyrics', schema: { type: 'object', properties: { title: { type: 'string' }, lyrics: { type: 'string' } }, required: ['title', 'lyrics'], additionalProperties: false } },
+          });
+          try {
+            lyrics = SongLyricsSchema.parse(JSON.parse(generated.text.replace(/^```(?:json)?\s*|\s*```$/g, '')));
+          } catch (err) {
+            logger.warn(`song lyric response from ${generated.provider} was invalid: ${errorMessage(err)}`);
+            throw new HttpError(502, 'Le fournisseur IA a renvoyé des paroles invalides. Réessayez.', 'song_lyrics_invalid');
+          }
+        }
+        const song = await createSongDraft(db, config, user.id, { ...body, ...lyrics, durationSec: body.durationSec ?? 90 });
+        return json(res, 201, publicSong(song));
+      }
+      if (!id) throw new HttpError(405, 'method not allowed');
+      const song = await songFor(user, id);
+      if (!sub && method === 'GET') return json(res, 200, publicSong(song));
+      if (sub === 'lyrics' && method === 'PUT') {
+        const body = parse(SongUpdateSchema, await readJson(req));
+        const updated = await updateSongLyrics(db, user.id, song.id, body.title, body.lyrics);
+        if (!updated) throw new HttpError(409, 'Les paroles ne peuvent plus être modifiées pendant ou après la génération.', 'song_not_editable');
+        return json(res, 200, publicSong(updated));
+      }
+      if (sub === 'generate' && method === 'POST') {
+        if (config.env.REQUIRE_EMAIL_VERIFICATION && !user.email_verified_at) throw new HttpError(403, 'Confirmez votre adresse e-mail pour générer des chansons', 'email_unverified');
+        if (!options.songGenerator && !config.env.ELEVENLABS_API_KEY) throw new HttpError(503, 'La génération de chansons ElevenLabs n’est pas configurée.', 'song_provider_unavailable');
+        if (song.lyrics.split(/\r?\n/).filter((line) => line.trim()).length > 30 || song.lyrics.split(/\r?\n/).some((line) => line.length > 200)) {
+          throw new HttpError(400, 'ElevenLabs accepte au maximum 30 lignes de 200 caractères par chanson.', 'song_lyrics_too_long');
+        }
+        const updated = await db.tx(async (tx) => {
+          await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [user.id]);
+          const quota = checkSongQuota(planOfUser(config, user), await getUsage(tx, user.id));
+          if (quota) throw new HttpError(402, 'Quota mensuel de chansons atteint', 'quota_songs', { limit: quota.limit, plan: planOfUser(config, user).id });
+          return tx.one<SongRow>(
+            `UPDATE songs SET status = 'running', error = NULL, finished_at = NULL, heartbeat_at = now(), updated_at = now()
+             WHERE id = $1 AND user_id = $2 AND status IN ('draft', 'failed') RETURNING *`,
+            [song.id, user.id],
+          );
+        });
+        if (!updated) throw new HttpError(409, 'Cette chanson est déjà en cours ou a déjà été générée.', 'song_not_ready');
+        const task = generateSong(updated).catch((err) => logger.error(`song ${updated.id} background task failed: ${errorMessage(err)}`)).finally(() => songTasks.delete(task));
+        songTasks.add(task);
+        return json(res, 202, publicSong(updated));
+      }
+      if (sub === 'audio' && song.audio_file && method === 'GET') return sendFile(req, res, song.audio_file, { download: url.searchParams.get('download') === '1', cache: 'private, max-age=3600' });
+      throw new HttpError(404, 'not found', 'not_found');
     }
 
     if (resource === 'jobs') {
@@ -584,6 +721,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     db,
     worker,
     close: async () => {
+      await Promise.allSettled([...songTasks]);
       await worker?.stop();
       if (!options.db) await db.close();
     },

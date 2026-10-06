@@ -82,7 +82,7 @@ export const SETTING_GROUPS: SettingGroup[] = [
       { key: 'PIPER_VOICE_FR', label: 'Voix Piper française', free: true, options: opt(['fr_FR-siwis-medium', 'Siwis (femme)'], ['fr_FR-tom-medium', 'Tom (homme)'], ['fr_FR-upmc-medium', 'UPMC (femme/homme)'], ['fr_FR-gilles-low', 'Gilles (homme)']), link: 'https://rhasspy.github.io/piper-samples/' },
       { key: 'PIPER_VOICE_EN', label: 'Voix Piper anglaise', free: true, options: opt(['en_US-lessac-medium', 'Lessac (US, femme)'], ['en_US-ryan-medium', 'Ryan (US, homme)'], ['en_GB-alba-medium', 'Alba (UK, femme)']) },
       { key: 'PIPER_LENGTH_SCALE', label: 'Débit Piper (1 = normal, 1.2 = plus lent)' },
-      { key: 'ELEVENLABS_API_KEY', label: 'Clé ElevenLabs', secret: true, link: 'https://elevenlabs.io/app/settings/api-keys' },
+      { key: 'ELEVENLABS_API_KEY', label: 'Clé ElevenLabs', secret: true, link: 'https://elevenlabs.io/app/settings/api-keys', help: 'Nécessaire pour la voix-off ElevenLabs et la génération de chansons chantées (offre Music payante).' },
       { key: 'ELEVENLABS_VOICE_ID', label: 'Voix ElevenLabs (id)' },
     ],
   },

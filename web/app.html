@@ -75,7 +75,8 @@
     <aside class="sidebar" id="sidebar">
       <a class="brand" href="/"><i data-icon="logo" data-size="26"></i>Video Agent</a>
       <nav class="nav">
-        <a href="#create" data-page="create"><i data-icon="sparkles"></i><span data-i18n="nav.create"></span></a>
+        <a href="#create" data-page="create"><i data-icon="film"></i><span data-i18n="nav.create"></span></a>
+        <a href="#songs" data-page="songs"><i data-icon="mic"></i><span data-i18n="nav.songs"></span></a>
         <a href="#library" data-page="library"><i data-icon="film"></i><span data-i18n="nav.library"></span></a>
         <a href="#schedule" data-page="schedule"><i data-icon="calendar"></i><span data-i18n="nav.schedule"></span><span class="count" id="pendingCount" hidden></span></a>
         <a href="#connections" data-page="connections"><i data-icon="link"></i><span data-i18n="nav.connections"></span></a>
@@ -92,6 +93,7 @@
           <div class="plan"><b id="usagePlan"></b><a href="#billing" class="small" data-i18n="usage.upgrade" id="usageUpgrade"></a></div>
           <div class="row"><span data-i18n="billing.videos"></span><span id="usageVideos"></span></div>
           <div class="progress"><span id="usageBar"></span></div>
+          <div class="row"><span data-i18n="billing.songs"></span><span id="usageSongs"></span></div>
         </div>
         <div class="user-box">
           <div class="avatar" id="avatar"></div>
@@ -264,6 +266,47 @@
           </div>
         </section>
 
+        <!-- ---------------- Songs ---------------- -->
+        <section class="page" id="page-songs">
+          <div class="page-header"><div><h1 data-i18n="songs.title"></h1><p data-i18n="songs.subtitle"></p></div></div>
+          <div class="grid-2">
+            <form class="card" id="songBriefForm" novalidate>
+              <div class="card-header"><div><h2 data-i18n="songs.briefTitle"></h2><p data-i18n="songs.briefSubtitle"></p></div></div>
+              <div class="card-body form-stack">
+                <label class="field"><span class="label" data-i18n="songs.brief"></span><textarea class="textarea" id="songPrompt" rows="4" maxlength="2000" required data-i18n-placeholder="songs.briefPlaceholder"></textarea></label>
+                <div class="form-grid">
+                  <label class="field"><span class="label" data-i18n="songs.style"></span><select class="select" id="songStyle">
+                    <option value="Afrobeats">Afrobeats</option><option value="Afropop">Afropop</option><option value="Amapiano">Amapiano</option><option value="Pop">Pop</option><option value="R&B">R&amp;B</option><option value="Gospel">Gospel</option><option value="Acoustic">Acoustic</option><option value="Coupé-décalé">Coupé-décalé</option><option value="Gnawa">Gnawa</option><option value="Reggae">Reggae</option><option value="Hip-hop">Hip-hop</option>
+                  </select></label>
+                  <label class="field"><span class="label" data-i18n="songs.mood"></span><select class="select" id="songMood">
+                    <option value="Joyful and celebratory" data-i18n="songs.moodJoyful"></option><option value="Romantic and tender" data-i18n="songs.moodRomantic"></option><option value="Calm and emotional" data-i18n="songs.moodCalm"></option><option value="Energetic and uplifting" data-i18n="songs.moodEnergetic"></option><option value="Nostalgic and warm" data-i18n="songs.moodNostalgic"></option>
+                  </select></label>
+                  <label class="field"><span class="label" data-i18n="songs.duration"></span><select class="select" id="songDuration"><option value="60">60 s</option><option value="90" selected>90 s</option><option value="120">120 s</option></select></label>
+                </div>
+                <div class="alert warning"><i data-icon="info"></i><span data-i18n="songs.providerCaveat"></span></div>
+                <div class="alert danger" id="songDraftError" hidden></div>
+              </div>
+              <div class="card-footer"><button class="btn btn-primary btn-lg" type="submit" id="songDraftSubmit"><i data-icon="edit"></i><span data-i18n="songs.writeLyrics"></span></button></div>
+            </form>
+            <div class="card" id="songEditorCard" hidden>
+              <div class="card-header"><div><h2 data-i18n="songs.reviewTitle"></h2><p data-i18n="songs.reviewSubtitle"></p></div></div>
+              <div class="card-body form-stack">
+                <label class="field"><span class="label" data-i18n="songs.songTitle"></span><input class="input" id="songTitle" maxlength="120" /></label>
+                <label class="field"><span class="label" data-i18n="songs.lyrics"></span><textarea class="textarea" id="songLyrics" rows="12" maxlength="6000"></textarea><span class="hint" data-i18n="songs.lyricsHint"></span></label>
+                <div class="alert warning"><i data-icon="alert"></i><span data-i18n="songs.fidelityWarning"></span></div>
+                <div class="alert danger" id="songGenerateError" hidden></div>
+                <div id="songAudioResult" hidden class="form-stack"><audio controls id="songAudio" style="width: 100%"></audio><a class="btn btn-secondary" id="songDownload"><i data-icon="download"></i><span data-i18n="songs.download"></span></a></div>
+              </div>
+              <div class="card-footer">
+                <button class="btn btn-secondary" type="button" id="songSaveLyrics"><i data-icon="check"></i><span data-i18n="songs.saveLyrics"></span></button>
+                <button class="btn btn-primary" type="button" id="songGenerate"><i data-icon="mic"></i><span data-i18n="songs.generate"></span></button>
+                <span class="hint" id="songRunStatus" aria-live="polite"></span>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top: 24px"><h2 data-i18n="songs.history"></h2><div class="video-grid" id="songHistory"></div><div class="card" id="songsEmpty" hidden><div class="empty-state"><div class="icon-wrap"><i data-icon="mic"></i></div><h3 data-i18n="songs.empty"></h3></div></div></div>
+        </section>
+
         <!-- ---------------- Library ---------------- -->
         <section class="page" id="page-library">
           <div class="page-header"><div><h1 data-i18n="library.title"></h1><p data-i18n="library.subtitle"></p></div></div>
@@ -340,7 +383,7 @@
           <div class="grid-3" style="margin-bottom: 20px">
             <div class="card stat"><div class="k" data-i18n="billing.current"></div><div class="v" id="billingPlan"></div><div class="hint" id="billingRenew"></div></div>
             <div class="card stat"><div class="meter"><div class="row"><span class="k" data-i18n="billing.videos"></span><b id="meterVideosText"></b></div><div class="progress"><span id="meterVideos"></span></div></div><div class="hint" style="margin-top: 10px" data-i18n="billing.resets"></div></div>
-            <div class="card stat"><div class="meter"><div class="row"><span class="k" data-i18n="billing.minutes"></span><b id="meterMinutesText"></b></div><div class="progress"><span id="meterMinutes"></span></div></div></div>
+            <div class="card stat"><div class="meter"><div class="row"><span class="k" data-i18n="billing.minutes"></span><b id="meterMinutesText"></b></div><div class="progress"><span id="meterMinutes"></span></div></div><div class="meter" style="margin-top: 14px"><div class="row"><span class="k" data-i18n="billing.songs"></span><b id="meterSongsText"></b></div><div class="progress"><span id="meterSongs"></span></div></div></div>
           </div>
           <div class="plans" id="billingPlans"></div>
           <div class="card" id="paymentsCard" hidden style="margin-top: 20px">

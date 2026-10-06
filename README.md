@@ -1,6 +1,6 @@
 # 🎬 Video Agent
 
-**Agent autonome de génération vidéo.** Décrivez la vidéo en une phrase et l'agent fait le reste, du concept au fichier MP4 final. Le rendu est effectué localement avec [Remotion](https://www.remotion.dev).
+**Génération de vidéos et de chansons par IA.** Décrivez une vidéo pour obtenir un MP4 rendu localement avec [Remotion](https://www.remotion.dev), ou passez en mode Chanson dans l'application web pour faire rédiger, relire et valider des paroles avant de générer un MP3 chanté avec ElevenLabs Music.
 
 ```bash
 video-agent "Crée une vidéo verticale de 30 secondes pour promouvoir Sirago auprès des chauffeurs au Burkina Faso."
@@ -570,17 +570,19 @@ cp .env.example .env
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-Ouvrez `https://app.example.com/app`, créez le premier compte (administrateur), puis complétez les clés dans **Administration › Services**. Pour fermer les inscriptions publiques : `SIGNUP_MODE=closed`.
+Ouvrez `https://app.example.com/app`, créez le premier compte (administrateur), puis complétez les clés dans **Administration › Services**. Pour le mode Chanson, configurez aussi un fournisseur LLM pour rédiger les paroles et `ELEVENLABS_API_KEY` pour générer l'audio (Music API payante, accès payant requis). Pour fermer les inscriptions publiques : `SIGNUP_MODE=closed`.
 
 **Offres et quotas** (remis à zéro le 1er du mois) :
 
-| Offre | Vidéos / mois | Minutes / mois | Durée max | Publication | Filigrane |
-|---|---|---|---|---|---|
-| Gratuit | 3 | 3 | 1 min | non | « Made with Video Agent » |
-| Créateur | 30 | 60 | 3 min | oui | non |
-| Pro | 120 | 300 | 10 min | oui | non |
+| Offre | Vidéos / mois | Minutes / mois | Chansons / mois | Durée max vidéo | Publication | Filigrane |
+|---|---|---|---|---|---|---|
+| Gratuit | 3 | 3 | 1 | 1 min | non | « Made with Video Agent » |
+| Créateur | 30 | 60 | 10 | 3 min | oui | non |
+| Pro | 120 | 300 | 40 | 10 min | oui | non |
 
 Les limites sont définies dans `src/saas/plans.ts` ; les prix affichés dans `PLAN_CREATOR_PRICE` et `PLAN_PRO_PRICE`. Un administrateur peut aussi changer l'offre d'un client depuis **Administration**.
+
+**Mode Chanson** : dans **Chansons**, décrivez le morceau et choisissez son style, son ambiance et sa durée (1 à 2 min). L'IA propose un brouillon éditable ; aucune génération audio n'a lieu avant de cliquer sur « Générer la chanson ». Le MP3 et les brouillons restent privés au compte. ElevenLabs Music utilise les paroles structurées comme guide de composition, mais ne garantit ni la présence de voix ni que chaque ligne soit chantée fidèlement ; vérifiez le résultat. La génération est facturée par ElevenLabs selon son offre et n'utilise pas le quota vidéo.
 
 **Paiement Stripe** :
 1. Créez deux produits avec un prix mensuel ; copiez leurs identifiants `price_…` dans `STRIPE_PRICE_CREATOR` et `STRIPE_PRICE_PRO`.

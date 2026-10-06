@@ -6,7 +6,7 @@ import { createLogger } from '../src/core/logger';
 import { signStripePayload, stripeForm, verifyStripeSignature } from '../src/saas/billing';
 import { hashPassword, Vault, verifyPassword } from '../src/saas/crypto';
 import { connectPglite, migrate, type Db } from '../src/saas/db';
-import { checkQuota, getPlan } from '../src/saas/plans';
+import { checkQuota, checkSongQuota, getPlan } from '../src/saas/plans';
 import { startSaasServer } from '../src/saas/server';
 import type { PlatformId } from '../src/publish/types';
 import { fakeRenderer, testConfig, tmpDir } from './helpers';
@@ -85,6 +85,8 @@ beforeAll(async () => {
         },
       }),
     },
+    songLyricsGenerator: async () => ({ title: 'Joyeux anniversaire', lyrics: '[Verse 1]\nLe soleil se lève pour toi\n[Chorus]\nJoyeux anniversaire Aïcha\n' }),
+    songGenerator: async () => Buffer.from('fake mp3'),
     stripe: async (p) => {
       if (p === '/checkout/sessions') return { url: 'https://checkout.stripe.test/s' };
       if (p.startsWith('/subscriptions/')) return { id: 'sub_1', customer: 'cus_1', status: 'active', items: { data: [{ price: { id: 'price_creator' }, current_period_end: 2_000_000_000 }] } };
@@ -121,10 +123,15 @@ describe('crypto', () => {
 describe('plans', () => {
   it('limits videos, minutes and duration per plan', () => {
     const free = getPlan(config, 'free');
-    expect(checkQuota(free, { periodStart: '', videos: 0, seconds: 0 }, 30)).toBeNull();
-    expect(checkQuota(free, { periodStart: '', videos: 3, seconds: 0 })).toEqual({ code: 'videos', limit: 3 });
-    expect(checkQuota(free, { periodStart: '', videos: 0, seconds: 0 }, 120)).toEqual({ code: 'duration', limit: 60 });
-    expect(checkQuota(free, { periodStart: '', videos: 1, seconds: 170 }, 30)).toEqual({ code: 'minutes', limit: 3 });
+    const usage = { periodStart: '', videos: 0, seconds: 0, songs: 0 };
+    expect(checkQuota(free, usage, 30)).toBeNull();
+    expect(checkQuota(free, { ...usage, videos: 3 })).toEqual({ code: 'videos', limit: 3 });
+    expect(checkQuota(free, usage, 120)).toEqual({ code: 'duration', limit: 60 });
+    expect(checkQuota(free, { ...usage, videos: 1, seconds: 170 }, 30)).toEqual({ code: 'minutes', limit: 3 });
+    expect(checkSongQuota(free, usage)).toBeNull();
+    expect(checkSongQuota(free, { ...usage, songs: 1 })).toEqual({ code: 'songs', limit: 1 });
+    expect(getPlan(config, 'creator').songsPerMonth).toBe(10);
+    expect(getPlan(config, 'pro').songsPerMonth).toBe(40);
     expect(getPlan(config, 'unknown').id).toBe('free');
   });
 });
@@ -179,6 +186,7 @@ describe('videos', () => {
       const j = await alice.json('GET', `/api/jobs/${jobId}`);
       return ['completed', 'failed'].includes(j.body.status) ? j.body : undefined;
     });
+
     expect(done.error).toBeUndefined();
     expect(done.status).toBe('completed');
     // Free plan: duration capped at 60 s and badge in the video.
@@ -263,6 +271,35 @@ describe('videos', () => {
     const later = await alice.json('POST', `/api/jobs/${jobId}/publish`, { platforms: ['facebook'], at: new Date(Date.now() + 3600_000).toISOString() });
     expect((await alice.json('DELETE', `/api/publications/${later.body.id}`)).body.cancelled).toBe(true);
     expect((await alice.json('POST', '/api/billing/checkout', { plan: 'pro' })).body.url).toBe('https://checkout.stripe.test/s');
+  }, 30_000);
+});
+
+describe('songs', () => {
+  it('keeps lyrics editable until explicit generation, isolates audio, and enforces the separate quota', async () => {
+    const singer = new Client(base);
+    await singer.json('POST', '/api/auth/signup', { email: 'singer@example.com', password: 'motdepasse6' });
+    const draft = await singer.json('POST', '/api/songs', { prompt: 'Chanson romantique anniversaire pour Aïcha', style: 'Afrobeats', mood: 'Romantic and tender', durationSec: 90 });
+    expect(draft.status).toBe(201);
+    expect(draft.body).toMatchObject({ title: 'Joyeux anniversaire', status: 'draft', lyrics: expect.stringContaining('Aïcha') });
+    const edited = await singer.json('PUT', `/api/songs/${draft.body.id}/lyrics`, { title: 'Pour Aïcha', lyrics: '[Verse 1]\nPour toi' });
+    expect(edited.body).toMatchObject({ title: 'Pour Aïcha', status: 'draft' });
+    const started = await singer.json('POST', `/api/songs/${draft.body.id}/generate`);
+    expect(started.status).toBe(202);
+    const finished = await waitFor(async () => {
+      const result = await singer.json('GET', `/api/songs/${draft.body.id}`);
+      return ['completed', 'failed'].includes(result.body.status) ? result.body : undefined;
+    });
+    expect(finished.status).toBe('completed');
+    expect(await (await singer.req('GET', finished.audioUrl)).text()).toBe('fake mp3');
+    expect((await singer.json('GET', '/api/me')).body.usage.songs).toBe(1);
+    expect((await singer.json('PUT', `/api/songs/${draft.body.id}/lyrics`, { title: 'No', lyrics: 'No' })).status).toBe(409);
+
+    const anotherDraft = await singer.json('POST', '/api/songs', { prompt: 'Another birthday song', style: 'Pop', mood: 'Joyful and celebratory' });
+    expect((await singer.json('POST', `/api/songs/${anotherDraft.body.id}/generate`)).body).toMatchObject({ code: 'quota_songs', limit: 1 });
+    const other = new Client(base);
+    await other.json('POST', '/api/auth/signup', { email: 'another-singer@example.com', password: 'motdepasse7' });
+    expect((await other.json('GET', `/api/songs/${draft.body.id}`)).status).toBe(404);
+    expect((await other.req('GET', finished.audioUrl)).status).toBe(404);
   }, 30_000);
 });
 

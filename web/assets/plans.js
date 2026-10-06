@@ -29,6 +29,7 @@ export const renderPlans = (plans, opts = {}) =>
       const featured = p.id === 'creator';
       const features = [
         [true, t('plan.videos', { n: p.videosPerMonth })],
+        [true, t('plan.songs', { n: p.songsPerMonth })],
         [true, t('plan.minutes', { n: p.minutesPerMonth })],
         [true, t('plan.maxDuration', { d: formatDuration(p.maxDurationSec) })],
         [p.publish, t('plan.publish')],

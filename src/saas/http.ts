@@ -15,6 +15,8 @@ export const MIME: Record<string, string> = {
   '.woff2': 'font/woff2',
   '.json': 'application/json',
   '.mp4': 'video/mp4',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
   '.webm': 'video/webm',
   '.mov': 'video/quicktime',
   '.gif': 'image/gif',

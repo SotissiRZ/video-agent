@@ -191,6 +191,28 @@ export const MIGRATIONS: string[] = [
   CREATE UNIQUE INDEX payments_provider_ref ON payments(provider, provider_ref);
   CREATE INDEX payments_user ON payments(user_id, created_at DESC);
   `,
+  // 4 — standalone songs, separate from video jobs and quotas
+  `
+  CREATE TABLE songs (
+    id text PRIMARY KEY,
+    user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    prompt text NOT NULL,
+    title text NOT NULL,
+    lyrics text NOT NULL,
+    style text NOT NULL,
+    mood text NOT NULL,
+    duration_sec integer NOT NULL DEFAULT 90,
+    status text NOT NULL DEFAULT 'draft',
+    error text,
+    audio_file text,
+    heartbeat_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    finished_at timestamptz
+  );
+  CREATE INDEX songs_user ON songs(user_id, created_at DESC);
+  CREATE INDEX songs_usage ON songs(user_id, created_at) WHERE status IN ('queued', 'running', 'completed');
+  `,
 ];
 
 /** Apply pending migrations (serialized with an advisory lock: several containers may start together). */
