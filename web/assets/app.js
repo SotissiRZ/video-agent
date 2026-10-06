@@ -2,6 +2,7 @@
 import { $, api, ApiError, errorText, escapeHtml, getTheme, icon, initChrome, onLanguageChange, post, renderIcons, savedLang, setLang, setTheme, toast } from './common.js';
 import { formatDate, formatDuration, getLang, SETTINGS_EN, STYLE_NAMES, t, TEMPLATE_NAMES } from './i18n.js';
 import { formatMoney, renderPlans } from './plans.js';
+import { openFile } from './viewer.js';
 
 const STEPS = ['analyze', 'concept', 'script', 'storyboard', 'scenes', 'assets', 'animations', 'subtitles', 'audio', 'project', 'render', 'output'];
 const PLATFORMS = { youtube: 'YouTube', tiktok: 'TikTok', instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn' };
@@ -184,6 +185,15 @@ const updateCapHints = () => {
   $('capHints').innerHTML = hints.map((h) => `<div class="alert warning">${icon('alert', 16)}<span>${escapeHtml(h)}</span></div>`).join('');
 };
 ['voice', 'stock'].forEach((id) => $(id).addEventListener('change', updateCapHints));
+
+// Files open in the in-app viewer (formatted); Ctrl/Cmd-click still opens the raw file.
+['fileStoryboard', 'fileScript', 'fileSrt', 'fileCredits'].forEach((id) =>
+  $(id).addEventListener('click', (e) => {
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+    e.preventDefault();
+    openFile($(id).getAttribute('href'), $(id).textContent.trim());
+  }),
+);
 
 // WhatsApp: share the MP4 itself (Status or chat) from a phone; elsewhere, download it.
 let shareCache = null;

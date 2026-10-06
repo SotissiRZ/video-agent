@@ -11,7 +11,7 @@ export const scriptMarkdown = (brief: VideoBrief, concept: VideoConcept, storybo
   const lines = [
     `# ${concept.title}`,
     '',
-    `> ${brief.prompt}`,
+    brief.prompt.split('\n').map((l) => `> ${l}`.trimEnd()).join('\n'),
     '',
     '## Concept',
     '',
