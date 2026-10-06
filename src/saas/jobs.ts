@@ -116,3 +116,15 @@ export const queuePosition = async (db: Db, job: JobRow): Promise<number> => {
   const row = await db.one<{ n: string | number }>("SELECT count(*) AS n FROM jobs WHERE status = 'queued' AND created_at < $1", [new Date(job.created_at).toISOString()]);
   return Number(row?.n ?? 0) + 1;
 };
+
+/**
+ * Retention: finished videos older than `days` are deleted (rows and files are removed by the
+ * caller), except those still waiting to be published.
+ */
+export const purgeOldJobs = (db: Db, days: number) =>
+  db.query<{ id: string; dir: string }>(
+    `DELETE FROM jobs j WHERE j.status IN ('completed', 'failed', 'cancelled') AND j.created_at < $1
+       AND NOT EXISTS (SELECT 1 FROM publications p WHERE p.job_id = j.id AND p.status IN ('pending', 'running'))
+     RETURNING id, dir`,
+    [new Date(Date.now() - days * 86_400_000).toISOString()],
+  );

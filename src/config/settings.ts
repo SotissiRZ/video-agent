@@ -92,9 +92,26 @@ export const SETTING_GROUPS: SettingGroup[] = [
     description: 'Valeurs par défaut des vidéos.',
     fields: [
       { key: 'VIDEO_AGENT_MUSIC', label: 'Musique', options: opt(['auto', 'Vos pistes (assets/music) sinon synthèse'], ['procedural', 'Synthèse automatique'], ['assets', 'Vos pistes uniquement'], ['none', 'Aucune']) },
+      { key: 'VIDEO_AGENT_MUSIC_PROVIDER', label: 'Musique composée par IA', options: opt(['none', 'Désactivée'], ['auto', 'Automatique (selon les clés)'], ['elevenlabs', 'ElevenLabs Music'], ['stability', 'Stable Audio (Stability AI)'], ['replicate', 'MusicGen (Replicate)']), help: 'Une musique originale, adaptée au sujet et à l’ambiance demandée, est composée pour chaque vidéo. Payant chez le fournisseur ; en cas d’échec la synthèse automatique prend le relais.' },
       { key: 'VIDEO_AGENT_SUBTITLES', label: 'Sous-titres par défaut', options: opt(['true', 'Oui'], ['false', 'Non']) },
       { key: 'VIDEO_AGENT_RENDER_CONCURRENCY', label: 'Images rendues en parallèle', placeholder: 'auto (moitié des cœurs)', help: 'Augmentez jusqu’au nombre de cœurs du processeur pour accélérer le rendu (plus de mémoire utilisée).' },
       { key: 'VIDEO_AGENT_X264_PRESET', label: 'Vitesse d’encodage MP4', options: opt(['veryfast', 'Rapide (recommandé)'], ['ultrafast', 'Très rapide (fichiers plus lourds)'], ['medium', 'Équilibré'], ['slow', 'Lent (fichiers plus légers)']) },
+    ],
+  },
+  {
+    id: 'payments',
+    title: 'Paiements (pass de 30 jours)',
+    description: 'GeniusPay : Wave, Orange Money, MTN, Moov et cartes en FCFA. YouCan Pay : cartes et CashPlus en dirhams. Webhooks : <PUBLIC_URL>/api/payments/geniuspay/webhook et /api/payments/youcanpay/webhook.',
+    fields: [
+      { key: 'GENIUSPAY_API_KEY', label: 'GeniusPay : clé API (pk_…)', secret: true, link: 'https://geniuspay.ci/dashboard', help: 'pk_sandbox_… pour tester, pk_live_… pour encaisser.' },
+      { key: 'GENIUSPAY_API_SECRET', label: 'GeniusPay : secret API (sk_…)', secret: true },
+      { key: 'GENIUSPAY_WEBHOOK_SECRET', label: 'GeniusPay : secret du webhook', secret: true, help: 'Obligatoire : sans lui, les paiements ne peuvent pas être confirmés automatiquement.' },
+      { key: 'YOUCANPAY_PRIVATE_KEY', label: 'YouCan Pay : clé privée (pri_…)', secret: true, link: 'https://youcanpay.com', help: 'Sert aussi à vérifier la signature des webhooks.' },
+      { key: 'YOUCANPAY_SANDBOX', label: 'YouCan Pay : mode test', options: opt(['false', 'Non (paiements réels)'], ['true', 'Oui (sandbox)']) },
+      { key: 'PLAN_CREATOR_PRICE_XOF', label: 'Prix Créateur (FCFA / 30 jours)' },
+      { key: 'PLAN_PRO_PRICE_XOF', label: 'Prix Pro (FCFA / 30 jours)' },
+      { key: 'PLAN_CREATOR_PRICE_MAD', label: 'Prix Créateur (MAD / 30 jours)' },
+      { key: 'PLAN_PRO_PRICE_MAD', label: 'Prix Pro (MAD / 30 jours)' },
     ],
   },
   {

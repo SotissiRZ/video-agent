@@ -28,6 +28,7 @@ class Client {
 }
 
 const published: Array<{ platform: PlatformId; userId: string }> = [];
+
 let base: string;
 let db: Db;
 let config: AppConfig;
@@ -262,6 +263,45 @@ describe('videos', () => {
     const later = await alice.json('POST', `/api/jobs/${jobId}/publish`, { platforms: ['facebook'], at: new Date(Date.now() + 3600_000).toISOString() });
     expect((await alice.json('DELETE', `/api/publications/${later.body.id}`)).body.cancelled).toBe(true);
     expect((await alice.json('POST', '/api/billing/checkout', { plan: 'pro' })).body.url).toBe('https://checkout.stripe.test/s');
+  }, 30_000);
+});
+
+describe('brand kit', () => {
+  it('stores a logo and colours and applies them to the videos', async () => {
+    const zsr = new Client(base);
+    await zsr.json('POST', '/api/auth/signup', { email: 'contact@zsr-technum.com', password: 'motdepasse9' });
+    expect((await zsr.json('GET', '/api/brand')).body).toEqual({ name: '', colors: [] });
+    expect((await zsr.json('PUT', '/api/brand', { name: 'ZSR-TechNum', colors: ['#0b1c8c', 'red'] })).body.code).toBe('invalid_colors');
+    const saved = await zsr.json('PUT', '/api/brand', { name: 'ZSR-TechNum', colors: ['#0b1c8c', '#3cc8c8'] });
+    expect(saved.body).toMatchObject({ name: 'ZSR-TechNum', colors: ['#0B1C8C', '#3CC8C8'] });
+
+    const upload = (body: Buffer) => fetch(`${base}/api/brand/logo`, { method: 'PUT', body: new Uint8Array(body), headers: { cookie: zsr.cookie, 'content-type': 'image/png' } });
+    const svg = await upload(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'));
+    expect(svg.status).toBe(400);
+    expect((await svg.json()).code).toBe('logo_format');
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64)]);
+    const ok = await upload(png);
+    expect(ok.status).toBe(200);
+    const kit = await ok.json();
+    expect(kit.logoUrl).toMatch(/^\/api\/brand\/logo/);
+    expect((await zsr.req('GET', kit.logoUrl)).status).toBe(200);
+    // Another customer never sees this logo.
+    const other = new Client(base);
+    await other.json('POST', '/api/auth/signup', { email: 'other-brand@example.com', password: 'motdepasse8' });
+    expect((await other.req('GET', '/api/brand/logo')).status).toBe(404);
+
+    const job = (await zsr.json('POST', '/api/jobs', { prompt: 'Une vidéo de 10 secondes pour présenter nos services numériques', durationSec: 10 })).body;
+    await waitFor(async () => (['completed', 'failed'].includes((await zsr.json('GET', `/api/jobs/${job.id}`)).body.status) ? true : undefined));
+    const sb = await (await zsr.req('GET', `/api/jobs/${job.id}/files/storyboard.json`)).json();
+    expect(sb.brand).toMatchObject({ name: 'ZSR-TechNum', logo: expect.stringMatching(/^brand\//), showWatermark: true });
+    expect(sb.theme.palette.background).toBe('#0B1C8C');
+
+    // Unticked for one video: no kit.
+    const plain = (await zsr.json('POST', '/api/jobs', { prompt: 'Une vidéo de 10 secondes pour un salon de thé', durationSec: 10, brandKit: false })).body;
+    await waitFor(async () => (['completed', 'failed'].includes((await zsr.json('GET', `/api/jobs/${plain.id}`)).body.status) ? true : undefined));
+    const sb2 = await (await zsr.req('GET', `/api/jobs/${plain.id}/files/storyboard.json`)).json();
+    expect(sb2.brand.logo).toBeUndefined();
+    expect((await zsr.json('DELETE', '/api/brand/logo')).body.logoUrl).toBeUndefined();
   }, 30_000);
 });
 

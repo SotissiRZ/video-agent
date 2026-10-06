@@ -42,6 +42,7 @@ export const providerStatus = (config: AppConfig) => {
     image: image.error ? `error: ${image.error}` : image.value?.id ?? 'none',
     video: video.error ? `error: ${video.error}` : video.value?.id ?? 'none',
     music: config.env.VIDEO_AGENT_MUSIC,
+    musicProvider: config.env.VIDEO_AGENT_MUSIC_PROVIDER,
     systemVoice: detectSystemEngine() ?? 'not available',
     secrets: describeSecrets(config.env),
   };

@@ -1,12 +1,18 @@
 import fs from 'node:fs';
 import { wavDurationSec } from '../../audio/wav';
 import { httpBuffer } from '../http';
+import { getLanguage } from '../../core/languages';
 import type { VoiceProvider, VoiceRequest, VoiceResult } from './types';
 
 /** OpenAI text-to-speech (/v1/audio/speech), WAV output. */
 export class OpenAIVoiceProvider implements VoiceProvider {
   readonly id = 'openai';
   constructor(private readonly opts: { apiKey: string; baseUrl: string; model: string; voice: string }) {}
+
+  supports(language: string): boolean {
+    const info = getLanguage(language);
+    return info ? Boolean(info.openai) : true;
+  }
 
   async synthesize(req: VoiceRequest): Promise<VoiceResult> {
     const audio = await httpBuffer(`${this.opts.baseUrl.replace(/\/+$/, '')}/audio/speech`, {

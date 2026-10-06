@@ -1,14 +1,15 @@
 // Video Agent web app: authentication, video creation, library, publishing, billing, admin.
 import { $, api, ApiError, errorText, escapeHtml, getTheme, icon, initChrome, onLanguageChange, post, renderIcons, savedLang, setLang, setTheme, toast } from './common.js';
 import { formatDate, formatDuration, getLang, SETTINGS_EN, STYLE_NAMES, t, TEMPLATE_NAMES } from './i18n.js';
-import { renderPlans } from './plans.js';
+import { formatMoney, renderPlans } from './plans.js';
+import { openFile } from './viewer.js';
 
 const STEPS = ['analyze', 'concept', 'script', 'storyboard', 'scenes', 'assets', 'animations', 'subtitles', 'audio', 'project', 'render', 'output'];
 const PLATFORMS = { youtube: 'YouTube', tiktok: 'TikTok', instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn' };
 const PROVIDER_INFO = { youtube: { name: 'YouTube', icon: 'youtube' }, tiktok: { name: 'TikTok', icon: 'tiktok' }, linkedin: { name: 'LinkedIn', icon: 'linkedin' }, meta: { name: 'Facebook + Instagram', icon: 'meta' } };
-const PAGES = ['create', 'library', 'schedule', 'connections', 'billing', 'account', 'admin'];
+const PAGES = ['create', 'library', 'schedule', 'connections', 'brand', 'billing', 'account', 'admin'];
 
-const state = { me: null, publicConfig: null, options: null, connections: null, job: null, source: null, publishJobId: null };
+const state = { me: null, publicConfig: null, options: null, connections: null, job: null, source: null, publishJobId: null, brand: null };
 
 // ---- Routing ------------------------------------------------------------------------------
 const route = () => {
@@ -22,15 +23,20 @@ const go = (hash) => {
 
 const onRoute = () => {
   const { page, params } = route();
-  if (!state.me) return showAuth(page === 'signup' ? 'signup' : 'login');
-  if (page === 'login' || page === 'signup') return go('create');
+  if (!state.me) return showAuth(['login', 'signup', 'forgot', 'reset'].includes(page) ? page : 'login');
+  if (['login', 'signup', 'forgot', 'reset'].includes(page)) return go('create');
+  if (params.get('verified')) {
+    toast(t(params.get('verified') === '1' ? 'verify.done' : 'verify.failed'), params.get('verified') === '1' ? 'success' : 'error');
+    history.replaceState(null, '', `#${page}`);
+    refreshMe().catch(() => undefined);
+  }
   const name = PAGES.includes(page) && (page !== 'admin' || state.me.user.role === 'admin') ? page : 'create';
   document.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === `page-${name}`));
   document.querySelectorAll('.nav a[data-page]').forEach((a) => a.classList.toggle('active', a.dataset.page === name));
   $('topTitle').textContent = t(name === 'schedule' ? 'nav.schedule' : `nav.${name}`);
   $('newVideoBtn').hidden = name === 'create';
   $('appView').classList.remove('menu-open');
-  ({ create: () => openJobFromParams(params), library: loadLibrary, schedule: loadSchedule, connections: () => loadConnections(params), billing: () => loadBilling(params), account: loadAccount, admin: loadAdmin })[name]?.();
+  ({ create: () => openJobFromParams(params), library: loadLibrary, schedule: loadSchedule, connections: () => loadConnections(params), brand: loadBrand, billing: () => loadBilling(params), account: loadAccount, admin: loadAdmin })[name]?.();
 };
 window.addEventListener('hashchange', onRoute);
 
@@ -38,13 +44,13 @@ window.addEventListener('hashchange', onRoute);
 const showAuth = (mode) => {
   $('appView').hidden = true;
   $('authView').hidden = false;
-  $('loginForm').hidden = mode !== 'login';
-  $('signupForm').hidden = mode !== 'signup';
+  ['login', 'signup', 'forgot', 'reset'].forEach((m) => ($(`${m}Form`).hidden = mode !== m));
+  $('forgotForm').querySelector('[data-done]').hidden = true;
   const cfg = state.publicConfig;
   $('firstUserNote').hidden = !cfg?.firstUser;
   $('signupClosed').hidden = cfg?.signupOpen !== false;
   $('signupForm').querySelector('button[type=submit]').disabled = cfg?.signupOpen === false;
-  document.title = `${t(mode === 'login' ? 'auth.login' : 'auth.signup')} · Video Agent`;
+  document.title = `${t({ login: 'auth.login', signup: 'auth.signup', forgot: 'auth.forgot.title', reset: 'auth.reset.title' }[mode])} · Video Agent`;
 };
 
 const bindAuthForm = (form, path, extra = () => ({})) =>
@@ -67,6 +73,21 @@ const bindAuthForm = (form, path, extra = () => ({})) =>
   });
 bindAuthForm($('loginForm'), '/api/auth/login');
 bindAuthForm($('signupForm'), '/api/auth/signup', () => ({ locale: getLang() }));
+bindAuthForm($('resetForm'), '/api/auth/reset', () => ({ token: route().params.get('token') ?? '' }));
+
+$('forgotForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const error = form.querySelector('[data-error]');
+  error.hidden = true;
+  try {
+    await post('/api/auth/forgot', { email: form.email.value });
+    form.querySelector('[data-done]').hidden = false;
+  } catch (err) {
+    error.textContent = errorText(err);
+    error.hidden = false;
+  }
+});
 
 $('logout').addEventListener('click', async () => {
   await post('/api/auth/logout').catch(() => undefined);
@@ -86,6 +107,7 @@ const startApp = async () => {
   renderShell();
   await loadOptions();
   loadConnectionsData().catch(() => undefined);
+  loadBrandData().catch(() => undefined);
   refreshPendingCount();
   onRoute();
 };
@@ -97,6 +119,8 @@ const refreshMe = async () => {
 
 const renderShell = () => {
   const { user, plan, usage } = state.me;
+  $('verifyBanner').hidden = user.emailVerified;
+  $('verifyText').textContent = t(state.me.requireVerification ? 'verify.required' : 'verify.banner', { email: user.email });
   $('adminLink').hidden = user.role !== 'admin';
   $('userName').textContent = user.name || user.email.split('@')[0];
   $('userEmail').textContent = user.email;
@@ -110,6 +134,15 @@ const renderShell = () => {
   $('planNote').hidden = !plan.badge;
   $('planNoteText').textContent = t('create.badgeNote', { d: formatDuration(plan.maxDurationSec) });
 };
+
+$('resendVerify').addEventListener('click', async () => {
+  try {
+    await post('/api/me/verify');
+    toast(t('verify.sent'), 'success');
+  } catch (err) {
+    toast(errorText(err), 'error');
+  }
+});
 
 $('menuBtn').addEventListener('click', () => $('appView').classList.toggle('menu-open'));
 $('appView').addEventListener('click', (e) => {
@@ -153,6 +186,50 @@ const updateCapHints = () => {
 };
 ['voice', 'stock'].forEach((id) => $(id).addEventListener('change', updateCapHints));
 
+// Files open in the in-app viewer (formatted); Ctrl/Cmd-click still opens the raw file.
+['fileStoryboard', 'fileScript', 'fileSrt', 'fileCredits'].forEach((id) =>
+  $(id).addEventListener('click', (e) => {
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+    e.preventDefault();
+    openFile($(id).getAttribute('href'), $(id).textContent.trim());
+  }),
+);
+
+// WhatsApp: share the MP4 itself (Status or chat) from a phone; elsewhere, download it.
+let shareCache = null;
+$('shareWhatsapp').addEventListener('click', async () => {
+  const btn = $('shareWhatsapp');
+  const url = $('download').href;
+  const name = $('download').getAttribute('download') || 'video.mp4';
+  if (!navigator.canShare) {
+    $('download').click();
+    toast(t('job.whatsapp.fallback'), 'success');
+    return;
+  }
+  btn.disabled = true;
+  try {
+    if (shareCache?.url !== url) {
+      toast(t('job.whatsapp.preparing'));
+      const res = await fetch(url, { credentials: 'same-origin' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      shareCache = { url, file: new File([blob], name, { type: blob.type || 'video/mp4' }) };
+    }
+    if (!navigator.canShare({ files: [shareCache.file] })) {
+      $('download').click();
+      toast(t('job.whatsapp.fallback'), 'success');
+      return;
+    }
+    await navigator.share({ files: [shareCache.file] });
+  } catch (err) {
+    // A long download can outlive the tap that allowed sharing: the file is ready, tap again.
+    if (err?.name === 'NotAllowedError') toast(t('job.whatsapp.again'));
+    else if (err?.name !== 'AbortError') toast(errorText(err), 'error');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 document.querySelectorAll('[data-example]').forEach((b) =>
   b.addEventListener('click', () => {
     $('prompt').value = t(b.dataset.example);
@@ -185,6 +262,7 @@ $('createForm').addEventListener('submit', async (e) => {
   if (format) body.format = format;
   if ($('duration').value) body.durationSec = Number($('duration').value);
   if ($('mediaCoverage').value) body.mediaCoverage = $('mediaCoverage').value;
+  if (!$('brandKitToggle').hidden) body.brandKit = $('brandKit').checked;
   const res = /^(\d{2,4})x(\d{2,4})$/.exec($('resolution').value.trim());
   if (res) Object.assign(body, { width: Number(res[1]), height: Number(res[2]) });
   $('submit').disabled = true;
@@ -552,43 +630,176 @@ $('providerCards').addEventListener('change', async (e) => {
   }
 });
 
+// ---- Brand kit -------------------------------------------------------------------------------
+const hasBrand = (kit) => Boolean(kit && (kit.name || kit.colors.length || kit.logoUrl));
+
+const loadBrandData = async () => {
+  state.brand = await api('/api/brand');
+  $('brandKitToggle').hidden = !hasBrand(state.brand);
+  return state.brand;
+};
+
+const colorRow = (value) => `<div class="color-item"><input type="color" value="${escapeHtml(value)}" data-color-picker /><input type="text" value="${escapeHtml(value)}" maxlength="7" data-color-text /><button type="button" class="btn btn-ghost btn-icon btn-sm" data-color-remove title="${escapeHtml(t('common.delete'))}">${icon('x', 14)}</button></div>`;
+
+const renderBrandColors = (colors) => {
+  $('brandColors').innerHTML =
+    colors.map(colorRow).join('') + (colors.length < 4 ? `<button type="button" class="btn btn-secondary btn-sm" data-color-add>${icon('plus', 14)}</button>` : '');
+};
+const brandColorValues = () => [...$('brandColors').querySelectorAll('[data-color-text]')].map((i) => i.value.trim().toUpperCase()).filter(Boolean);
+
+const loadBrand = async () => {
+  const kit = await loadBrandData().catch(() => ({ name: '', colors: [] }));
+  $('brandForm').name.value = kit.name ?? '';
+  renderBrandColors(kit.colors ?? []);
+  renderLogo(kit.logoUrl);
+};
+
+const renderLogo = (url) => {
+  $('logoPreview').innerHTML = url ? `<img src="${escapeHtml(url)}" alt="" />` : icon('image', 28);
+  $('logoRemove').hidden = !url;
+};
+
+$('brandColors').addEventListener('input', (e) => {
+  const item = e.target.closest('.color-item');
+  if (!item) return;
+  if (e.target.matches('[data-color-picker]')) item.querySelector('[data-color-text]').value = e.target.value.toUpperCase();
+  if (e.target.matches('[data-color-text]') && /^#[0-9a-f]{6}$/i.test(e.target.value)) item.querySelector('[data-color-picker]').value = e.target.value;
+});
+$('brandColors').addEventListener('click', (e) => {
+  if (e.target.closest('[data-color-add]')) renderBrandColors([...brandColorValues(), state.brand?.colors?.length ? '#FFFFFF' : '#0B1C8C']);
+  const remove = e.target.closest('[data-color-remove]');
+  if (remove) {
+    remove.closest('.color-item').remove();
+    renderBrandColors(brandColorValues());
+  }
+});
+$('brandForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    state.brand = await api('/api/brand', { method: 'PUT', body: JSON.stringify({ name: $('brandForm').name.value, colors: brandColorValues() }) });
+    $('brandKitToggle').hidden = !hasBrand(state.brand);
+    toast(t('brand.saved'), 'success');
+  } catch (err) {
+    toast(errorText(err), 'error');
+  }
+});
+$('logoInput').addEventListener('change', async () => {
+  const file = $('logoInput').files[0];
+  if (!file) return;
+  try {
+    // Raw upload: the server checks the real image type and size.
+    const res = await fetch('/api/brand/logo', { method: 'PUT', body: file, headers: { 'content-type': file.type || 'application/octet-stream' }, credentials: 'same-origin' });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new ApiError(res.status, body);
+    state.brand = body;
+    renderLogo(body.logoUrl);
+    $('brandKitToggle').hidden = !hasBrand(state.brand);
+    toast(t('brand.saved'), 'success');
+  } catch (err) {
+    toast(errorText(err), 'error');
+  } finally {
+    $('logoInput').value = '';
+  }
+});
+$('logoRemove').addEventListener('click', async () => {
+  try {
+    state.brand = await api('/api/brand/logo', { method: 'DELETE' });
+    renderLogo(undefined);
+    $('brandKitToggle').hidden = !hasBrand(state.brand);
+  } catch (err) {
+    toast(errorText(err), 'error');
+  }
+});
+
 // ---- Billing ----------------------------------------------------------------------------------
+const PAY_STATUS = { pending: 'info', paid: 'success', failed: 'danger', cancelled: '' };
+const payBadge = (status) => `<span class="badge ${PAY_STATUS[status] ?? ''}"><span class="dot"></span>${escapeHtml(t(`pay.status.${status}`))}</span>`;
+
+/** Back from the payment page: ask the server (which asks the gateway) until the pass is active. */
+const followPayment = async (ref) => {
+  toast(t('billing.paymentPending'));
+  for (let i = 0; i < 10; i++) {
+    try {
+      const r = await post(`/api/billing/payments/${encodeURIComponent(ref)}/refresh`);
+      if (r.payment.status === 'paid') {
+        state.me = r.account;
+        renderShell();
+        toast(t('billing.paymentDone'), 'success');
+        return loadBilling();
+      }
+      if (r.payment.status === 'failed' || r.payment.status === 'cancelled') return toast(t('billing.paymentFailed'), 'error');
+    } catch {
+      /* keep trying */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  toast(t('billing.paymentSlow'));
+  loadBilling();
+};
+
 const loadBilling = async (params) => {
   if (params?.get('checkout') === 'success') toast(t('billing.success'), 'success');
   if (params?.get('checkout') === 'cancel') toast(t('billing.cancelled'));
-  if (params?.get('checkout')) history.replaceState(null, '', '#billing');
+  const payment = params?.get('payment');
+  if (payment === 'success' && params.get('ref')) void followPayment(params.get('ref'));
+  if (payment === 'error') toast(t('billing.paymentFailed'), 'error');
+  if (params?.get('checkout') || payment) history.replaceState(null, '', '#billing');
   await refreshMe().catch(() => undefined);
   const { user, plan, usage, billing } = state.me;
-  $('billingDisabled').hidden = billing;
-  $('portalBtn').hidden = !billing || !user.subscriptionStatus;
+  const providers = state.me.paymentProviders ?? [];
+  const prepaid = user.subscriptionStatus === 'prepaid';
+  $('billingDisabled').hidden = billing || providers.length > 0;
+  $('portalBtn').hidden = !billing || !user.subscriptionStatus || prepaid;
   $('billingPlan').textContent = t(`plan.${plan.id}`);
-  $('billingRenew').textContent = user.currentPeriodEnd && plan.id !== 'free' ? t('billing.renews', { date: formatDate(user.currentPeriodEnd, false) }) : t(`plan.${plan.id}.desc`);
+  const expired = prepaid && user.currentPeriodEnd && new Date(user.currentPeriodEnd) < new Date();
+  $('billingRenew').textContent = expired
+    ? t('billing.expired', { date: formatDate(user.currentPeriodEnd, false) })
+    : user.currentPeriodEnd && plan.id !== 'free'
+      ? t(prepaid ? 'billing.activeUntil' : 'billing.renews', { date: formatDate(user.currentPeriodEnd, false) })
+      : t(`plan.${plan.id}.desc`);
   const minutes = Math.round((usage.seconds / 60) * 10) / 10;
   $('meterVideosText').textContent = `${usage.videos} / ${plan.videosPerMonth}`;
   $('meterVideos').style.width = `${Math.min(100, (usage.videos / plan.videosPerMonth) * 100)}%`;
   $('meterMinutesText').textContent = `${minutes} / ${plan.minutesPerMonth}`;
   $('meterMinutes').style.width = `${Math.min(100, (minutes / plan.minutesPerMonth) * 100)}%`;
   const plans = state.publicConfig?.plans ?? [];
-  const order = plans.map((p) => p.id);
+  const stripeSubscriber = Boolean(user.subscriptionStatus) && !prepaid;
   $('billingPlans').innerHTML = renderPlans(plans, {
     current: plan.id,
     action: (p) => {
-      if (p.id === plan.id) return { label: t('plan.current'), disabled: true };
-      if (p.id === 'free') return user.subscriptionStatus ? { label: t('billing.manage'), attrs: 'data-portal' } : null;
-      if (!billing || !p.purchasable) return { label: t('plan.contact'), disabled: true };
-      if (user.subscriptionStatus && order.indexOf(p.id) !== order.indexOf(plan.id)) return { label: t('plan.choose', { name: t(`plan.${p.id}`) }), attrs: 'data-portal' };
-      return { label: t('plan.choose', { name: t(`plan.${p.id}`) }), attrs: `data-checkout="${p.id}"` };
+      if (p.id === 'free') return p.id === plan.id ? { label: t('plan.current'), disabled: true } : stripeSubscriber ? { label: t('billing.manage'), attrs: 'data-portal' } : null;
+      if (stripeSubscriber) return p.id === plan.id ? { label: t('plan.current'), disabled: true } : { label: t('plan.choose', { name: t(`plan.${p.id}`) }), attrs: 'data-portal' };
+      const actions = [];
+      // Local passes: one button per gateway (a running pass of this plan is extended).
+      for (const provider of providers) {
+        const label = p.id === plan.id && prepaid ? `${t('billing.renew')} · ${t(provider.id === 'geniuspay' ? 'billing.payMobile' : 'billing.payCard')}` : t(provider.id === 'geniuspay' ? 'billing.payMobile' : 'billing.payCard');
+        actions.push({ label, icon: provider.id === 'geniuspay' ? 'phone' : 'card', attrs: `data-pay="${p.id}" data-provider="${provider.id}"`, primary: actions.length === 0 });
+      }
+      if (billing && !prepaid) actions.push({ label: t('billing.payStripe'), icon: 'card', attrs: `data-checkout="${p.id}"`, primary: actions.length === 0 });
+      if (!actions.length) return p.id === plan.id ? { label: t('plan.current'), disabled: true } : { label: t('plan.contact'), disabled: true };
+      return actions;
     },
   });
+  const payments = await api('/api/billing/payments').catch(() => []);
+  $('paymentsCard').hidden = !payments.length;
+  $('paymentRows').innerHTML = payments
+    .map((p) => `<tr><td>${escapeHtml(formatDate(p.createdAt))}</td><td>${escapeHtml(t(`plan.${p.plan}`))} · ${p.months * 30} j</td><td>${escapeHtml(t(`pay.provider.${p.provider}`))}</td><td>${escapeHtml(formatMoney(p.amount, p.currency))}</td><td>${payBadge(p.status)}</td></tr>`)
+    .join('');
 };
 
 $('billingPlans').addEventListener('click', async (e) => {
   const checkout = e.target.closest('[data-checkout]');
   const portal = e.target.closest('[data-portal]');
+  const pay = e.target.closest('[data-pay]');
   try {
+    if (pay) {
+      pay.disabled = true;
+      location.href = (await post('/api/billing/pay', { plan: pay.dataset.pay, provider: pay.dataset.provider })).url;
+    }
     if (checkout) location.href = (await post('/api/billing/checkout', { plan: checkout.dataset.checkout })).url;
     if (portal) location.href = (await post('/api/billing/portal')).url;
   } catch (err) {
+    if (pay) pay.disabled = false;
     toast(errorText(err), 'error');
   }
 });
@@ -652,6 +863,7 @@ const loadAdmin = async () => {
       ['admin.stats.paying', stats.paying],
       ['admin.stats.videos', stats.videos_month],
       ['admin.stats.queue', `${stats.queued} / ${stats.running}`],
+      ...(stats.revenue_xof || stats.revenue_mad ? [['admin.revenue', [stats.revenue_xof ? formatMoney(stats.revenue_xof, 'XOF') : '', stats.revenue_mad ? formatMoney(stats.revenue_mad, 'MAD') : ''].filter(Boolean).join(' · ')]] : []),
     ]
       .map(([k, v]) => `<div class="card stat"><div class="k">${escapeHtml(t(k))}</div><div class="v">${escapeHtml(String(v))}</div></div>`)
       .join('');
@@ -667,6 +879,12 @@ const loadAdmin = async () => {
         <td>${escapeHtml(formatDate(u.createdAt, false))}</td>
       </tr>`,
     )
+    .join('');
+  const payments = await api('/api/admin/payments').catch(() => []);
+  $('adminPaymentsCard').hidden = !payments.length;
+  $('adminPaymentRows').innerHTML = payments
+    .slice(0, 50)
+    .map((p) => `<tr><td>${escapeHtml(formatDate(p.createdAt))}</td><td>${escapeHtml(p.email ?? '')}</td><td>${escapeHtml(t(`plan.${p.plan}`))}</td><td>${escapeHtml(t(`pay.provider.${p.provider}`))}</td><td>${escapeHtml(formatMoney(p.amount, p.currency))}</td><td>${payBadge(p.status)}</td></tr>`)
     .join('');
   if (settings.error) {
     $('adminSettings').innerHTML = `<div class="alert warning">${escapeHtml(settings.error)}</div>`;
@@ -747,7 +965,7 @@ $('adminSettings').addEventListener('click', async (e) => {
 
 // ---- Language changes re-render dynamic content ----------------------------------------------------
 onLanguageChange((lang) => {
-  if (!state.me) return showAuth(route().page === 'signup' ? 'signup' : 'login');
+  if (!state.me) return showAuth(['login', 'signup', 'forgot', 'reset'].includes(route().page) ? route().page : 'login');
   renderShell();
   renderOptions();
   if (state.job) showJob(state.job);
@@ -755,7 +973,7 @@ onLanguageChange((lang) => {
   if (state.job?.status === 'completed') resetPublish(state.job.id);
   const page = route().page;
   $('topTitle').textContent = t(`nav.${PAGES.includes(page) ? page : 'create'}`);
-  ({ library: loadLibrary, schedule: loadSchedule, connections: loadConnections, billing: loadBilling, account: loadAccount, admin: loadAdmin })[page]?.();
+  ({ library: loadLibrary, schedule: loadSchedule, connections: loadConnections, brand: loadBrand, billing: loadBilling, account: loadAccount, admin: loadAdmin })[page]?.();
   if (lang !== state.me.user.locale) api('/api/me', { method: 'PATCH', body: JSON.stringify({ locale: lang }) }).then((me) => (state.me = me)).catch(() => undefined);
 });
 

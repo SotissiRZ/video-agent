@@ -1,9 +1,12 @@
 import type { AppConfig } from '../config/config';
 import { ConfigError } from '../core/errors';
+import { getLanguage } from '../core/languages';
 import { normalizeResolution, resolveFormat } from '../core/formats';
 import type { ParsedPrompt, VideoBrief, VideoOptions } from '../core/types';
 import { DEFAULT_STYLE_ID, STYLES } from '../remotion/contract/styles';
 import { selectTemplate } from '../templates/selector';
+
+export const WHATSAPP_STATUS_MAX_SEC = 60;
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 
@@ -25,7 +28,12 @@ export const buildBrief = (parsed: ParsedPrompt, options: VideoOptions, config: 
   resolution ??= parsed.format ?? resolveFormat(template.defaultFormat) ?? resolveFormat(env.VIDEO_AGENT_DEFAULT_FORMAT) ?? resolveFormat('landscape')!;
   const { width, height } = normalizeResolution(resolution);
 
-  const durationSec = clamp(Math.round(options.durationSec ?? parsed.durationSec ?? env.VIDEO_AGENT_DEFAULT_DURATION ?? template.defaultDurationSec), 3, Math.min(600, options.maxDurationSec ?? 600));
+  // WhatsApp Status plays videos of up to 60 seconds.
+  const whatsapp = parsed.platform === 'whatsapp' || /^(whatsapp|statut|status)$/i.test(options.format ?? '');
+  const maxSec = Math.min(600, options.maxDurationSec ?? 600, whatsapp ? WHATSAPP_STATUS_MAX_SEC : 600);
+  const wanted = Math.round(options.durationSec ?? parsed.durationSec ?? env.VIDEO_AGENT_DEFAULT_DURATION ?? template.defaultDurationSec);
+  if (whatsapp && wanted > maxSec) notes.push(`WhatsApp Status: duration limited to ${maxSec} s`);
+  const durationSec = clamp(wanted, 3, maxSec);
   const fps = clamp(Math.round(options.fps ?? parsed.fps ?? env.VIDEO_AGENT_DEFAULT_FPS), 1, 120);
 
   // Style
@@ -34,12 +42,18 @@ export const buildBrief = (parsed: ParsedPrompt, options: VideoOptions, config: 
   styleId ??= parsed.styleHints[0] ?? template.defaultStyle ?? DEFAULT_STYLE_ID;
 
   const configuredLanguage = env.VIDEO_AGENT_LANGUAGE === 'auto' ? undefined : env.VIDEO_AGENT_LANGUAGE;
-  const language = (options.language && options.language !== 'auto' ? options.language : configuredLanguage) ?? parsed.language;
-  if (language !== 'fr' && language !== 'en') notes.push(`language "${language}" not supported by offline copywriting; falling back to the LLM or English`);
+  const requested = (options.language && options.language !== 'auto' ? options.language : undefined) ?? parsed.locale ?? configuredLanguage ?? parsed.language;
+  const info = getLanguage(requested);
+  if (!info) notes.push(`unknown language "${requested}"; using ${parsed.language}`);
+  const locale = info?.code ?? parsed.language;
+  // The offline copywriter and captions use French or English; the LLM writes in the requested language.
+  const base = info?.base ?? parsed.language;
+  if (locale !== base) notes.push(`language ${info!.name}: written by the LLM`);
 
   const brief: VideoBrief = {
     prompt: parsed.raw,
-    language: language === 'fr' ? 'fr' : 'en',
+    language: base,
+    locale,
     durationSec,
     fps,
     width,

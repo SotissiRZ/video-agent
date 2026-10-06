@@ -68,7 +68,7 @@ export const validateStoryboard = (input: unknown, options: ValidateOptions = {}
 
   if (options.publicDir) {
     const files = [
-      ...sb.scenes.flatMap((s) => [s.media?.src, s.voiceover?.src]),
+      ...sb.scenes.flatMap((s) => [s.media?.src, ...(s.shots ?? []).map((m) => m.src), s.voiceover?.src]),
       sb.audio.music?.src,
       sb.brand.logo,
     ].filter((s): s is string => Boolean(s) && !isRemote(s!));

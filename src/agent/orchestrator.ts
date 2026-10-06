@@ -9,6 +9,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { synthesizeMusic } from '../audio/music';
+import { getLanguage } from '../core/languages';
+import { buildMusicPrompt } from '../providers/music/prompt';
+import { resolveMusicProvider } from '../providers/music/registry';
+import type { MusicProvider } from '../providers/music/types';
 import { AssetLibrary, importAsset } from '../assets/manager';
 import type { AppConfig } from '../config/config';
 import { errorMessage, StoryboardValidationError } from '../core/errors';
@@ -57,6 +61,8 @@ export interface AgentDependencies {
   /** `null` forces procedural planning. `undefined` = resolve from configuration. */
   llm?: LLMProvider | null;
   voice?: VoiceProvider | null;
+  /** AI music. `undefined` = from VIDEO_AGENT_MUSIC_PROVIDER. */
+  music?: MusicProvider | null;
   image?: ImageProvider | null;
   video?: VideoProvider | null;
   stock?: StockProvider[];
@@ -155,15 +161,20 @@ export class VideoAgent {
         // A detailed script ("SCÈNE 1 — … (0–5 s)") sets the duration from its timings.
         const structured = parseStructuredPrompt(request.prompt);
         const timedOptions = structured?.totalSec && !options.durationSec ? { ...options, durationSec: Math.round(structured.totalSec) } : options;
-        const { brief, notes } = buildBrief(parsed, timedOptions, this.config);
+        const built = buildBrief(parsed, timedOptions, this.config);
+        const { notes } = built;
+        // Brand kit: its name applies when the prompt does not name a brand.
+        const brief = !built.brief.brand && options.brandName ? { ...built.brief, brand: options.brandName } : built.brief;
         notes.forEach((n) => this.logger.debug(n));
         const baseStyle = getStyle(brief.styleId);
-        const colors = parseHexColors(request.prompt);
+        // Colours written in the prompt win over the brand kit.
+        const promptColors = parseHexColors(request.prompt);
+        const colors = promptColors.length ? promptColors : (options.brandColors ?? []);
         const style = colors.length ? { ...baseStyle, theme: applyBrandColors(baseStyle.theme, colors) } : baseStyle;
         return { brief, template: getTemplate(brief.templateId)!, style, structured };
       },
       ({ brief }) =>
-        `${brief.templateId} · ${brief.width}×${brief.height} · ${brief.durationSec}s · ${brief.fps} fps · style ${brief.styleId} · ${brief.language}` +
+        `${brief.templateId} · ${brief.width}×${brief.height} · ${brief.durationSec}s · ${brief.fps} fps · style ${brief.styleId} · ${brief.locale}` +
         (brief.brand ? ` · marque ${brief.brand}` : '') +
         (brief.audience ? ` · cible ${brief.audience}` : ''),
     );
@@ -217,6 +228,10 @@ export class VideoAgent {
         const r = await planner.script(brief, template, concept, slots, signal);
         if (r.warning) warnings.push(r.warning);
         scriptSource = r.source;
+        if (r.source === 'procedural' && brief.locale !== brief.language) {
+          warnings.push(`${getLanguage(brief.locale)?.name ?? brief.locale} needs an AI model (LLM) to write the texts: video written in ${brief.language === 'fr' ? 'French' : 'English'}.`);
+          brief.locale = brief.language;
+        }
         return r.value;
       },
       (s) => `${s.length} scènes écrites`,
@@ -253,18 +268,27 @@ export class VideoAgent {
         maxGeneratedClips: this.config.env.VIDEO_AGENT_MAX_GENERATED_CLIPS,
         // LLM scripts produce English visual keywords; procedural ones are in the brief's language.
         keywordLanguage: scriptSource === 'procedural' ? brief.language : 'en',
+        shotsPerScene: this.config.env.VIDEO_AGENT_SHOTS_PER_SCENE,
       },
     );
     storyboard = await step(
       'assets',
       'Sélection des visuels',
-      (progress) => director.run(storyboard, planned, brief, paths, warnings, progress, signal),
+      async (progress) => {
+        const sb = await director.run(storyboard, planned, brief, paths, warnings, progress, signal);
+        // Brand kit logo (uploaded by the customer) wins over the shared assets library.
+        if (options.brandLogo && fs.existsSync(options.brandLogo)) {
+          return { ...sb, brand: { ...sb.brand, logo: importAsset(options.brandLogo, paths.publicDir, 'brand'), showWatermark: true } };
+        }
+        return sb;
+      },
       (sb) => {
         const media = sb.scenes.filter((s) => s.media);
         if (!media.length) return `aucun visuel trouvé${sb.brand.logo ? ' (logo seul)' : ''} — fonds animés procéduraux`;
         const bySource = new Map<string, number>();
         for (const s of media) bySource.set(s.media!.origin, (bySource.get(s.media!.origin) ?? 0) + 1);
-        return `${media.length}/${sb.scenes.length} scènes illustrées (${[...bySource].map(([k, v]) => `${k}×${v}`).join(', ')})${sb.brand.logo ? ' + logo' : ''}`;
+        const extra = sb.scenes.reduce((n, s) => n + (s.shots?.length ?? 0), 0);
+        return `${media.length}/${sb.scenes.length} scènes illustrées (${[...bySource].map(([k, v]) => `${k}×${v}`).join(', ')})${extra ? ` + ${extra} plans` : ''}${sb.brand.logo ? ' + logo' : ''}`;
       },
     );
     const credits = director.credits;
@@ -288,7 +312,13 @@ export class VideoAgent {
     // ---- 9. Voice-over & music ---------------------------------------------------------
     let voiceProvider: VoiceProvider | null = null;
     if (brief.voice) {
-      voiceProvider = this.deps.voice !== undefined ? this.deps.voice : safeResolve(() => resolveVoiceProvider(this.config), warnings);
+      voiceProvider = this.deps.voice !== undefined ? this.deps.voice : safeResolve(() => resolveVoiceProvider(this.config, undefined, brief.locale), warnings);
+      if (voiceProvider?.supports?.(brief.locale) === false) {
+        const other = this.deps.voice !== undefined ? null : safeResolve(() => resolveVoiceProvider(this.config, 'auto', brief.locale), warnings);
+        const name = getLanguage(brief.locale)?.name ?? brief.locale;
+        warnings.push(other ? `voice ${voiceProvider.id} cannot speak ${name}: using ${other.id}` : `no voice available for ${name} (set HF_TOKEN for the experimental MMS voices): video without voice-over`);
+        voiceProvider = other;
+      }
     }
     let musicSource = 'none';
     storyboard = await step(
@@ -304,7 +334,7 @@ export class VideoAgent {
           if (sb.scenes.some((s) => s.voiceover)) sb = paceScenesToVoiceover(sb, { targetFrames: Math.round(targetSec * sb.format.fps), minFill: script ? 1 : undefined });
         }
         if (brief.music) {
-          const music = this.prepareMusic(sb, brief, paths, style.theme.motion, style.id === 'elegant');
+          const music = await this.prepareMusic(sb, brief, paths, style.theme.motion, style.id === 'elegant', warnings, progress, signal);
           if (music) {
             musicSource = music.source;
             sb = { ...sb, audio: { music: { src: music.src, volume: voiceProvider ? 0.3 : 0.45, duckedVolume: 0.1 } } };
@@ -440,7 +470,7 @@ export class VideoAgent {
       progress(i / scenes.length, `Voix-off ${i + 1}/${scenes.length}`);
       const outFile = path.join(paths.publicDir, 'voice', `${scene.id}.wav`);
       try {
-        let { durationSec } = await provider.synthesize({ text, language: brief.language, outFile, signal });
+        let { durationSec } = await provider.synthesize({ text, language: brief.locale, outFile, signal });
         // TTS engines pad sentences with silence: trim it so the voice starts right on cue.
         if (fs.existsSync(outFile)) {
           const trimmed = trimWavSilence(fs.readFileSync(outFile));
@@ -461,7 +491,16 @@ export class VideoAgent {
     return { ...storyboard, scenes };
   }
 
-  private prepareMusic(storyboard: Storyboard, brief: VideoBrief, paths: JobPaths, mood: 'calm' | 'normal' | 'energetic', minor: boolean): { src: string; source: string } | undefined {
+  private async prepareMusic(
+    storyboard: Storyboard,
+    brief: VideoBrief,
+    paths: JobPaths,
+    mood: 'calm' | 'normal' | 'energetic',
+    minor: boolean,
+    warnings: string[],
+    progress: (p: number, msg?: string) => void,
+    signal?: AbortSignal,
+  ): Promise<{ src: string; source: string } | undefined> {
     const mode = this.config.env.VIDEO_AGENT_MUSIC;
     if (mode === 'none') return undefined;
     if (mode === 'assets' || mode === 'auto') {
@@ -469,11 +508,26 @@ export class VideoAgent {
         const track = AssetLibrary.load(this.config.paths.assets).music([brief.styleId, mood, ...brief.keywords]);
         if (track) return { src: importAsset(track.file, paths.publicDir, 'music'), source: `asset:${track.relative}` };
       } catch {
-        /* fall through to procedural */
+        /* fall through */
       }
       if (mode === 'assets') return undefined;
     }
     const durationSec = storyboard.format.durationInFrames / storyboard.format.fps;
+    // An original track composed for this video; procedural synthesis when unavailable.
+    const ai = this.deps.music !== undefined ? this.deps.music : safeResolve(() => resolveMusicProvider(this.config), warnings);
+    if (ai) {
+      try {
+        progress(0.9, `composition de la musique (${ai.id})`);
+        const prompt = buildMusicPrompt({ prompt: brief.prompt, mood, minor });
+        const track = await ai.generate({ prompt, durationSec: Math.min(ai.maxDurationSec, Math.ceil(durationSec) + 2), signal });
+        const file = `music/generated.${track.extension}`;
+        fs.writeFileSync(path.join(paths.publicDir, file), track.audio);
+        return { src: file, source: `ia:${ai.id}` };
+      } catch (err) {
+        if (signal?.aborted) throw err;
+        warnings.push(`AI music unavailable, using synthesized music: ${errorMessage(err)}`);
+      }
+    }
     const seed = [...brief.prompt].reduce((s, c) => (s + c.charCodeAt(0)) % 997, 0);
     fs.writeFileSync(path.join(paths.publicDir, 'music', 'procedural.wav'), synthesizeMusic({ durationSec, mood, minor, seed }));
     return { src: 'music/procedural.wav', source: `procedural (${mood})` };

@@ -15,6 +15,7 @@ export const IMAGE_PROVIDER_IDS = ['auto', 'none', 'cloudflare', 'huggingface', 
 export const VOICE_PROVIDER_IDS = ['auto', 'none', 'openai', 'elevenlabs', 'piper', 'system'] as const;
 export const VIDEO_PROVIDER_IDS = ['none', 'replicate'] as const;
 export const MUSIC_MODES = ['auto', 'procedural', 'assets', 'none'] as const;
+export const MUSIC_PROVIDER_IDS = ['none', 'auto', 'elevenlabs', 'stability', 'replicate'] as const;
 
 const emptyToUndefined = (v: unknown) => (typeof v === 'string' && v.trim() === '' ? undefined : v);
 const optionalString = z.preprocess(emptyToUndefined, z.string().trim().optional());
@@ -71,6 +72,8 @@ const EnvSchema = z.object({
   /** auto (all configured) | none | comma-separated list in priority order. */
   VIDEO_AGENT_STOCK_PROVIDERS: z.preprocess(emptyToUndefined, z.string().regex(/^[a-z,\s-]+$/).default('auto')),
   VIDEO_AGENT_STOCK_VIDEOS: bool(true),
+  /** Visuals per scene: long scenes show up to this many photos/clips in a row (1 = one per scene). */
+  VIDEO_AGENT_SHOTS_PER_SCENE: int(3, 1, 4),
   /** Order in which media sources are tried for each scene. */
   VIDEO_AGENT_MEDIA_SOURCES: z.preprocess(
     emptyToUndefined,
@@ -103,6 +106,8 @@ const EnvSchema = z.object({
 
   // --- Music -----------------------------------------------------------
   VIDEO_AGENT_MUSIC: enumWithDefault(MUSIC_MODES, 'auto'),
+  VIDEO_AGENT_MUSIC_PROVIDER: enumWithDefault(MUSIC_PROVIDER_IDS, 'none'),
+  REPLICATE_MUSIC_MODEL: z.preprocess(emptyToUndefined, z.string().default('meta/musicgen:671ac645ce5e552cc63a54a2bbff63fcf798043055d2dac5fc9e36a837eedcfb')),
 
   // --- Paths & defaults --------------------------------------------------
   VIDEO_AGENT_OUTPUT_DIR: z.preprocess(emptyToUndefined, z.string().default('output')),
@@ -191,9 +196,36 @@ const EnvSchema = z.object({
   STRIPE_WEBHOOK_SECRET: optionalString,
   STRIPE_PRICE_CREATOR: optionalString,
   STRIPE_PRICE_PRO: optionalString,
+  /** GeniusPay (Côte d'Ivoire): Wave, Orange Money, MTN, Moov, cards — prepaid passes in XOF. */
+  GENIUSPAY_API_KEY: optionalString,
+  GENIUSPAY_API_SECRET: optionalString,
+  /** Secret used to sign the webhooks (set when the webhook is created in GeniusPay). */
+  GENIUSPAY_WEBHOOK_SECRET: optionalString,
+  /** YouCan Pay (Morocco): cards, CashPlus — prepaid passes in MAD. */
+  YOUCANPAY_PRIVATE_KEY: optionalString,
+  /** Sandbox mode (also detected from a pri_sandbox… key). */
+  YOUCANPAY_SANDBOX: bool(false),
+  /** Prices of the 30-day passes (whole units: FCFA, dirhams). */
+  PLAN_CREATOR_PRICE_XOF: int(10000, 200, 100_000_000),
+  PLAN_PRO_PRICE_XOF: int(25000, 200, 100_000_000),
+  PLAN_CREATOR_PRICE_MAD: int(190, 5, 1_000_000),
+  PLAN_PRO_PRICE_MAD: int(490, 5, 1_000_000),
   /** Prices shown on the pricing page (Stripe remains the source of truth for billing). */
   PLAN_CREATOR_PRICE: z.preprocess(emptyToUndefined, z.string().default('19 €')),
   PLAN_PRO_PRICE: z.preprocess(emptyToUndefined, z.string().default('49 €')),
+
+  /** Outgoing e-mail (password reset, verification): smtp(s)://user:password@host:port. Empty = links written to the logs. */
+  SMTP_URL: optionalString,
+  /** Sender, e.g. "Video Agent <no-reply@example.com>". */
+  MAIL_FROM: z.preprocess(emptyToUndefined, z.string().default('Video Agent <no-reply@localhost>')),
+  /** Videos can be created only once the e-mail address is confirmed. */
+  REQUIRE_EMAIL_VERIFICATION: bool(false),
+  /** Delete videos older than this many days (0 = keep forever). */
+  VIDEO_AGENT_RETENTION_DAYS: int(0, 0, 3650),
+  /** Legal pages (terms, privacy, legal notice). */
+  COMPANY_NAME: z.preprocess(emptyToUndefined, z.string().default('Video Agent')),
+  COMPANY_ADDRESS: z.preprocess(emptyToUndefined, z.string().default('')),
+  CONTACT_EMAIL: z.preprocess(emptyToUndefined, z.string().default('')),
 
   VIDEO_AGENT_LOG_LEVEL: enumWithDefault(['debug', 'info', 'warn', 'error', 'silent'] as const, 'info'),
 });
@@ -285,6 +317,8 @@ export const describeSecrets = (env: Env): Record<string, boolean> => ({
   APP_SECRET: Boolean(env.APP_SECRET),
   STRIPE_SECRET_KEY: Boolean(env.STRIPE_SECRET_KEY),
   STRIPE_WEBHOOK_SECRET: Boolean(env.STRIPE_WEBHOOK_SECRET),
+  GENIUSPAY_API_KEY: Boolean(env.GENIUSPAY_API_KEY),
+  YOUCANPAY_PRIVATE_KEY: Boolean(env.YOUCANPAY_PRIVATE_KEY),
   YOUTUBE_REFRESH_TOKEN: Boolean(env.YOUTUBE_REFRESH_TOKEN),
   TIKTOK_REFRESH_TOKEN: Boolean(env.TIKTOK_REFRESH_TOKEN || env.TIKTOK_ACCESS_TOKEN),
   FACEBOOK_PAGE_ACCESS_TOKEN: Boolean(env.FACEBOOK_PAGE_ACCESS_TOKEN),

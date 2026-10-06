@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ensureJobDirs, jobPaths } from '../src/agent/job';
 import { createLogger } from '../src/core/logger';
 import { detectDomain } from '../src/media/domains';
-import { buildStockQueries, ROLE_VISUAL_HINTS, MediaDirector, wantsMedia } from '../src/media/director';
+import { buildStockQueries, ROLE_VISUAL_HINTS, MediaDirector, shotsFor, wantsMedia } from '../src/media/director';
+import { visibleShots } from '../src/remotion/components/MediaLayer';
 import { PexelsProvider } from '../src/providers/stock/pexels';
 import { PixabayProvider } from '../src/providers/stock/pixabay';
 import { resolveStockProviders } from '../src/providers/stock/registry';
@@ -139,6 +140,42 @@ describe('media director', () => {
     expect(director.credits).toHaveLength(4);
     expect(warnings.some((w) => w.includes('broken'))).toBe(true);
     expect(n).toBeGreaterThan(0);
+  });
+
+  it('shows several shots in long scenes, reusing the same searches', async () => {
+    let searches = 0;
+    const fake: StockProvider = {
+      id: 'fake',
+      supports: ['photo'],
+      async search(q): Promise<StockResult[]> {
+        searches++;
+        return Array.from({ length: 12 }, (_, i) => ({ provider: 'fake', id: `${q.query}-${i}`, kind: 'photo' as const, downloadUrl: `https://cdn.test/${i}`, width: 1080, height: 1920, author: `A${i}`, pageUrl: `https://fake/${i}`, extension: 'jpg' }));
+      },
+    };
+    const m = mockFetch([['GET', /cdn\.test/, () => new Response('bytes')]]);
+    restore = m.restore;
+    const paths = jobPaths(path.join(tmpDir(), 'job'));
+    ensureJobDirs(paths);
+    const sb0 = makeStoryboard();
+    sb0.scenes[0] = { ...sb0.scenes[0]!, durationInFrames: 8 * 30 }; // 8 s → 3 shots
+    const director = new MediaDirector(
+      { stock: [fake], image: null, video: null, logger: createLogger('silent') },
+      { sources: ['stock'], coverage: 'all', stockVideos: false, maxGeneratedImages: 0, maxGeneratedClips: 0, keywordLanguage: 'en', shotsPerScene: 3 },
+    );
+    const sb = await director.run(sb0, [], brief, paths, [], () => undefined);
+    expect(sb.scenes[0]!.shots).toHaveLength(2);
+    expect(sb.scenes[1]!.shots).toBeUndefined(); // 3 s scene: a single shot
+    const all = sb.scenes.flatMap((s) => [s.media!, ...(s.shots ?? [])]);
+    expect(new Set(all.map((x) => x.src)).size).toBe(all.length);
+    expect(all.every((x) => fs.existsSync(path.join(paths.publicDir, x.src)))).toBe(true);
+    expect(searches).toBeLessThanOrEqual(sb.scenes.length);
+    expect(shotsFor(8, 3)).toBe(3);
+    expect(shotsFor(5, 3)).toBe(2);
+    expect(shotsFor(2, 3)).toBe(1);
+    expect(shotsFor(10, 1)).toBe(1);
+    const shot = { type: 'image' as const, src: 'a.jpg', fit: 'cover' as const, origin: 'stock' };
+    expect(visibleShots([shot, shot, shot], 90, 30)).toHaveLength(1);
+    expect(visibleShots([shot, shot, shot], 300, 30)).toHaveLength(3);
   });
 
   it('falls back to AI images, respects coverage and disables a provider after a 401', async () => {

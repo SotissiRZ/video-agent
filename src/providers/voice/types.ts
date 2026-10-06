@@ -14,5 +14,7 @@ export interface VoiceResult {
 /** Text-to-speech provider. Implementations must write a 16-bit PCM WAV file. */
 export interface VoiceProvider {
   readonly id: string;
+  /** Can it speak this language (code of core/languages)? Assumed true when absent. */
+  supports?(language: string): boolean;
   synthesize(request: VoiceRequest): Promise<VoiceResult>;
 }

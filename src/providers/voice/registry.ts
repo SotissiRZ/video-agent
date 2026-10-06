@@ -3,6 +3,7 @@ import { ConfigError } from '../../core/errors';
 import { ElevenLabsVoiceProvider } from './elevenlabs';
 import { OpenAIVoiceProvider } from './openai';
 import path from 'node:path';
+import { MmsVoiceProvider } from './mms';
 import { findPiperBinary, PiperVoiceProvider } from './piper';
 import { detectSystemEngine, SystemVoiceProvider } from './system';
 import type { VoiceProvider } from './types';
@@ -23,6 +24,8 @@ registerVoiceProvider('system', ({ env }) => {
   return engine ? new SystemVoiceProvider(engine, env.VIDEO_AGENT_SYSTEM_VOICE) : null;
 });
 
+registerVoiceProvider('mms', ({ env }) => (env.HF_TOKEN ? new MmsVoiceProvider({ token: env.HF_TOKEN }) : null));
+
 const piperDataDir = (config: AppConfig) => path.resolve(config.paths.root, config.env.PIPER_DATA_DIR);
 
 registerVoiceProvider('piper', (config) => {
@@ -41,16 +44,17 @@ registerVoiceProvider('piper', (config) => {
 export const isPiperInstalled = (config: AppConfig): boolean => Boolean(findPiperBinary(piperDataDir(config), config.env.PIPER_BINARY));
 
 /** "auto": cloud voices first, then free Piper if installed. System voices are robotic: opt in explicitly. */
-const AUTO_ORDER = ['elevenlabs', 'openai', 'piper'];
+const AUTO_ORDER = ['elevenlabs', 'openai', 'piper', 'mms'];
 
-export const resolveVoiceProvider = (config: AppConfig, requested?: string): VoiceProvider | null => {
+/** `language`: in "auto", skip providers that cannot speak it. */
+export const resolveVoiceProvider = (config: AppConfig, requested?: string, language?: string): VoiceProvider | null => {
   const id = requested ?? config.env.VIDEO_AGENT_VOICE_PROVIDER;
   if (id === 'none') return null;
   if (id === 'auto') {
     for (const candidate of AUTO_ORDER) {
       if (candidate === 'piper' && !isPiperInstalled(config)) continue;
       const p = factories.get(candidate)?.(config);
-      if (p) return p;
+      if (p && (!language || p.supports?.(language) !== false)) return p;
     }
     return null;
   }

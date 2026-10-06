@@ -7,6 +7,7 @@
  *   video-agent studio <job-dir>      open the job in Remotion Studio
  *   video-agent web                   local web interface
  */
+import { LANGUAGE_CODES } from '../core/languages';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
@@ -171,7 +172,7 @@ program
   .option('--fps <fps>', 'frames per second', positiveInt('fps'))
   .addOption(new Option('-s, --style <style>', 'visual style').choices(['auto', ...Object.keys(STYLES)]))
   .addOption(new Option('-t, --template <template>', 'video template').choices(['auto', ...listTemplates().map((t) => t.id)]))
-  .addOption(new Option('-l, --language <lang>', 'language of the copy').choices(['auto', 'fr', 'en']))
+  .addOption(new Option('-l, --language <lang>', 'language of the copy').choices(['auto', ...LANGUAGE_CODES]))
   .option('-o, --output-format <format>', `output container (${OUTPUT_FORMATS.join(', ')})`, outputFormat)
   .option('--voice', 'force voice-over (needs a voice provider)')
   .option('--no-voice', 'disable voice-over')

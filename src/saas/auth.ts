@@ -18,14 +18,15 @@ export interface User {
   subscription_status: string | null;
   current_period_end: Date | string | null;
   created_at: Date | string;
+  email_verified_at: Date | string | null;
 }
 
-const USER_COLUMNS = 'id, email, name, role, locale, plan, stripe_customer_id, subscription_status, current_period_end, created_at';
+const USER_COLUMNS = 'id, email, name, role, locale, plan, stripe_customer_id, subscription_status, current_period_end, created_at, email_verified_at';
 
 /** Error with a stable code the UI translates. */
 export class AuthError extends VideoAgentError {
   constructor(
-    readonly code: 'invalid_email' | 'weak_password' | 'email_taken' | 'invalid_credentials' | 'signup_closed' | 'too_many_attempts' | 'unauthorized',
+    readonly code: 'invalid_email' | 'weak_password' | 'email_taken' | 'invalid_credentials' | 'signup_closed' | 'too_many_attempts' | 'unauthorized' | 'invalid_token',
     message: string,
   ) {
     super(message);
@@ -148,3 +149,36 @@ export const parseCookies = (header: string | undefined): Record<string, string>
 
 export const sessionCookie = (token: string, maxAgeSec: number, secure: boolean): string =>
   `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}${secure ? '; Secure' : ''}`;
+
+// ---- E-mail tokens (verification, password reset) -------------------------------------------
+
+const TOKEN_TTL = { verify: 48 * 3600_000, reset: 3600_000 } as const;
+export type EmailTokenKind = keyof typeof TOKEN_TTL;
+
+/** One-time token (stored hashed); previous tokens of the same kind are revoked. */
+export const createEmailToken = async (db: Db, userId: string, kind: EmailTokenKind): Promise<string> => {
+  const token = randomToken();
+  await db.query('DELETE FROM email_tokens WHERE user_id = $1 AND kind = $2', [userId, kind]);
+  await db.query('INSERT INTO email_tokens (id, user_id, kind, expires_at) VALUES ($1, $2, $3, $4)', [sha256(token), userId, kind, new Date(Date.now() + TOKEN_TTL[kind]).toISOString()]);
+  return token;
+};
+
+/** Consume a token: returns its user, or throws when unknown, used or expired. */
+export const consumeEmailToken = async (db: Db, token: string, kind: EmailTokenKind): Promise<string> => {
+  const row = token && token.length < 200 ? await db.one<{ user_id: string; expires_at: Date | string }>('DELETE FROM email_tokens WHERE id = $1 AND kind = $2 RETURNING user_id, expires_at', [sha256(token), kind]) : undefined;
+  if (!row || new Date(row.expires_at).getTime() < Date.now()) throw new AuthError('invalid_token', 'Lien invalide ou expiré');
+  return row.user_id;
+};
+
+export const markEmailVerified = (db: Db, userId: string) => db.query('UPDATE users SET email_verified_at = coalesce(email_verified_at, now()) WHERE id = $1', [userId]);
+
+export const findUserByEmail = (db: Db, email: string) => db.one<User>(`SELECT ${USER_COLUMNS} FROM users WHERE email = $1`, [normalizeEmail(email)]);
+
+/** New password from a reset link; every session is closed. */
+export const resetPassword = async (db: Db, token: string, password: string): Promise<string> => {
+  if (password.length < 8 || password.length > 200) throw new AuthError('weak_password', 'Le mot de passe doit contenir au moins 8 caractères');
+  const userId = await consumeEmailToken(db, token, 'reset');
+  await db.query('UPDATE users SET password_hash = $1, email_verified_at = coalesce(email_verified_at, now()) WHERE id = $2', [await hashPassword(password), userId]);
+  await db.query('DELETE FROM sessions WHERE user_id = $1', [userId]);
+  return userId;
+};

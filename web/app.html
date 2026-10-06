@@ -26,9 +26,31 @@
         </div>
         <label class="field"><span class="label" data-i18n="auth.email"></span><input class="input" type="email" name="email" autocomplete="email" required /></label>
         <label class="field"><span class="label" data-i18n="auth.password"></span><input class="input" type="password" name="password" autocomplete="current-password" required /></label>
+        <a href="#forgot" class="small" style="justify-self: end; margin-top: -8px" data-i18n="auth.forgot"></a>
         <div class="alert danger" data-error hidden></div>
         <button class="btn btn-primary btn-lg btn-block" type="submit" data-i18n="auth.login"></button>
         <p class="switch-link" data-i18n-html="auth.toSignup"></p>
+      </form>
+      <form id="forgotForm" class="form-stack" novalidate hidden>
+        <div>
+          <h1 data-i18n="auth.forgot.title"></h1>
+          <p class="sub" data-i18n="auth.forgot.subtitle"></p>
+        </div>
+        <label class="field"><span class="label" data-i18n="auth.email"></span><input class="input" type="email" name="email" autocomplete="email" required /></label>
+        <div class="alert success" data-done hidden><i data-icon="check"></i><span data-i18n="auth.forgot.sent"></span></div>
+        <div class="alert danger" data-error hidden></div>
+        <button class="btn btn-primary btn-lg btn-block" type="submit" data-i18n="auth.forgot.submit"></button>
+        <p class="switch-link"><a href="#login" data-i18n="auth.backToLogin"></a></p>
+      </form>
+      <form id="resetForm" class="form-stack" novalidate hidden>
+        <div>
+          <h1 data-i18n="auth.reset.title"></h1>
+          <p class="sub" data-i18n="auth.reset.subtitle"></p>
+        </div>
+        <label class="field"><span class="label" data-i18n="account.new"></span><input class="input" type="password" name="password" autocomplete="new-password" minlength="8" required /><span class="hint" data-i18n="auth.passwordHint"></span></label>
+        <div class="alert danger" data-error hidden></div>
+        <button class="btn btn-primary btn-lg btn-block" type="submit" data-i18n="auth.reset.submit"></button>
+        <p class="switch-link"><a href="#login" data-i18n="auth.backToLogin"></a></p>
       </form>
       <form id="signupForm" class="form-stack" novalidate hidden>
         <div>
@@ -41,6 +63,7 @@
         <label class="field"><span class="label" data-i18n="auth.email"></span><input class="input" type="email" name="email" autocomplete="email" required /></label>
         <label class="field"><span class="label" data-i18n="auth.password"></span><input class="input" type="password" name="password" autocomplete="new-password" minlength="8" required /><span class="hint" data-i18n="auth.passwordHint"></span></label>
         <div class="alert danger" data-error hidden></div>
+        <p class="hint" data-i18n-html="auth.consent"></p>
         <button class="btn btn-primary btn-lg btn-block" type="submit" data-i18n="auth.signup"></button>
         <p class="switch-link" data-i18n-html="auth.toLogin"></p>
       </form>
@@ -56,6 +79,7 @@
         <a href="#library" data-page="library"><i data-icon="film"></i><span data-i18n="nav.library"></span></a>
         <a href="#schedule" data-page="schedule"><i data-icon="calendar"></i><span data-i18n="nav.schedule"></span><span class="count" id="pendingCount" hidden></span></a>
         <a href="#connections" data-page="connections"><i data-icon="link"></i><span data-i18n="nav.connections"></span></a>
+        <a href="#brand" data-page="brand"><i data-icon="palette"></i><span data-i18n="nav.brand"></span></a>
       </nav>
       <div class="nav-section" data-i18n="nav.settings"></div>
       <nav class="nav">
@@ -88,6 +112,11 @@
       </header>
 
       <main class="content">
+        <div class="alert warning" id="verifyBanner" hidden style="margin-bottom: 18px">
+          <i data-icon="alert"></i>
+          <span id="verifyText"></span>
+          <button type="button" class="btn btn-secondary btn-sm" id="resendVerify" style="margin-left: auto" data-i18n="verify.resend"></button>
+        </div>
         <!-- ---------------- Create ---------------- -->
         <section class="page" id="page-create">
           <div class="create-layout">
@@ -105,6 +134,17 @@
                   <button type="button" class="chip" data-example="create.ex.tutorial.text" data-i18n="create.ex.tutorial"></button>
                   <button type="button" class="chip" data-example="create.ex.story.text" data-i18n="create.ex.story"></button>
                 </div>
+                <div class="examples">
+                  <span class="hint" data-i18n="create.business"></span>
+                  <button type="button" class="chip" data-example="biz.restaurant.text" data-i18n="biz.restaurant"></button>
+                  <button type="button" class="chip" data-example="biz.shop.text" data-i18n="biz.shop"></button>
+                  <button type="button" class="chip" data-example="biz.pharmacy.text" data-i18n="biz.pharmacy"></button>
+                  <button type="button" class="chip" data-example="biz.school.text" data-i18n="biz.school"></button>
+                  <button type="button" class="chip" data-example="biz.realestate.text" data-i18n="biz.realestate"></button>
+                  <button type="button" class="chip" data-example="biz.event.text" data-i18n="biz.event"></button>
+                  <button type="button" class="chip" data-example="biz.transport.text" data-i18n="biz.transport"></button>
+                  <button type="button" class="chip" data-example="biz.beauty.text" data-i18n="biz.beauty"></button>
+                </div>
                 <div class="field">
                   <span class="label" data-i18n="create.format"></span>
                   <div class="formats">
@@ -113,6 +153,7 @@
                     <label class="format"><input type="radio" name="format" value="landscape" /><span class="shape"><span class="h"></span></span><b>16:9</b><small data-i18n="create.format.landscape"></small></label>
                     <label class="format"><input type="radio" name="format" value="square" /><span class="shape"><span class="s"></span></span><b>1:1</b><small data-i18n="create.format.square"></small></label>
                     <label class="format"><input type="radio" name="format" value="portrait" /><span class="shape"><span class="p"></span></span><b>4:5</b><small data-i18n="create.format.portrait"></small></label>
+                    <label class="format"><input type="radio" name="format" value="whatsapp" /><span class="shape"><i class="wa" data-icon="whatsapp"></i></span><b>WhatsApp</b><small data-i18n="create.format.whatsapp"></small></label>
                   </div>
                 </div>
                 <div class="form-grid">
@@ -128,6 +169,7 @@
                   <label class="switch"><input type="checkbox" id="subtitles" checked /><span class="track"></span><span data-i18n="create.subtitles"></span></label>
                   <label class="switch"><input type="checkbox" id="music" checked /><span class="track"></span><span data-i18n="create.music"></span></label>
                   <label class="switch"><input type="checkbox" id="stock" checked /><span class="track"></span><span data-i18n="create.stock"></span></label>
+                  <label class="switch" id="brandKitToggle" hidden><input type="checkbox" id="brandKit" checked /><span class="track"></span><span data-i18n="create.brandKit"></span></label>
                 </div>
                 <div id="capHints"></div>
                 <details class="disclosure">
@@ -136,7 +178,7 @@
                     <label class="field"><span class="label" data-i18n="create.fps"></span><select class="select" id="fps"></select></label>
                     <label class="field"><span class="label" data-i18n="create.file"></span><select class="select" id="outputFormat"></select></label>
                     <label class="field"><span class="label" data-i18n="create.language"></span>
-                      <select class="select" id="language"><option value="auto" data-i18n="create.language.auto"></option><option value="fr">Français</option><option value="en">English</option></select>
+                      <select class="select" id="language"><option value="auto" data-i18n="create.language.auto"></option><option value="fr">Français</option><option value="en">English</option><option value="ar">العربية · Arabe</option><option value="ary">الدارجة · Darija</option><option value="sw">Kiswahili</option><option value="ha">Hausa</option><option value="yo">Yorùbá</option><option value="wo">Wolof</option><option value="bm">Bamanankan · Bambara</option><option value="ln">Lingála</option><option value="pt">Português</option></select>
                     </label>
                     <label class="field"><span class="label" data-i18n="create.resolution"></span><input class="input" id="resolution" placeholder="1280x720" pattern="\d{2,4}x\d{2,4}" /></label>
                     <label class="field"><span class="label" data-i18n="create.media"></span>
@@ -184,6 +226,7 @@
                     <video class="player" id="player" controls playsinline preload="metadata"></video>
                     <div class="result-actions" style="margin-top: 14px">
                       <a class="btn btn-primary" id="download" download><i data-icon="download" data-size="16"></i><span data-i18n="job.download"></span></a>
+                      <button type="button" class="btn btn-whatsapp" id="shareWhatsapp"><i data-icon="whatsapp" data-size="16"></i><span data-i18n="job.whatsapp"></span></button>
                       <a class="btn btn-ghost btn-sm" id="fileStoryboard" target="_blank" rel="noopener" data-i18n="job.file.storyboard"></a>
                       <a class="btn btn-ghost btn-sm" id="fileScript" target="_blank" rel="noopener" data-i18n="job.file.script"></a>
                       <a class="btn btn-ghost btn-sm" id="fileSrt" target="_blank" rel="noopener" data-i18n="job.file.srt"></a>
@@ -258,6 +301,35 @@
           <div class="grid-2" id="providerCards"></div>
         </section>
 
+        <!-- ---------------- Brand kit ---------------- -->
+        <section class="page" id="page-brand">
+          <div class="page-header"><div><h1 data-i18n="brand.title"></h1><p data-i18n="brand.subtitle"></p></div></div>
+          <div class="grid-2">
+            <form class="card" id="brandForm">
+              <div class="card-header"><h2 data-i18n="brand.identity"></h2></div>
+              <div class="card-body form-stack">
+                <label class="field"><span class="label" data-i18n="brand.name"></span><input class="input" name="name" maxlength="80" /><span class="hint" data-i18n="brand.nameHint"></span></label>
+                <div class="field">
+                  <span class="label" data-i18n="brand.colors"></span>
+                  <div class="color-list" id="brandColors"></div>
+                  <span class="hint" data-i18n="brand.colorsHint"></span>
+                </div>
+              </div>
+              <div class="card-footer"><button class="btn btn-primary" type="submit" data-i18n="common.save"></button></div>
+            </form>
+            <div class="card">
+              <div class="card-header"><div><h2 data-i18n="brand.logo"></h2><p data-i18n="brand.logoHint"></p></div></div>
+              <div class="card-body form-stack">
+                <div class="logo-preview" id="logoPreview"><i data-icon="image" data-size="28"></i></div>
+                <div class="result-actions">
+                  <label class="btn btn-primary"><i data-icon="download" data-size="16"></i><span data-i18n="brand.upload"></span><input type="file" id="logoInput" accept="image/png,image/jpeg,image/webp" hidden /></label>
+                  <button type="button" class="btn btn-danger-ghost" id="logoRemove" hidden><i data-icon="trash" data-size="16"></i><span data-i18n="common.delete"></span></button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <!-- ---------------- Billing ---------------- -->
         <section class="page" id="page-billing">
           <div class="page-header">
@@ -271,6 +343,15 @@
             <div class="card stat"><div class="meter"><div class="row"><span class="k" data-i18n="billing.minutes"></span><b id="meterMinutesText"></b></div><div class="progress"><span id="meterMinutes"></span></div></div></div>
           </div>
           <div class="plans" id="billingPlans"></div>
+          <div class="card" id="paymentsCard" hidden style="margin-top: 20px">
+            <div class="card-header"><h2 data-i18n="billing.history"></h2></div>
+            <div class="card-body" style="padding: 8px 6px 6px">
+              <div class="table-wrap"><table class="table">
+                <thead><tr><th data-i18n="billing.date"></th><th data-i18n="admin.plan"></th><th data-i18n="billing.method"></th><th data-i18n="billing.amount"></th><th data-i18n="schedule.status"></th></tr></thead>
+                <tbody id="paymentRows"></tbody>
+              </table></div>
+            </div>
+          </div>
         </section>
 
         <!-- ---------------- Account ---------------- -->
@@ -315,6 +396,15 @@
                   <tbody id="adminUsers"></tbody>
                 </table>
               </div>
+            </div>
+          </div>
+          <div class="card" id="adminPaymentsCard" hidden style="margin-bottom: 20px">
+            <div class="card-header"><h2 data-i18n="admin.payments"></h2></div>
+            <div class="card-body" style="padding: 8px 6px 6px">
+              <div class="table-wrap"><table class="table">
+                <thead><tr><th data-i18n="billing.date"></th><th data-i18n="admin.user"></th><th data-i18n="admin.plan"></th><th data-i18n="billing.method"></th><th data-i18n="billing.amount"></th><th data-i18n="schedule.status"></th></tr></thead>
+                <tbody id="adminPaymentRows"></tbody>
+              </table></div>
             </div>
           </div>
           <div class="page-header" style="margin-bottom: 14px"><div><h2 data-i18n="admin.services"></h2><p id="adminServicesText"></p></div></div>

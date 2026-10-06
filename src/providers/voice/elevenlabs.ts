@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { pcm16ToWav, wavDurationSec } from '../../audio/wav';
 import { httpBuffer } from '../http';
+import { getLanguage } from '../../core/languages';
 import type { VoiceProvider, VoiceRequest, VoiceResult } from './types';
 
 const SAMPLE_RATE = 22050;
@@ -9,6 +10,11 @@ const SAMPLE_RATE = 22050;
 export class ElevenLabsVoiceProvider implements VoiceProvider {
   readonly id = 'elevenlabs';
   constructor(private readonly opts: { apiKey: string; voiceId: string; model: string }) {}
+
+  supports(language: string): boolean {
+    const info = getLanguage(language);
+    return info ? Boolean(info.elevenlabs) : true;
+  }
 
   async synthesize(req: VoiceRequest): Promise<VoiceResult> {
     const pcm = await httpBuffer(

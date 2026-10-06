@@ -11,6 +11,7 @@ import { computeTimeline, transitionLength, voiceStartFrame } from './contract/t
 import { SubtitlesOverlay } from './components/SubtitlesOverlay';
 import { PlanBadge, Watermark } from './components/Watermark';
 import { ensureFonts } from './fonts';
+import { isRtl } from './contract/languages';
 import { SceneRenderer } from './scenes';
 import { resolveSrc } from './utils';
 
@@ -86,7 +87,7 @@ export const VideoComposition: React.FC<CompositionProps> = (props) => {
   });
 
   return (
-    <AbsoluteFill style={{ backgroundColor: storyboard.theme.palette.background }}>
+    <AbsoluteFill style={{ backgroundColor: storyboard.theme.palette.background, direction: isRtl(storyboard.meta.language) ? 'rtl' : 'ltr' }}>
       <TransitionSeries>{children}</TransitionSeries>
       <Watermark storyboard={storyboard} />
       <PlanBadge storyboard={storyboard} />

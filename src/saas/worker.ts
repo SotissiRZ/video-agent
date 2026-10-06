@@ -4,6 +4,7 @@
  * Run several workers (containers) to render several videos at once.
  */
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import os from 'node:os';
 import { VideoAgent, type AgentDependencies } from '../agent/orchestrator';
 import type { AppConfig } from '../config/config';
@@ -16,8 +17,9 @@ import type { PlatformId, Publisher } from '../publish/types';
 import { createConnectionPublisher, getConnection, providerFor, saveConnection, type ConnectionData } from './connections';
 import type { Vault } from './crypto';
 import type { Db } from './db';
-import { claimNextJob, failStaleJobs, type JobRow } from './jobs';
-import { getPlan } from './plans';
+import { getBrandKit } from './brand';
+import { claimNextJob, failStaleJobs, purgeOldJobs, type JobRow } from './jobs';
+import { planOfUser } from './plans';
 import { claimDuePublication, finishPublication, type PublicationRow } from './publications';
 
 export interface WorkerOptions {
@@ -43,7 +45,7 @@ export class Worker {
   constructor(private readonly o: WorkerOptions) {}
 
   start(): void {
-    this.loops = [this.loop(() => this.renderNext()), this.loop(() => this.publishNext())];
+    this.loops = [this.loop(this.renderTick), this.loop(() => this.publishNext())];
     void failStaleJobs(this.o.db).catch(() => undefined);
   }
 
@@ -58,8 +60,19 @@ export class Worker {
     for (const wake of [...this.wakers]) wake();
   }
 
+  /** Delete videos past VIDEO_AGENT_RETENTION_DAYS (hourly; harmless when several workers do it). */
+  async purge(): Promise<number> {
+    const days = this.o.config().env.VIDEO_AGENT_RETENTION_DAYS;
+    if (!days) return 0;
+    const removed = await purgeOldJobs(this.o.db, days);
+    for (const job of removed) fs.rmSync(job.dir, { recursive: true, force: true });
+    if (removed.length) this.o.logger.info(`retention: ${removed.length} video(s) older than ${days} days deleted`);
+    return removed.length;
+  }
+
   private async loop(tick: () => Promise<boolean>): Promise<void> {
     let lastStaleCheck = Date.now();
+    let lastPurge = 0;
     while (!this.stopped) {
       let worked = false;
       try {
@@ -67,6 +80,10 @@ export class Worker {
         if (Date.now() - lastStaleCheck > 60_000) {
           lastStaleCheck = Date.now();
           await failStaleJobs(this.o.db);
+        }
+        if (tick === this.renderTick && Date.now() - lastPurge > 3600_000) {
+          lastPurge = Date.now();
+          await this.purge();
         }
       } catch (err) {
         this.o.logger.error(`worker: ${errorMessage(err)}`);
@@ -85,6 +102,8 @@ export class Worker {
     }
   }
 
+  private readonly renderTick = () => this.renderNext();
+
   /** Render one queued video. Returns false when the queue is empty. */
   async renderNext(): Promise<boolean> {
     const job = await claimNextJob(this.o.db, this.id);
@@ -96,8 +115,8 @@ export class Worker {
   private async render(job: JobRow): Promise<void> {
     const { db, logger } = this.o;
     const config = this.o.config();
-    const user = await db.one<{ plan: string }>('SELECT plan FROM users WHERE id = $1', [job.user_id]);
-    const plan = getPlan(config, user?.plan);
+    const user = await db.one<{ plan: string; subscription_status: string | null; current_period_end: Date | string | null }>('SELECT plan, subscription_status, current_period_end FROM users WHERE id = $1', [job.user_id]);
+    const plan = planOfUser(config, user);
     const controller = new AbortController();
     const steps = { ...job.steps };
     let progress = { overall: 0, step: '', message: '' };
@@ -121,8 +140,11 @@ export class Worker {
       })();
     }, 1000);
 
+    // Brand kit (unless the customer unticked it for this video).
+    const kit = (job.options as { brandKit?: boolean }).brandKit === false ? undefined : await getBrandKit(db, job.user_id);
     const options: VideoOptions = {
       ...job.options,
+      ...(kit ? { brandName: kit.name || undefined, brandColors: kit.colors.length ? kit.colors : undefined, brandLogo: kit.logoFile ?? undefined } : {}),
       outDir: job.dir,
       maxDurationSec: plan.maxDurationSec,
       badge: plan.badge ? BADGE_TEXT : undefined,

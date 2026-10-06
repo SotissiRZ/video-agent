@@ -2,7 +2,7 @@ import React from 'react';
 import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion';
 import type { Scene, Storyboard } from '../contract/storyboard';
 import { Background } from '../components/Background';
-import { MediaLayer } from '../components/MediaLayer';
+import { MediaStack } from '../components/MediaLayer';
 import { springFor, useLayout, withAlpha } from '../utils';
 
 export interface SceneProps {
@@ -30,7 +30,7 @@ export const SceneShell: React.FC<SceneProps & { children: React.ReactNode; just
     <AbsoluteFill style={{ backgroundColor: theme.palette.background }}>
       {mediaBackdrop && scene.media ? (
         <>
-          <MediaLayer media={scene.media} kenBurns={scene.animation.kenBurns} />
+          <MediaStack media={[scene.media, ...(scene.shots ?? [])]} kenBurns={scene.animation.kenBurns} />
           <AbsoluteFill
             style={{
               background: `linear-gradient(180deg, ${withAlpha(theme.palette.background, 0.55)} 0%, ${withAlpha(theme.palette.background, 0.85)} 100%)`,

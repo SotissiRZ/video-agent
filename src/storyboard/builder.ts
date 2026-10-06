@@ -80,7 +80,7 @@ export const buildStoryboard = ({ brief, concept, scenes, style }: BuildStoryboa
 
   return StoryboardSchema.parse({
     version: 1,
-    meta: { title: concept.title, language: brief.language, template: brief.templateId, style: style.id, prompt: brief.prompt },
+    meta: { title: concept.title, language: brief.locale, template: brief.templateId, style: style.id, prompt: brief.prompt },
     format: { width: brief.width, height: brief.height, fps, durationInFrames: computeTotalDuration(storyboardScenes) },
     theme: style.theme,
     brand: { name: brief.brand, tagline: concept.tagline, showWatermark: Boolean(brief.brand), ...(brief.badge ? { badge: brief.badge } : {}) },
