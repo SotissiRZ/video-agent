@@ -4,6 +4,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createLogger } from '../src/core/logger';
 import { connectPglite, migrate, type Db } from '../src/saas/db';
 import { handleYouCanPayWebhook } from '../src/saas/payments';
+import { refundCredits } from '../src/saas/jobs';
+import { sendPassReminders } from '../src/saas/reminders';
+import type { MailMessage } from '../src/saas/mail';
 import { getPlan, planOfUser } from '../src/saas/plans';
 import { startSaasServer } from '../src/saas/server';
 import { fakeRenderer, testConfig } from './helpers';
@@ -26,6 +29,8 @@ const ENV = {
   YOUCANPAY_PRIVATE_KEY: 'pri_sandbox_test',
   PLAN_CREATOR_PRICE_XOF: '10000',
   PLAN_CREATOR_PRICE_MAD: '190',
+  CREDIT_PACK_VIDEOS: '10',
+  CREDIT_PACK_PRICE_XOF: '5000',
 };
 const sign = (secret: string, raw: string) => crypto.createHmac('sha256', secret).update(raw).digest('hex');
 
@@ -60,6 +65,7 @@ beforeAll(async () => {
     webRoot: path.resolve('web'),
     db,
     embeddedWorker: false,
+    reminders: false,
     logger: createLogger('silent'),
     deps: { renderer: fakeRenderer, logger: createLogger('silent'), llm: null, voice: null, stock: [] },
     mailer: { kind: 'log', send: async () => undefined },
@@ -172,5 +178,65 @@ describe('prepaid passes', () => {
     expect(planOfUser(config, { plan: 'pro', subscription_status: 'prepaid', current_period_end: new Date(Date.now() + 1e6).toISOString() }).id).toBe('pro');
     expect(planOfUser(config, { plan: 'pro', subscription_status: 'active', current_period_end: past }).id).toBe('pro'); // Stripe manages its own state
     expect(getPlan(config, 'creator').id).toBe('creator');
+  });
+
+  it('extra-video packs: bought with mobile money, used beyond the quota, refunded when a video fails', async () => {
+    const c = new Client(base);
+    await c.json('POST', '/api/auth/signup', { email: 'fatou@shop.sn', password: 'motdepasse1' });
+    const cfg = (await c.json('GET', '/api/public/config')).body;
+    expect(cfg.creditPack).toEqual({ videos: 10, prices: { XOF: 5000, MAD: 90 } });
+
+    const pay = await c.json('POST', '/api/billing/pay', { packs: 2, provider: 'geniuspay' });
+    expect(pay.status).toBe(200);
+    const sent = calls.filter((x) => x.url.endsWith('/merchant/payments')).at(-1)!;
+    expect(JSON.parse(String(sent.init!.body))).toMatchObject({ amount: 10000, currency: 'XOF' });
+    const ref = new URL(pay.body.url).pathname.split('/').pop()!;
+    remote.get(ref)!.status = 'completed';
+    const refreshed = await c.json('POST', `/api/billing/payments/${pay.body.id}/refresh`);
+    expect(refreshed.body.payment).toMatchObject({ status: 'paid', credits: 20 });
+    expect(refreshed.body.account.user.credits).toBe(20);
+    expect(refreshed.body.account.plan.id).toBe('free'); // a pack does not change the plan
+
+    // The free plan's 3 videos, then credits.
+    const create = () => c.json('POST', '/api/jobs', { prompt: 'Une vidéo pour ma boutique', durationSec: 10 });
+    for (let i = 0; i < 3; i++) expect((await create()).status).toBe(201);
+    const extra = await create();
+    expect(extra.status).toBe(201);
+    expect(extra.body.paidWithCredit).toBe(true);
+    let me = (await c.json('GET', '/api/me')).body;
+    expect(me.user.credits).toBe(19);
+    expect(me.usage.videos).toBe(3); // credit videos are outside the monthly count
+
+    // Cancelled (or failed) video: the credit comes back, once.
+    expect((await c.json('DELETE', `/api/jobs/${extra.body.id}`)).body.cancelled).toBe(true);
+    await refundCredits(db);
+    me = (await c.json('GET', '/api/me')).body;
+    expect(me.user.credits).toBe(20);
+
+    // A video longer than the plan allows is refused even with credits.
+    const long = await c.json('POST', '/api/jobs', { prompt: 'Une longue vidéo', durationSec: 300 });
+    expect(long.status).toBe(402);
+    expect(long.body.code).toBe('quota_duration');
+    expect((await c.json('GET', '/api/me')).body.user.credits).toBe(20);
+    expect((await c.json('POST', '/api/billing/pay', { provider: 'geniuspay' })).status).toBe(400);
+  });
+
+  it('e-mails a reminder before a pass ends and when it expires, once each', async () => {
+    const config = testConfig(ENV);
+    const mails: MailMessage[] = [];
+    const mailer = { kind: 'log' as const, send: async (m: MailMessage) => void mails.push(m) };
+    const logger = createLogger('silent');
+    const soon = new Date(Date.now() + 2 * 86_400_000).toISOString();
+    const past = new Date(Date.now() - 86_400_000).toISOString();
+    await db.query("INSERT INTO users (id, email, password_hash, name, locale, plan, subscription_status, current_period_end) VALUES ('u_soon', 'soon@shop.ci', 'x', '', 'fr', 'creator', 'prepaid', $1), ('u_past', 'past@shop.ma', 'x', '', 'en', 'pro', 'prepaid', $2)", [soon, past]);
+    expect(await sendPassReminders(db, config, mailer, 'https://app.example.com', logger)).toBe(2);
+    expect(await sendPassReminders(db, config, mailer, 'https://app.example.com', logger)).toBe(0);
+    const toSoon = mails.find((m) => m.to === 'soon@shop.ci')!;
+    expect(toSoon.subject).toMatch(/Votre pass Creator se termine le/);
+    expect(toSoon.text).toContain('https://app.example.com/app#billing');
+    expect(mails.find((m) => m.to === 'past@shop.ma')!.subject).toMatch(/Your Pro pass has expired/);
+    // Renewed: a new period gets its own reminder later.
+    await db.query("UPDATE users SET current_period_end = $1 WHERE id = 'u_soon'", [new Date(Date.now() + 2.5 * 86_400_000).toISOString()]);
+    expect(await sendPassReminders(db, config, mailer, 'https://app.example.com', logger)).toBe(1);
   });
 });

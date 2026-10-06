@@ -14,6 +14,8 @@ export interface JobRow {
   prompt: string;
   options: VideoOptions;
   status: JobStatus;
+  /** Paid with an extra-video credit (outside the monthly quota). */
+  paid_with_credit: boolean;
   created_at: Date | string;
   started_at: Date | string | null;
   finished_at: Date | string | null;
@@ -44,6 +46,7 @@ export const publicJob = (job: JobRow) => ({
   id: job.id,
   prompt: job.prompt,
   options: job.options,
+  paidWithCredit: job.paid_with_credit || undefined,
   status: job.status,
   createdAt: iso(job.created_at),
   finishedAt: iso(job.finished_at),
@@ -66,15 +69,16 @@ export type PublicJob = ReturnType<typeof publicJob>;
 
 export const userJobsDir = (config: AppConfig, userId: string): string => path.join(config.paths.output, 'users', userId);
 
-export const createJob = async (db: Db, config: AppConfig, userId: string, prompt: string, options: VideoOptions): Promise<JobRow> => {
+export const createJob = async (db: Db, config: AppConfig, userId: string, prompt: string, options: VideoOptions, paidWithCredit = false): Promise<JobRow> => {
   // Timestamp + slug for readability, random suffix: several users may submit the same prompt.
   const id = `${newJobId(prompt.split(/\s+/).slice(0, 6).join(' '))}-${crypto.randomBytes(3).toString('hex')}`.slice(0, 100);
-  const rows = await db.query<JobRow>('INSERT INTO jobs (id, user_id, prompt, options, dir) VALUES ($1, $2, $3, $4, $5) RETURNING *', [
+  const rows = await db.query<JobRow>('INSERT INTO jobs (id, user_id, prompt, options, dir, paid_with_credit) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *', [
     id,
     userId,
     prompt,
     JSON.stringify(options),
     path.join(userJobsDir(config, userId), id),
+    paidWithCredit,
   ]);
   return rows[0]!;
 };
@@ -83,6 +87,20 @@ export const getJob = (db: Db, userId: string, id: string): Promise<JobRow | und
 
 export const listJobs = (db: Db, userId: string, limit = 60): Promise<JobRow[]> =>
   db.query<JobRow>('SELECT * FROM jobs WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2', [userId, limit]);
+
+/** Take one extra-video credit; false when the balance is empty. */
+export const useCredit = async (db: Db, userId: string): Promise<boolean> =>
+  (await db.query('UPDATE users SET credits = credits - 1 WHERE id = $1 AND credits > 0 RETURNING credits', [userId])).length > 0;
+
+/** Give back the credits of failed or cancelled videos (once per video; safe to call anytime). */
+export const refundCredits = (db: Db) =>
+  db.tx(async (t) => {
+    const rows = await t.query<{ user_id: string }>("UPDATE jobs SET credit_refunded = true WHERE paid_with_credit AND NOT credit_refunded AND status IN ('failed', 'cancelled') RETURNING user_id");
+    const perUser = new Map<string, number>();
+    for (const r of rows) perUser.set(r.user_id, (perUser.get(r.user_id) ?? 0) + 1);
+    for (const [userId, n] of perUser) await t.query('UPDATE users SET credits = credits + $2 WHERE id = $1', [userId, n]);
+    return rows.length;
+  });
 
 /** Queued jobs are cancelled at once; running ones are flagged and stopped by their worker. */
 export const requestCancel = async (db: Db, userId: string, id: string): Promise<boolean> => {

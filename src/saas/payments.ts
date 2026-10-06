@@ -2,7 +2,7 @@
  * Prepaid 30-day passes paid through local gateways:
  *  - GeniusPay (Côte d'Ivoire): Wave, Orange Money, MTN, Moov, cards — amounts in XOF;
  *  - YouCan Pay (Morocco): cards, CashPlus — amounts in MAD (sent in centimes).
- * Mobile money has no recurring billing: each payment buys N months of a plan.
+ * Mobile money has no recurring billing: each payment buys N months of a plan, or packs of extra videos.
  * A payment is activated only after a signed webhook AND a confirmation read back from the gateway.
  */
 import crypto from 'node:crypto';
@@ -19,12 +19,14 @@ export type PaymentProvider = (typeof PAYMENT_PROVIDERS)[number];
 const GENIUSPAY_API = 'https://geniuspay.ci/api/v1/merchant';
 const YOUCANPAY = 'https://youcanpay.com';
 const PASS_DAYS = 30;
+/** `plan` value of a payment that buys extra-video credits. */
+export const CREDITS = 'credits';
 
 export interface PaymentRow {
   id: string;
   user_id: string;
   provider: PaymentProvider;
-  plan: PlanId;
+  plan: PlanId | typeof CREDITS;
   months: number;
   amount: string | number;
   currency: string;
@@ -33,6 +35,8 @@ export interface PaymentRow {
   checkout_url: string | null;
   created_at: Date | string;
   paid_at: Date | string | null;
+  /** Extra videos bought (credit packs); null for passes. */
+  credits: number | null;
 }
 
 export const providerEnabled = (config: AppConfig, provider: PaymentProvider): boolean =>
@@ -49,6 +53,14 @@ export const passPrice = (config: AppConfig, plan: PlanId, currency: 'XOF' | 'MA
   if (plan === 'pro') return currency === 'XOF' ? e.PLAN_PRO_PRICE_XOF : e.PLAN_PRO_PRICE_MAD;
   return undefined;
 };
+
+/** Price of one pack of extra videos. */
+export const packPrice = (config: AppConfig, currency: 'XOF' | 'MAD'): number => (currency === 'XOF' ? config.env.CREDIT_PACK_PRICE_XOF : config.env.CREDIT_PACK_PRICE_MAD);
+
+export const creditPack = (config: AppConfig) => ({
+  videos: config.env.CREDIT_PACK_VIDEOS,
+  prices: Object.fromEntries(enabledProviders(config).map((p) => [CURRENCY[p], packPrice(config, CURRENCY[p])])) as Partial<Record<'XOF' | 'MAD', number>>,
+});
 
 export const localPrices = (config: AppConfig, plan: PlanId) =>
   Object.fromEntries(enabledProviders(config).map((p) => [CURRENCY[p], passPrice(config, plan, CURRENCY[p])]).filter(([, v]) => v !== undefined)) as Partial<Record<'XOF' | 'MAD', number>>;
@@ -69,7 +81,10 @@ const readJson = async (res: Response) => (await res.json().catch(() => ({}))) a
 
 export interface CreatePaymentInput {
   user: { id: string; email: string; name: string; locale: string };
-  plan: PlanId;
+  /** A pass of this plan... */
+  plan?: PlanId;
+  /** ...or this number of packs of extra videos. */
+  packs?: number;
   provider: PaymentProvider;
   months?: number;
   baseUrl: string;
@@ -77,17 +92,19 @@ export interface CreatePaymentInput {
 }
 
 export const createPayment = async (db: Db, config: AppConfig, input: CreatePaymentInput, fetchImpl: typeof fetch = fetch): Promise<{ id: string; url: string }> => {
-  const { provider, plan, user } = input;
+  const { provider, user } = input;
   if (!providerEnabled(config, provider)) throw new ConfigError(`${provider} n'est pas configuré sur cette instance`);
-  if (plan === 'free') throw new HttpError(400, 'Offre gratuite : rien à payer');
-  const months = Math.max(1, Math.min(12, Math.round(input.months ?? 1)));
   const currency = CURRENCY[provider];
-  const unit = passPrice(config, plan, currency)!;
-  const amount = unit * months;
+  const packs = input.packs ? Math.max(1, Math.min(10, Math.round(input.packs))) : 0;
+  const plan = packs ? CREDITS : input.plan;
+  if (!plan || plan === 'free') throw new HttpError(400, 'Offre gratuite : rien à payer');
+  const months = packs || Math.max(1, Math.min(12, Math.round(input.months ?? 1)));
+  const credits = packs ? packs * config.env.CREDIT_PACK_VIDEOS : null;
+  const amount = (packs ? packPrice(config, currency) : passPrice(config, plan as PlanId, currency)!) * months;
   const id = `pay_${newId().replace(/-/g, '')}`;
-  await db.query('INSERT INTO payments (id, user_id, provider, plan, months, amount, currency) VALUES ($1, $2, $3, $4, $5, $6, $7)', [id, user.id, provider, plan, months, amount, currency]);
+  await db.query('INSERT INTO payments (id, user_id, provider, plan, months, amount, currency, credits) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)', [id, user.id, provider, plan, months, amount, currency, credits]);
   const returnUrl = (status: string) => `${input.baseUrl}/app#billing?payment=${status}&ref=${id}`;
-  const description = `Video Agent — ${getPlan(config, plan).name} (${months * PASS_DAYS} jours)`;
+  const description = credits ? `Video Agent — ${credits} vidéos supplémentaires` : `Video Agent — ${getPlan(config, plan).name} (${months * PASS_DAYS} jours)`;
 
   try {
     if (provider === 'geniuspay') {
@@ -154,6 +171,10 @@ export const activatePayment = async (db: Db, paymentId: string, raw?: unknown):
   db.tx(async (t) => {
     const p = await t.one<PaymentRow>("UPDATE payments SET status = 'paid', paid_at = now(), raw = $2 WHERE id = $1 AND status <> 'paid' RETURNING *", [paymentId, raw === undefined ? null : JSON.stringify(raw)]);
     if (!p) return false;
+    if (p.credits) {
+      await t.query('UPDATE users SET credits = credits + $2 WHERE id = $1', [p.user_id, p.credits]);
+      return true;
+    }
     const user = await t.one<{ plan: string; subscription_status: string | null; current_period_end: Date | string | null }>('SELECT plan, subscription_status, current_period_end FROM users WHERE id = $1 FOR UPDATE', [p.user_id]);
     const end = user?.current_period_end ? new Date(user.current_period_end).getTime() : 0;
     const base = user?.subscription_status === PREPAID && user.plan === p.plan && end > Date.now() ? end : Date.now();
@@ -240,6 +261,7 @@ export const publicPayment = (p: PaymentRow & { email?: string }) => ({
   provider: p.provider,
   plan: p.plan,
   months: p.months,
+  credits: p.credits ?? undefined,
   amount: Number(p.amount),
   currency: p.currency,
   status: p.status,

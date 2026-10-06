@@ -129,6 +129,8 @@ const renderShell = () => {
   $('usageUpgrade').hidden = plan.id === 'pro';
   $('usageVideos').textContent = `${usage.videos} / ${plan.videosPerMonth}`;
   $('usageBar').style.width = `${Math.min(100, (usage.videos / plan.videosPerMonth) * 100)}%`;
+  $('usageCreditsRow').hidden = !user.credits;
+  $('usageCredits').textContent = `+${user.credits ?? 0}`;
   $('durationHint').textContent = t('create.duration.hint', { max: formatDuration(plan.maxDurationSec) });
   $('duration').max = String(plan.maxDurationSec);
   $('planNote').hidden = !plan.badge;
@@ -780,12 +782,45 @@ const loadBilling = async (params) => {
       return actions;
     },
   });
+  renderCredits(user, providers);
   const payments = await api('/api/billing/payments').catch(() => []);
   $('paymentsCard').hidden = !payments.length;
   $('paymentRows').innerHTML = payments
-    .map((p) => `<tr><td>${escapeHtml(formatDate(p.createdAt))}</td><td>${escapeHtml(t(`plan.${p.plan}`))} · ${p.months * 30} j</td><td>${escapeHtml(t(`pay.provider.${p.provider}`))}</td><td>${escapeHtml(formatMoney(p.amount, p.currency))}</td><td>${payBadge(p.status)}</td></tr>`)
+    .map((p) => `<tr><td>${escapeHtml(formatDate(p.createdAt))}</td><td>${escapeHtml(p.credits ? t('credits.bought', { n: p.credits }) : `${t(`plan.${p.plan}`)} · ${t('billing.days', { n: p.months * 30 })}`)}</td><td>${escapeHtml(t(`pay.provider.${p.provider}`))}</td><td>${escapeHtml(formatMoney(p.amount, p.currency))}</td><td>${payBadge(p.status)}</td></tr>`)
     .join('');
 };
+
+// Packs of extra videos (beyond the monthly quota, never expire).
+const renderCredits = (user, providers) => {
+  const pack = state.publicConfig?.creditPack;
+  $('creditsCard').hidden = !pack || !providers.length;
+  if ($('creditsCard').hidden) return;
+  $('creditsBalance').textContent = t('credits.count', { n: user.credits ?? 0 });
+  $('creditsDesc').textContent = t('credits.desc', { n: pack.videos });
+  const current = Number($('creditsPacks').value) || 1;
+  $('creditsPacks').innerHTML = [1, 2, 3, 5, 10]
+    .map((n) => `<option value="${n}" ${n === current ? 'selected' : ''}>${escapeHtml(t('credits.option', { n: n * pack.videos }))}</option>`)
+    .join('');
+  const draw = () => {
+    const n = Number($('creditsPacks').value) || 1;
+    $('creditsActions').innerHTML = providers
+      .map((p, i) => `<button type="button" class="btn ${i ? 'btn-secondary' : 'btn-primary'}" data-buy-credits="${p.id}">${icon(p.id === 'geniuspay' ? 'phone' : 'card', 16)}<span>${escapeHtml(formatMoney((pack.prices[p.currency] ?? 0) * n, p.currency))} · ${escapeHtml(t(p.id === 'geniuspay' ? 'billing.payMobile' : 'billing.payCard'))}</span></button>`)
+      .join('');
+  };
+  $('creditsPacks').onchange = draw;
+  draw();
+};
+$('creditsActions').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-buy-credits]');
+  if (!btn) return;
+  btn.disabled = true;
+  try {
+    location.href = (await post('/api/billing/pay', { packs: Number($('creditsPacks').value) || 1, provider: btn.dataset.buyCredits })).url;
+  } catch (err) {
+    btn.disabled = false;
+    toast(errorText(err), 'error');
+  }
+});
 
 $('billingPlans').addEventListener('click', async (e) => {
   const checkout = e.target.closest('[data-checkout]');
@@ -884,7 +919,7 @@ const loadAdmin = async () => {
   $('adminPaymentsCard').hidden = !payments.length;
   $('adminPaymentRows').innerHTML = payments
     .slice(0, 50)
-    .map((p) => `<tr><td>${escapeHtml(formatDate(p.createdAt))}</td><td>${escapeHtml(p.email ?? '')}</td><td>${escapeHtml(t(`plan.${p.plan}`))}</td><td>${escapeHtml(t(`pay.provider.${p.provider}`))}</td><td>${escapeHtml(formatMoney(p.amount, p.currency))}</td><td>${payBadge(p.status)}</td></tr>`)
+    .map((p) => `<tr><td>${escapeHtml(formatDate(p.createdAt))}</td><td>${escapeHtml(p.email ?? '')}</td><td>${escapeHtml(p.credits ? t('credits.bought', { n: p.credits }) : t(`plan.${p.plan}`))}</td><td>${escapeHtml(t(`pay.provider.${p.provider}`))}</td><td>${escapeHtml(formatMoney(p.amount, p.currency))}</td><td>${payBadge(p.status)}</td></tr>`)
     .join('');
   if (settings.error) {
     $('adminSettings').innerHTML = `<div class="alert warning">${escapeHtml(settings.error)}</div>`;

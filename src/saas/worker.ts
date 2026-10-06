@@ -18,7 +18,7 @@ import { createConnectionPublisher, getConnection, providerFor, saveConnection, 
 import type { Vault } from './crypto';
 import type { Db } from './db';
 import { getBrandKit } from './brand';
-import { claimNextJob, failStaleJobs, purgeOldJobs, type JobRow } from './jobs';
+import { claimNextJob, failStaleJobs, purgeOldJobs, type JobRow, refundCredits } from './jobs';
 import { planOfUser } from './plans';
 import { claimDuePublication, finishPublication, type PublicationRow } from './publications';
 
@@ -80,6 +80,7 @@ export class Worker {
         if (Date.now() - lastStaleCheck > 60_000) {
           lastStaleCheck = Date.now();
           await failStaleJobs(this.o.db);
+          await refundCredits(this.o.db);
         }
         if (tick === this.renderTick && Date.now() - lastPurge > 3600_000) {
           lastPurge = Date.now();
@@ -178,6 +179,7 @@ export class Worker {
       const cancelled = controller.signal.aborted;
       await db.query("UPDATE jobs SET status = $2, error = $3, finished_at = now() WHERE id = $1", [job.id, cancelled ? 'cancelled' : 'failed', cancelled ? null : errorMessage(err)]);
       if (!cancelled) logger.warn(`job ${job.id} failed: ${errorMessage(err)}`);
+      if (job.paid_with_credit) await refundCredits(db).catch(() => 0);
     }
   }
 
