@@ -11,7 +11,7 @@ export interface FormatPreset {
 
 export const FORMAT_PRESETS: FormatPreset[] = [
   { id: 'landscape', label: 'Paysage 16:9 (1920×1080)', width: 1920, height: 1080, aspect: '16:9', aliases: ['16:9', 'horizontal', 'horizontale', 'paysage', 'youtube', 'hd', '1080p', 'widescreen'] },
-  { id: 'vertical', label: 'Vertical 9:16 (1080×1920)', width: 1080, height: 1920, aspect: '9:16', aliases: ['9:16', 'portrait', 'verticale', 'story', 'stories', 'reel', 'reels', 'tiktok', 'shorts'] },
+  { id: 'vertical', label: 'Vertical 9:16 (1080×1920)', width: 1080, height: 1920, aspect: '9:16', aliases: ['9:16', 'portrait', 'verticale', 'story', 'stories', 'reel', 'reels', 'tiktok', 'shorts', 'whatsapp', 'statut', 'status'] },
   { id: 'square', label: 'Carré 1:1 (1080×1080)', width: 1080, height: 1080, aspect: '1:1', aliases: ['1:1', 'carre', 'carré', 'carree', 'carrée', 'post'] },
   { id: 'portrait', label: 'Portrait 4:5 (1080×1350)', width: 1080, height: 1350, aspect: '4:5', aliases: ['4:5', 'feed'] },
 ];

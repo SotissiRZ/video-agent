@@ -81,3 +81,12 @@ describe('voices per language', () => {
     expect(sec).toBeLessThan(2.2);
   });
 });
+
+describe('WhatsApp Status', () => {
+  it('is vertical and at most 60 seconds', () => {
+    const { brief, notes } = buildBrief(parsePrompt('Vidéo de 90 secondes pour mon statut WhatsApp : promo de ma boutique à Abidjan'), {}, testConfig());
+    expect(brief).toMatchObject({ formatId: 'vertical', durationSec: 60 });
+    expect(notes.join(' ')).toMatch(/WhatsApp/);
+    expect(buildBrief(parsePrompt('Promo de ma boutique'), { format: 'whatsapp', durationSec: 45 }, testConfig()).brief).toMatchObject({ formatId: 'vertical', durationSec: 45 });
+  });
+});

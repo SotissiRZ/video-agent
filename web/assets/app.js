@@ -185,6 +185,41 @@ const updateCapHints = () => {
 };
 ['voice', 'stock'].forEach((id) => $(id).addEventListener('change', updateCapHints));
 
+// WhatsApp: share the MP4 itself (Status or chat) from a phone; elsewhere, download it.
+let shareCache = null;
+$('shareWhatsapp').addEventListener('click', async () => {
+  const btn = $('shareWhatsapp');
+  const url = $('download').href;
+  const name = $('download').getAttribute('download') || 'video.mp4';
+  if (!navigator.canShare) {
+    $('download').click();
+    toast(t('job.whatsapp.fallback'), 'success');
+    return;
+  }
+  btn.disabled = true;
+  try {
+    if (shareCache?.url !== url) {
+      toast(t('job.whatsapp.preparing'));
+      const res = await fetch(url, { credentials: 'same-origin' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      shareCache = { url, file: new File([blob], name, { type: blob.type || 'video/mp4' }) };
+    }
+    if (!navigator.canShare({ files: [shareCache.file] })) {
+      $('download').click();
+      toast(t('job.whatsapp.fallback'), 'success');
+      return;
+    }
+    await navigator.share({ files: [shareCache.file] });
+  } catch (err) {
+    // A long download can outlive the tap that allowed sharing: the file is ready, tap again.
+    if (err?.name === 'NotAllowedError') toast(t('job.whatsapp.again'));
+    else if (err?.name !== 'AbortError') toast(errorText(err), 'error');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 document.querySelectorAll('[data-example]').forEach((b) =>
   b.addEventListener('click', () => {
     $('prompt').value = t(b.dataset.example);

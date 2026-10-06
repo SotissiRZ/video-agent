@@ -6,6 +6,8 @@ import type { ParsedPrompt, VideoBrief, VideoOptions } from '../core/types';
 import { DEFAULT_STYLE_ID, STYLES } from '../remotion/contract/styles';
 import { selectTemplate } from '../templates/selector';
 
+export const WHATSAPP_STATUS_MAX_SEC = 60;
+
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 
 /**
@@ -26,7 +28,12 @@ export const buildBrief = (parsed: ParsedPrompt, options: VideoOptions, config: 
   resolution ??= parsed.format ?? resolveFormat(template.defaultFormat) ?? resolveFormat(env.VIDEO_AGENT_DEFAULT_FORMAT) ?? resolveFormat('landscape')!;
   const { width, height } = normalizeResolution(resolution);
 
-  const durationSec = clamp(Math.round(options.durationSec ?? parsed.durationSec ?? env.VIDEO_AGENT_DEFAULT_DURATION ?? template.defaultDurationSec), 3, Math.min(600, options.maxDurationSec ?? 600));
+  // WhatsApp Status plays videos of up to 60 seconds.
+  const whatsapp = parsed.platform === 'whatsapp' || /^(whatsapp|statut|status)$/i.test(options.format ?? '');
+  const maxSec = Math.min(600, options.maxDurationSec ?? 600, whatsapp ? WHATSAPP_STATUS_MAX_SEC : 600);
+  const wanted = Math.round(options.durationSec ?? parsed.durationSec ?? env.VIDEO_AGENT_DEFAULT_DURATION ?? template.defaultDurationSec);
+  if (whatsapp && wanted > maxSec) notes.push(`WhatsApp Status: duration limited to ${maxSec} s`);
+  const durationSec = clamp(wanted, 3, maxSec);
   const fps = clamp(Math.round(options.fps ?? parsed.fps ?? env.VIDEO_AGENT_DEFAULT_FPS), 1, 120);
 
   // Style

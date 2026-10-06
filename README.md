@@ -13,6 +13,7 @@ Il produit `output/<job>/video.mp4` (1080×1920, 30 s, 30 fps), avec animations,
 - **Vrais visuels** : vos photos (`assets/`), banques gratuites de photos et vidéos (Pexels, Pixabay, Unsplash), images IA (OpenAI, Replicate, Stability AI), avec crédits automatiques.
 - **Publication automatique** sur TikTok, Instagram, Facebook, YouTube et LinkedIn : légendes et hashtags par plateforme, publication immédiate ou programmée.
 - **SaaS prêt à déployer** : comptes clients, offres et quotas, paiement Stripe, comptes sociaux connectés par chaque client, interface professionnelle en français et en anglais, thème clair et sombre (voir [§ 16](#16-saas--déploiement-en-production)).
+- **Pensé pour l'Afrique** : paiement mobile money (GeniusPay : Wave, Orange Money, MTN, Moov en FCFA ; YouCan Pay en dirhams), vidéos en arabe, darija, swahili, wolof, bambara, haoussa, yoruba, lingala, format Statut WhatsApp et partage direct, musique originale composée par IA (voir [§ 17](#17-afrique--paiements-locaux-langues-musique-whatsapp)).
 - **CLI + application web** avec progression en direct et prévisualisation, **ou Docker** (`docker compose up`).
 
 ![Images de la vidéo de démonstration Sirago](docs/demo/storyboard-frames.jpg)
@@ -39,6 +40,7 @@ Il produit `output/<job>/video.mp4` (1080×1920, 30 s, 30 fps), avec animations,
 14. [Visuels : photos, vidéos et images IA](#14-visuels--photos-vidéos-et-images-ia)
 15. [Publication sur les réseaux sociaux](#15-publication-sur-les-réseaux-sociaux)
 16. [SaaS : déploiement en production](#16-saas--déploiement-en-production)
+17. [Afrique : paiements locaux, langues, musique, WhatsApp](#17-afrique--paiements-locaux-langues-musique-whatsapp)
 
 ---
 
@@ -602,7 +604,72 @@ Les limites sont définies dans `src/saas/plans.ts` ; les prix affichés dans `P
 
 **Conservation** : `VIDEO_AGENT_RETENTION_DAYS=30` supprime chaque heure les vidéos de plus de 30 jours (sauf celles dont une publication est programmée).
 
-**Sécurité** : mots de passe hachés (scrypt), sessions en cookie `HttpOnly` / `SameSite=Lax` (`Secure` en HTTPS), vérification de l'origine des requêtes, limitation des tentatives de connexion, en-têtes CSP stricts, chaque requête limitée aux données de l'utilisateur connecté, webhooks Stripe signés.
+**Sécurité** : mots de passe hachés (scrypt), sessions en cookie `HttpOnly` / `SameSite=Lax` (`Secure` en HTTPS), vérification de l'origine des requêtes, limitation des tentatives de connexion, en-têtes CSP stricts, chaque requête limitée aux données de l'utilisateur connecté, webhooks Stripe, GeniusPay et YouCan Pay signés.
+
+---
+
+## 17. Afrique : paiements locaux, langues, musique, WhatsApp
+
+### Paiement mobile money : pass de 30 jours
+
+Le mobile money ne permet pas le prélèvement automatique : les offres payantes s'achètent en **pass de 30 jours** (1, 3, 6 ou 12 mois), sans renouvellement automatique. Un pass acheté avant la fin du précédent s'y ajoute. À l'expiration, le compte repasse sur l'offre gratuite. Stripe (carte, abonnement) reste disponible en parallèle.
+
+| Passerelle | Pays et moyens de paiement | Devise | Variables |
+|---|---|---|---|
+| [GeniusPay](https://geniuspay.ci) | Côte d'Ivoire, Sénégal, Burkina Faso, Mali, Bénin, Togo… : Wave, Orange Money, MTN, Moov, cartes | FCFA (XOF) | `GENIUSPAY_API_KEY`, `GENIUSPAY_API_SECRET` (optionnel), `GENIUSPAY_WEBHOOK_SECRET` |
+| [YouCan Pay](https://youcanpay.com) | Maroc : cartes, CashPlus | dirham (MAD) | `YOUCANPAY_PRIVATE_KEY`, `YOUCANPAY_SANDBOX` |
+
+Prix par mois : `PLAN_CREATOR_PRICE_XOF` / `PLAN_PRO_PRICE_XOF` (10 000 / 25 000 FCFA par défaut) et `PLAN_CREATOR_PRICE_MAD` / `PLAN_PRO_PRICE_MAD` (190 / 490 MAD).
+
+**Webhooks** à déclarer dans chaque tableau de bord :
+- GeniusPay : `https://app.example.com/api/payments/geniuspay/webhook` (événements `payment.success`, `payment.failed`…) ; copiez le secret `whsec_…` dans `GENIUSPAY_WEBHOOK_SECRET`.
+- YouCan Pay : `https://app.example.com/api/payments/youcanpay/webhook` (événement `transaction.paid`), signé avec la clé privée.
+
+**Sécurité** : un pass n'est activé qu'après un webhook à la signature valide **et** une confirmation auprès de la passerelle (statut payé, montant et devise vérifiés). Les webhooks rejoués n'ont aucun effet. Si le webhook tarde, le client peut cliquer sur « Vérifier » dans **Facturation**. L'administration affiche les paiements et le chiffre d'affaires en FCFA et en MAD.
+
+> Testez d'abord en mode test (`pk_sandbox_…` chez GeniusPay ; `YOUCANPAY_SANDBOX=true` et une clé `pri_sandbox_…` chez YouCan Pay) avant de passer en production.
+
+### Langues locales
+
+| Code | Langue | Texte | Voix |
+|---|---|---|---|
+| `fr`, `en` | français, anglais | hors-ligne ou LLM | toutes |
+| `ar`, `ary` | arabe, darija (écrite en alphabet arabe) | LLM | Piper (gratuit), OpenAI, ElevenLabs |
+| `sw` | swahili | LLM | Piper (gratuit), OpenAI, MMS |
+| `pt` | portugais | LLM | Piper (gratuit), OpenAI, ElevenLabs |
+| `wo`, `bm`, `ha`, `yo`, `ln` | wolof, bambara, haoussa, yoruba, lingala | LLM | Meta MMS via `HF_TOKEN` (expérimental) |
+
+- La langue se choisit dans le formulaire (« Langue de la vidéo ») ou s'écrit dans la description : « … **en wolof** », « … in Swahili ».
+- Hors français et anglais, les textes et la voix-off sont écrits par le LLM configuré. Sans LLM, la vidéo est produite en français (ou en anglais) avec un avertissement.
+- La voix est choisie automatiquement parmi les fournisseurs qui parlent la langue. Si aucun ne la parle, la vidéo est produite sans voix-off.
+- L'arabe s'affiche de droite à gauche avec la police Noto Sans Arabic. Les caractères des langues africaines (ɓ ɗ ƙ ẹ ọ ṣ ɛ ɔ ɲ ŋ) sont couverts.
+- Les voix MMS (Meta, licence CC BY-NC 4.0 : usage non commercial) servent surtout à tester. Pour un usage commercial, préférez un fournisseur sous licence commerciale.
+
+### Musique originale composée par IA
+
+`VIDEO_AGENT_MUSIC_PROVIDER` (désactivé par défaut, car payant) compose une piste originale pour chaque vidéo :
+
+| Valeur | Fournisseur | Durée max d'une piste | Clé |
+|---|---|---|---|
+| `elevenlabs` | ElevenLabs Music | 5 min | `ELEVENLABS_API_KEY` |
+| `stability` | Stable Audio 2 | 190 s | `STABILITY_API_KEY` |
+| `replicate` | MusicGen (Meta) | 30 s, jouée en boucle | `REPLICATE_API_TOKEN`, `REPLICATE_MUSIC_MODEL` |
+| `auto` | le premier fournisseur dont la clé est présente, dans cet ordre | | |
+
+Le style suit la description (« musique afrobeats », « coupé-décalé », « gnaoua », « amapiano », « piano doux »…), sinon le secteur de la vidéo (tech, restauration, immobilier…) et l'ambiance du style visuel. La piste est instrumentale et baisse automatiquement sous la voix-off. En cas d'échec, la musique synthétisée prend le relais.
+
+> Licences : ElevenLabs Music et Stable Audio autorisent l'usage commercial selon votre offre chez eux. Les poids de MusicGen sont sous licence CC BY-NC 4.0 (non commerciale) : vérifiez ce point avant de l'utiliser pour des clients.
+
+### WhatsApp
+
+- **Format Statut** : bouton « WhatsApp » dans le formulaire, ou « statut WhatsApp » dans la description. Vidéo verticale de 60 s maximum.
+- **Partage** : sur téléphone, le bouton **WhatsApp** sous la vidéo ouvre le partage natif avec le fichier MP4 (Statut, discussion, groupe). Sur ordinateur, la vidéo est téléchargée.
+
+### Modèles métiers
+
+Le formulaire propose des descriptions prêtes à adapter : restaurant ou maquis, boutique, pharmacie, école, immobilier, événement, transport et livraison, salon de beauté.
+
+---
 
 ## Développement
 
