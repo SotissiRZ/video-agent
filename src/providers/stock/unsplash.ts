@@ -54,7 +54,7 @@ export class UnsplashProvider implements StockProvider {
         author: p.user.name,
         pageUrl: `${p.links.html}?utm_source=video-agent&utm_medium=referral`,
         extension: 'jpg',
-        description: [p.alt_description, p.description].filter(Boolean).join('. '),
+        description: [p.alt_description, p.description].filter(Boolean).join(' '),
       };
     });
   }

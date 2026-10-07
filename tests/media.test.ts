@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ensureJobDirs, jobPaths } from '../src/agent/job';
 import { createLogger } from '../src/core/logger';
 import { detectDomain } from '../src/media/domains';
-import { buildStockQueries, ROLE_VISUAL_HINTS, MediaDirector, shotsFor, wantsMedia } from '../src/media/director';
+import { parseAvoidTerms } from '../src/prompt/parser';
+import { buildStockQueries, isRelevant, ROLE_VISUAL_HINTS, MediaDirector, shotsFor, wantsMedia } from '../src/media/director';
 import { visibleShots } from '../src/remotion/components/MediaLayer';
 import { PexelsProvider } from '../src/providers/stock/pexels';
 import { PixabayProvider } from '../src/providers/stock/pixabay';
@@ -14,7 +15,7 @@ import { UnsplashProvider } from '../src/providers/stock/unsplash';
 import { StoryboardSchema } from '../src/remotion/contract/storyboard';
 import { getStyle } from '../src/remotion/contract/styles';
 import { computeTotalDuration } from '../src/remotion/contract/timeline';
-import type { VideoBrief } from '../src/core/types';
+import type { PlannedScene, VideoBrief } from '../src/core/types';
 import { json, mockFetch } from './fetch-mock';
 import { testConfig, tmpDir } from './helpers';
 
@@ -103,8 +104,23 @@ describe('media director', () => {
     const llm = buildStockQueries({ role: 'point' }, { visualKeywords: ['security analyst', 'monitors'] }, { brand: '', audience: '', location: '', keywords: [] }, 'en', domain.queries.slice(0, 2));
     expect(llm[0]!.query).toBe('security analyst monitors');
     expect(llm.map((q) => q.query)).toContain(domain.queries[0]);
+    // One stray word must not decide the industry: "accompagne" contains "pagne", "transformation" contains "formation".
+    expect(detectDomain('ZSR-TechNum vous accompagne dans votre transformation numérique : sites web, IA, automatisation.').id).toBe('tech');
+    expect(detectDomain('boutique de pagnes wax à Abidjan').id).toBe('fashion-beauty');
+    // Script keywords are complete searches, never merged together.
+    const phrases = buildStockQueries({ role: 'x' }, { visualKeywords: ['analytics dashboard laptop', 'hand holding smartphone'] }, { brand: '', audience: '', location: '', keywords: [] }, 'en', ['laptop software dashboard'], true);
+    expect(phrases.map((q) => q.query)).toEqual(['analytics dashboard laptop', 'hand holding smartphone', 'laptop software dashboard']);
     // No generic hint that brings children's pictures.
     expect(Object.values(ROLE_VISUAL_HINTS).join(' ')).not.toMatch(/young people|celebration|kids|children/);
+  });
+
+  it('rejects off-topic stock results and avoided subjects', () => {
+    expect(isRelevant({ description: 'black car steering wheel' }, 'analytics dashboard laptop')).toBe(false);
+    expect(isRelevant({ description: 'person using laptop with analytics dashboards' }, 'analytics dashboard laptop')).toBe(true);
+    expect(isRelevant({ description: 'robot on a laptop screen' }, 'laptop desk', ['robot'])).toBe(false);
+    expect(isRelevant({}, 'laptop desk')).toBe(true);
+    expect(parseAvoidTerms('Éviter les robots futuristes, les faux logos. Montrer des ordinateurs.')).toEqual(expect.arrayContaining(['robot', 'logo']));
+    expect(parseAvoidTerms('Une vidéo sur le transport et les ordinateurs.')).toEqual([]);
   });
 
   const makeStoryboard = () => {
@@ -171,7 +187,8 @@ describe('media director', () => {
       { sources: ['stock'], coverage: 'all', stockVideos: false, maxGeneratedImages: 0, maxGeneratedClips: 0, keywordLanguage: 'en' },
     );
     const juiceBrief = { ...brief, prompt: 'Une pub pour mon jus de bissap' } as VideoBrief;
-    const sb = await director.run(makeStoryboard(), [], juiceBrief, paths, [], () => undefined);
+    const juicePlan = makeStoryboard().scenes.map(() => ({ visualKeywords: ['fresh juice'], visualPrompt: 'fresh juice' }) as unknown as PlannedScene);
+    const sb = await director.run(makeStoryboard(), juicePlan, juiceBrief, paths, [], () => undefined);
     // The sharp picture beats the smaller one listed first; the alcohol picture is never used.
     expect(sb.scenes[0]!.media).toMatchObject({ alt: 'fresh hibiscus juice', origin: 'stock:sharp' });
     expect(sb.scenes.every((s) => !s.media?.alt?.includes('alcohol'))).toBe(true);

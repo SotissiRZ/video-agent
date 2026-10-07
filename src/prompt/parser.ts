@@ -276,4 +276,26 @@ export const parsePrompt = (raw: string): ParsedPrompt => {
   };
 };
 
+/** Things the prompt asks not to show → English words found in stock photo descriptions. */
+const AVOIDABLE: Array<[RegExp, string[]]> = [
+  [/robot|androide|cyborg|humanoide/, ['robot', 'android', 'cyborg', 'humanoid']],
+  [/logo|marque/, ['logo', 'emblem']],
+  [/voiture|vehicule|\bcars?\b/, ['car', 'vehicle']],
+  [/enfant|bebe|child|kid/, ['child', 'kid', 'baby']],
+  [/\barmes?\b|weapon|\bguns?\b|pistolet/, ['gun', 'weapon', 'pistol']],
+  [/alcool|alcohol|biere|\bvin\b|wine/, ['alcohol', 'beer', 'wine']],
+  [/cigarette|tabac|smok/, ['cigarette', 'smoking']],
+  [/\bsports?\b|ballon|\bball\b/, ['ball', 'sport']],
+  [/costume|deguis|cosplay/, ['costume', 'cosplay']],
+];
+
+/** "Éviter les robots futuristes, les faux logos…" → ['robot', …, 'logo', 'emblem']. */
+export const parseAvoidTerms = (text: string): string[] => {
+  const t = normalize(text);
+  const parts = [...t.matchAll(/\b(?:eviter|evitez|evite|ne pas (?:montrer|inventer|afficher|utiliser)|pas de|aucun|aucune|avoid|do not show|don't show|no)\b[^.\n]*/g)].map((m) => m[0]);
+  const out = new Set<string>();
+  for (const part of parts) for (const [re, terms] of AVOIDABLE) if (re.test(part)) terms.forEach((w) => out.add(w));
+  return [...out];
+};
+
 export const KNOWN_FORMATS = FORMAT_PRESETS.map((p) => p.id);
