@@ -11,11 +11,12 @@ export const BulletsScene: React.FC<SceneProps> = (props) => {
   const { fps, durationInFrames } = useVideoConfig();
   const layout = useLayout();
   const { theme } = storyboard;
-  const items = scene.items.slice(0, 5);
+  const items = scene.items.slice(0, 6);
   // Spread the reveals across the first 60% of the scene.
   const spacing = Math.max(6, Math.floor((durationInFrames * 0.6 - 15) / Math.max(1, items.length)));
   const longest = items.reduce((m, i) => Math.max(m, i.length), 0);
-  const itemSize = Math.round(layout.unit * Math.min(0.055, Math.max(0.034, 0.055 * Math.sqrt(20 / Math.max(20, longest)))));
+  // A sixth line gets slightly smaller text so the list still fits a landscape frame.
+  const itemSize = Math.round(layout.unit * Math.min(0.055, Math.max(0.034, 0.055 * Math.sqrt(20 / Math.max(20, longest)))) * (items.length > 5 ? 0.88 : 1));
   return (
     <SceneShell {...props}>
       <Kicker text={scene.subheadline} storyboard={storyboard} />

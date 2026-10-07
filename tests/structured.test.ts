@@ -8,6 +8,26 @@ import { getStyle } from '../src/remotion/contract/styles';
 
 const text = fs.readFileSync(path.join(__dirname, 'fixtures', 'structured-prompt.txt'), 'utf8');
 
+describe('production notes after the script', () => {
+  it('never shows or reads aloud the notes written after the final texts', () => {
+    const prompt = fs.readFileSync(path.resolve('tests/fixtures/zsr-script-with-notes.txt'), 'utf8');
+    const script = parseStructuredPrompt(prompt)!;
+    expect(script.finalTexts).toEqual(['ZSR-TechNum', 'Votre idée. Notre technologie.', 'Contactez-nous pour votre projet.']);
+    expect(script.voiceover).toMatch(/^Vous avez une idée/);
+    expect(script.voiceover).not.toMatch(/impression de confiance|IMPORTANT|faux logo/);
+    const planned = plannedFromStructured(script, { brand: 'ZSR-TechNum', totalSec: 60, language: 'fr' });
+    const everything = JSON.stringify(planned);
+    expect(everything).not.toMatch(/impression de confiance|Le rendu doit|IMPORTANT|faux logo|texte déformé/);
+    // A six-item list keeps all its items.
+    expect(planned.find((p) => p.items.includes('PDF'))!.items).toEqual(['Logo', 'Affiche', 'Bannière', 'Flyer', 'PDF', 'PPTX']);
+  });
+
+  it('keeps an unquoted voice-over written on several lines', () => {
+    const script = parseStructuredPrompt(['SCÈNE 1 — A (0–5 s)', 'Texte : « Bonjour »', 'SCÈNE 2 — B (5–10 s)', 'Texte : « Merci »', 'Voix off :', 'Bienvenue chez nous.', 'Nous livrons partout à Dakar.'].join('\n'))!;
+    expect(script.voiceover).toBe('Bienvenue chez nous. Nous livrons partout à Dakar.');
+  });
+});
+
 describe('detailed scripts (SCÈNE 1 — … (0–5 s))', () => {
   it('reads scenes, timings, on-screen texts, voice-over and final texts', () => {
     const s = parseStructuredPrompt(text)!;

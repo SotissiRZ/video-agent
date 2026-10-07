@@ -121,7 +121,8 @@ export const buildStockQueries = (
   };
   if (phrases) {
     // Script keywords are ready-made searches: mixing two of them ("network connection logo") finds nothing relevant.
-    (plan?.visualKeywords ?? []).slice(0, 4).forEach((k) => push(clean([k]), keywordLanguage));
+    // Complete searches keep their short words ("ai", "3d"); only the brand name is left out.
+    (plan?.visualKeywords ?? []).slice(0, 4).forEach((k) => push(k.split(/\s+/).filter((w) => w && !brandWords.has(normalize(w))), keywordLanguage));
     domainQueries.forEach((q) => push(q.split(' '), 'en'));
   } else if (keywordLanguage === 'en') {
     // LLM keywords are specific to the scene: they come first, the industry searches back them up.

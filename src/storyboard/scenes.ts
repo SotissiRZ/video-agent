@@ -1,7 +1,8 @@
 /** Scene-level decisions that depend on the output format (layout, density). */
 import type { Scene, Storyboard } from '../remotion/contract/storyboard';
 
-export const MAX_ITEMS = 5;
+/** A user script may list six items ("Logo • Affiche • Bannière • Flyer • PDF • PPTX"): all are shown. */
+export const MAX_ITEMS = 6;
 
 export const refineScenes = (storyboard: Storyboard): Storyboard => {
   const { width, height } = storyboard.format;

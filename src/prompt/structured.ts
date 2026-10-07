@@ -31,7 +31,14 @@ export interface StructuredScript {
 const SCENE_HEADER = /^\s*(?:#+\s*)?(?:sc[eè]ne|scene|plan|shot)\s*(\d+)\s*[—–:\-.]*\s*(.*)$/i;
 const TIME_RANGE = /\(\s*(\d+(?:[.,]\d+)?)\s*(?:s|sec)?\s*[–—-]\s*(\d+(?:[.,]\d+)?)\s*(?:s|sec|secondes|seconds)?\s*\)/i;
 const QUOTED = /[«“"]\s*([^»”"]+?)\s*[»”"]/g;
-const LABEL = /^\s*(texte(?:\s+final)?|text(?:\s+on\s+screen)?|on-screen text|voix[\s-]?off|voice[\s-]?over|narration|direction artistique|art direction|dur[ée]e|duration|format|style(?:\s+visuel)?|musique|music)\s*:\s*(.*)$/i;
+const LABEL = /^\s*(texte(?:\s+final|\s+[àa]\s+l['’]\s*[ée]cran)?|text(?:\s+on\s+screen)?|on-screen text|voix[\s-]?off|voice[\s-]?over|narration|direction artistique|art direction|dur[ée]e|duration|format|style(?:\s+visuel)?|musique|music)\s*:\s*(.*)$/i;
+
+/**
+ * Production notes written after the script ("IMPORTANT :", "La vidéo doit…", "Le rendu doit…"):
+ * instructions for the studio, never texts to show or to read aloud.
+ */
+const NOTES_HEADER = /^\s*(?:#+\s*)?(?:important|nb|n\.b\.|notes?|remarques?|consignes?|contraintes?|exigences?|[àa] [ée]viter|[ée]viter|requirements?|constraints?|guidelines?)\b/i;
+const PRODUCTION_NOTE = /^\s*(?:la vid[ée]o|le rendu|le ton|l['’]ambiance|le style|les transitions|la musique|aucun(?:e)?|pas de|ne pas|[ée]viter|utiliser|pr[ée]voir|privil[ée]gier|the video|the result|no |do not|avoid|use )\b/i;
 
 const quotedIn = (line: string): string[] => [...line.matchAll(QUOTED)].map((m) => m[1]!.trim()).filter(Boolean);
 const num = (s: string) => Number(s.replace(',', '.'));
@@ -44,10 +51,18 @@ export const parseStructuredPrompt = (text: string): StructuredScript | undefine
   let section: 'scene' | 'voice' | 'final' | 'other' = 'other';
   const voice: string[] = [];
   const finalTexts: string[] = [];
+  /** The voice-over was written between quotes and the closing quote was met: it is complete. */
+  let voiceClosed = false;
 
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
+    // Notes for the studio end any section: they are not part of the video.
+    if (NOTES_HEADER.test(line) || ((section === 'final' || section === 'voice') && PRODUCTION_NOTE.test(line) && !quotedIn(line).length)) {
+      section = 'other';
+      current = undefined;
+      continue;
+    }
     const header = SCENE_HEADER.exec(line);
     if (header) {
       const time = TIME_RANGE.exec(line);
@@ -70,7 +85,11 @@ export const parseStructuredPrompt = (text: string): StructuredScript | undefine
       if (/^(voix|voice|narration)/.test(name)) {
         section = 'voice';
         current = undefined;
-        if (rest) voice.push(quotedIn(rest).join(' ') || rest);
+        voiceClosed = false;
+        if (rest) {
+          voice.push(quotedIn(rest).join(' ') || rest);
+          voiceClosed = /[»”]|"$/.test(rest) && /^[«“"]/.test(rest);
+        }
       } else if (/final/.test(name)) {
         section = 'final';
         current = undefined;
@@ -84,8 +103,24 @@ export const parseStructuredPrompt = (text: string): StructuredScript | undefine
       }
       continue;
     }
-    if (section === 'voice') voice.push(quotedIn(line).join(' ') || line);
-    else if (section === 'final') finalTexts.push(...(quotedIn(line).length ? quotedIn(line) : [line]));
+    if (section === 'voice') {
+      // After a quoted voice-over is closed, an unquoted line is no longer part of it.
+      if (voiceClosed && !quotedIn(line).length) {
+        section = 'other';
+        continue;
+      }
+      voice.push(quotedIn(line).join(' ') || line);
+      if (/[»”]\s*$|"\s*$/.test(line) && voice.join(' ').trimStart().match(/^[«“"]/)) voiceClosed = true;
+    } else if (section === 'final') {
+      // Final texts are the quoted lines; an unquoted sentence after them is a note, not a text.
+      const quoted = quotedIn(line);
+      if (quoted.length) finalTexts.push(...quoted);
+      else if (!finalTexts.length && line.length <= 80 && !/:\s*$/.test(line)) finalTexts.push(line);
+      else {
+        section = 'other';
+        continue;
+      }
+    }
     else if (section === 'scene' && current) {
       const quoted = quotedIn(line);
       // A line made only of quoted text continues the scene's on-screen texts.

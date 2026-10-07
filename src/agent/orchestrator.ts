@@ -9,14 +9,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { synthesizeMusic } from '../audio/music';
-import { getLanguage } from '../core/languages';
+import { getLanguage, LANGUAGE_CODES } from '../core/languages';
 import { buildMusicPrompt } from '../providers/music/prompt';
 import { resolveMusicProvider } from '../providers/music/registry';
 import type { MusicProvider } from '../providers/music/types';
 import { AssetLibrary, importAsset } from '../assets/manager';
 import { placeProductPhotos, type ProductPhoto } from '../media/product-photos';
 import type { AppConfig } from '../config/config';
-import { errorMessage, StoryboardValidationError, VideoAgentError } from '../core/errors';
+import { errorMessage, StoryboardValidationError, summarizeError, VideoAgentError } from '../core/errors';
 import { createLogger, type Logger } from '../core/logger';
 import {
   PIPELINE_STEPS,
@@ -25,15 +25,17 @@ import {
   type StepId,
   type VideoBrief,
   type VideoConcept,
+  type VideoOptions,
   type VideoRequest,
 } from '../core/types';
 import { resolveLLM } from '../llm/registry';
 import type { UsageMeter } from '../core/usage';
 import type { LLMProvider } from '../llm/types';
 import { Planner } from '../planning/planner';
-import { buildBrief } from '../planning/brief';
+import { buildBrief, WHATSAPP_STATUS_MAX_SEC } from '../planning/brief';
+import { directVideo, fromDirection, type Direction } from '../planning/direction';
 import { selectSlots } from '../planning/slots';
-import { parseAvoidTerms, parsePrompt } from '../prompt/parser';
+import { normalize, parseAvoidTerms, parsePrompt } from '../prompt/parser';
 import { resolveImageProvider } from '../providers/image/registry';
 import type { ImageProvider } from '../providers/image/types';
 import { resolveVideoProvider } from '../providers/video/registry';
@@ -46,7 +48,7 @@ import { MediaDirector, wantsMedia, type MediaCredit } from '../media/director';
 import type { VoiceGender, VoiceProvider } from '../providers/voice/types';
 import { renderStoryboard, type RenderOptions, type RenderResult } from '../render/renderer';
 import { StoryboardSchema, type Storyboard } from '../remotion/contract/storyboard';
-import { getStyle } from '../remotion/contract/styles';
+import { getStyle, STYLES, type StyleDefinition } from '../remotion/contract/styles';
 import { applyAnimations } from '../storyboard/animations';
 import { buildStoryboard } from '../storyboard/builder';
 import { refineScenes } from '../storyboard/scenes';
@@ -74,6 +76,8 @@ export interface AgentDependencies {
   logger?: Logger;
   /** Records the paid services used (tokens, voice characters, music seconds, images) for cost tracking. */
   meter?: UsageMeter;
+  /** false: skip the AI director and use the template planner directly (its fallback). */
+  direction?: boolean;
   /** Voice used when the chosen one fails. `undefined` = Piper or MMS when available. */
   voiceFallback?: VoiceProvider | null;
 }
@@ -202,9 +206,16 @@ export class VideoAgent {
     const { signal } = runOptions;
     const warnings: string[] = [];
     const { step, skip, timings } = this.stepper(runOptions);
+    // Colours written in the prompt win over the brand kit.
+    const styleWithColors = (id: string): StyleDefinition => {
+      const base = getStyle(id);
+      const promptColors = parseHexColors(request.prompt);
+      const colors = promptColors.length ? promptColors : (options.brandColors ?? []);
+      return colors.length ? { ...base, theme: applyBrandColors(base.theme, colors) } : base;
+    };
 
     // ---- 1. Analyse ------------------------------------------------------------
-    const { brief, template, style, structured } = await step(
+    const analyzed = await step(
       'analyze',
       'Analyse de la demande',
       () => {
@@ -218,18 +229,15 @@ export class VideoAgent {
         // Brand kit: its name applies when the prompt does not name a brand.
         const brief = !built.brief.brand && options.brandName ? { ...built.brief, brand: options.brandName } : built.brief;
         notes.forEach((n) => this.logger.debug(n));
-        const baseStyle = getStyle(brief.styleId);
-        // Colours written in the prompt win over the brand kit.
-        const promptColors = parseHexColors(request.prompt);
-        const colors = promptColors.length ? promptColors : (options.brandColors ?? []);
-        const style = colors.length ? { ...baseStyle, theme: applyBrandColors(baseStyle.theme, colors) } : baseStyle;
-        return { brief, template: getTemplate(brief.templateId)!, style, structured };
+        return { brief, template: getTemplate(brief.templateId)!, style: styleWithColors(brief.styleId), structured };
       },
       ({ brief }) =>
         `${brief.templateId} · ${brief.width}×${brief.height} · ${brief.durationSec}s · ${brief.fps} fps · style ${brief.styleId} · ${brief.locale}` +
         (brief.brand ? ` · marque ${brief.brand}` : '') +
         (brief.audience ? ` · cible ${brief.audience}` : ''),
     );
+    const { brief, template, structured } = analyzed;
+    let style = analyzed.style;
     const script: StructuredScript | undefined = structured;
     const productPhotos: ProductPhoto[] = (request.productImages ?? []).map((photo) => (typeof photo === 'string' ? { file: photo } : photo)).filter((photo) => fs.existsSync(photo.file));
     // The script is written knowing what the customer's photos show.
@@ -241,11 +249,39 @@ export class VideoAgent {
     ensureJobDirs(paths);
     writeJson(paths.briefFile, brief);
 
-    // ---- 2. Concept ------------------------------------------------------------
+    // ---- 2. Direction (the AI reads the whole request) or concept ----------------------
+    let direction: Direction | undefined;
     const concept = await step(
       'concept',
-      `Concept (${planner.source})`,
+      llm ? `Direction artistique (${planner.source})` : `Concept (${planner.source})`,
       async () => {
+        if (llm && this.deps.direction !== false) {
+          try {
+            direction = await directVideo(
+              llm,
+              {
+                prompt: request.prompt,
+                brief,
+                durationLocked: Boolean(options.durationSec || structured?.totalSec || brief.parsed.durationSec),
+                maxDurationSec: options.maxDurationSec,
+                styleLocked: Boolean(options.style && options.style !== 'auto'),
+                languageLocked: Boolean(options.language && options.language !== 'auto'),
+                minScenes: structured ? structured.scenes.length : Math.max(2, Math.ceil(brief.durationSec / 12)),
+              },
+              signal,
+            );
+            style = this.applyDirection(direction, brief, options, structured, styleWithColors) ?? style;
+            const value = fromDirection(direction).concept;
+            writeJson(paths.conceptFile, { ...value, source: `direction:${planner.source}` });
+            writeJson(path.join(paths.dir, 'direction.json'), direction);
+            writeJson(paths.briefFile, brief);
+            return value;
+          } catch (err) {
+            if (signal?.aborted) throw err;
+            direction = undefined;
+            warnings.push(`AI direction failed, rule-based planning used: ${summarizeError(errorMessage(err))}`);
+          }
+        }
         if (script) {
           // The user's script already sets the concept: keep their words.
           const final = script.finalTexts.filter((t) => t !== brief.brand);
@@ -276,6 +312,30 @@ export class VideoAgent {
       'script',
       script ? `Script fourni : ${script.scenes.length} scènes` : `Script de ${slots.length} scènes (${planner.source})`,
       async () => {
+        if (direction) {
+          scriptSource = 'direction';
+          const directed = fromDirection(direction).scenes;
+          // The customer's own script is law: their texts, timings and voice-over word for word. The director
+          // contributes what it understood of each scene (pictures to search, what to show, product photos).
+          if (script) {
+            // Every scene the customer wrote is kept; the director's scene is found by its headline (it may
+            // have merged, dropped or reordered some), else by position when both lists have the same length.
+            const key = (text: string) => normalize(text.replace(/\*/g, '')).replace(/[^a-z0-9]+/g, ' ').trim();
+            const own = plannedFromStructured(script, { brand: brief.brand, totalSec: brief.durationSec, language: brief.language });
+            return own.map((scene, i) => {
+              const match = directed.find((d) => key(d.headline) && key(d.headline) === key(scene.headline)) ?? (directed.length === own.length ? directed[i] : undefined);
+              if (!match) return scene;
+              return {
+                ...scene,
+                visualKeywords: match.visualKeywords.length ? match.visualKeywords : scene.visualKeywords,
+                visualPrompt: match.visualPrompt || scene.visualPrompt,
+                productPhoto: match.productPhoto ?? scene.productPhoto,
+                narration: script.voiceover ? scene.narration : match.narration || scene.narration,
+              };
+            });
+          }
+          return directed;
+        }
         if (script) {
           scriptSource = 'script';
           return plannedFromStructured(script, { brand: brief.brand, totalSec: brief.durationSec, language: brief.language });
@@ -325,8 +385,9 @@ export class VideoAgent {
         // LLM scripts produce English visual keywords; procedural ones are in the brief's language.
         keywordLanguage: scriptSource === 'procedural' ? brief.language : 'en',
         shotsPerScene: this.config.env.VIDEO_AGENT_SHOTS_PER_SCENE,
-        phraseKeywords: scriptSource === 'script',
-        avoidTerms: parseAvoidTerms(request.prompt),
+        // The AI director and user scripts give complete searches: one query each, never merged.
+        phraseKeywords: scriptSource === 'script' || scriptSource === 'direction',
+        avoidTerms: [...parseAvoidTerms(request.prompt), ...(direction?.avoid ?? [])],
       },
     );
     storyboard = await step(
@@ -823,6 +884,39 @@ export class VideoAgent {
       }
     }
     return { ...storyboard, scenes };
+  }
+
+  /**
+   * The director's choices apply where the customer left them open: duration, style and language
+   * set in the form (or written as a duration in the request) are kept. Returns the new style, if any.
+   */
+  private applyDirection(
+    direction: Direction,
+    brief: VideoBrief,
+    options: VideoOptions,
+    structured: StructuredScript | undefined,
+    styleWithColors: (id: string) => StyleDefinition,
+  ): StyleDefinition | undefined {
+    const durationLocked = Boolean(options.durationSec || structured?.totalSec || brief.parsed.durationSec);
+    if (!durationLocked && direction.durationSec >= 3) {
+      const cap = Math.min(600, options.maxDurationSec ?? 600, brief.formatId === 'whatsapp' ? WHATSAPP_STATUS_MAX_SEC : 600);
+      brief.durationSec = Math.round(Math.min(direction.durationSec, cap));
+    }
+    if (!options.language || options.language === 'auto') {
+      const language = getLanguage(direction.language);
+      if (language && (LANGUAGE_CODES as readonly string[]).includes(language.code)) {
+        brief.locale = language.code;
+        brief.language = language.base;
+      }
+    }
+    brief.brand ||= direction.brand;
+    brief.audience ||= direction.audience;
+    brief.location ||= direction.location;
+    if ((!options.style || options.style === 'auto') && STYLES[direction.style]) {
+      brief.styleId = direction.style;
+      return styleWithColors(direction.style);
+    }
+    return undefined;
   }
 
   /** Free voice used when the chosen one fails: Piper when installed, else the MMS voices. */

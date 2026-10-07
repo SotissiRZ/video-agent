@@ -59,7 +59,7 @@ describe('VideoAgent pipeline (Remotion project generation)', () => {
 
     const concept = { title: 'Sirago, la route simplifiée', idea: 'i', angle: 'a', tone: 't', keyMessage: 'k', callToAction: 'Installez Sirago', tagline: 'En route' };
     const llm = new FakeLLM([JSON.stringify(concept), 'garbage', 'garbage']); // script falls back to procedural
-    const agent = new VideoAgent(config, { renderer: fakeRenderer, logger, llm, voice: fakeVoice });
+    const agent = new VideoAgent(config, { renderer: fakeRenderer, logger, llm, voice: fakeVoice, direction: false });
     const result = await agent.run({ prompt: SIRAGO, options: { durationSec: 30 } });
 
     expect(result.concept.title).toBe('Sirago, la route simplifiée');
