@@ -21,6 +21,7 @@ export const COMMERCE_DEFAULTS = {
   proMaxDurationSec: 600,
   correctionsPerVideo: 1,
   correctionsPerSong: 1,
+  songPreviewSec: 45,
   maxProductImages: 4,
   maxProductImageMb: 5,
 } as const;
@@ -44,6 +45,7 @@ const CommerceSchema = z.object({
   proMaxDurationSec: z.number().int().min(3).max(600),
   correctionsPerVideo: z.number().int().min(0).max(5),
   correctionsPerSong: z.number().int().min(0).max(5),
+  songPreviewSec: z.number().int().min(10).max(120),
   maxProductImages: z.number().int().min(0).max(20),
   maxProductImageMb: z.number().int().min(1).max(20),
 });

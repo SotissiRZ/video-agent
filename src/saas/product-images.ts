@@ -6,14 +6,25 @@ import type { Db } from './db';
 import { HttpError } from './http';
 import { sniffImage } from './brand';
 import { userJobsDir } from './jobs';
+import type { LLMProvider } from '../llm/types';
+import { errorMessage } from '../core/errors';
+import { describeProductPhoto, type ProductPhoto } from '../media/product-photos';
 
 export interface ProductImage {
   id: string;
   user_id: string;
   name: string;
   file: string;
+  description: string | null;
   created_at: Date | string;
 }
+
+export const publicProductImage = (image: ProductImage) => ({
+  id: image.id,
+  name: image.name,
+  description: image.description ?? undefined,
+  createdAt: new Date(image.created_at).toISOString(),
+});
 
 export const listProductImages = (db: Db, userId: string) =>
   db.query<ProductImage>('SELECT * FROM product_images WHERE user_id = $1 ORDER BY created_at DESC', [userId]);
@@ -65,4 +76,31 @@ export const deleteProductImage = async (db: Db, userId: string, id: string): Pr
   );
   if (referenced) throw new HttpError(409, 'Cette image est utilisée par une génération en cours.', 'product_image_in_use');
   return db.one<ProductImage>('DELETE FROM product_images WHERE id = $1 AND user_id = $2 RETURNING *', [id, userId]);
+};
+
+/** Let the vision model describe a photo once; a text-only or unavailable model leaves it undescribed. */
+export const describeProductImage = async (db: Db, llm: LLMProvider | null, image: ProductImage, onError?: (message: string) => void): Promise<ProductImage> => {
+  if (!llm || image.description) return image;
+  try {
+    const description = await describeProductPhoto(llm, image.file, image.name, AbortSignal.timeout(30_000));
+    if (!description) return image;
+    return (await db.one<ProductImage>('UPDATE product_images SET description = $3 WHERE id = $1 AND user_id = $2 RETURNING *', [image.id, image.user_id, description])) ?? image;
+  } catch (err) {
+    onError?.(errorMessage(err));
+    return image;
+  }
+};
+
+/** Selected photos in the customer's order, described when possible, for the video pipeline. */
+export const productPhotos = async (db: Db, llm: LLMProvider | null, userId: string, ids: string[], onError?: (message: string) => void): Promise<ProductPhoto[]> => {
+  if (!ids.length) return [];
+  const rows = await db.query<ProductImage>('SELECT * FROM product_images WHERE user_id = $1 AND id = ANY($2::text[])', [userId, ids]);
+  const photos: ProductPhoto[] = [];
+  for (const id of ids) {
+    const row = rows.find((r) => r.id === id);
+    if (!row) continue;
+    const image = await describeProductImage(db, llm, row, onError);
+    photos.push({ file: image.file, name: image.name, description: image.description ?? undefined });
+  }
+  return photos;
 };

@@ -233,9 +233,11 @@ const showSong = (song) => {
   $('songPreviewNote').hidden = state.me.plan.id !== 'free' || song.exportPaid;
   renderExportActions($('songExportPay'), 'song', song.id, song.exportPaid);
   if (song.audioUrl) {
-    if ($('songAudio').dataset.song !== song.id) {
-      $('songAudio').src = song.audioUrl;
-      $('songAudio').dataset.song = song.id;
+    // Reload when the excerpt becomes the full song (payment) or a corrected version is generated.
+    const audioKey = `${song.id}:${song.exportPaid}:${song.finishedAt ?? ''}`;
+    if ($('songAudio').dataset.song !== audioKey) {
+      $('songAudio').src = `${song.audioUrl}?v=${encodeURIComponent(audioKey)}`;
+      $('songAudio').dataset.song = audioKey;
     }
     $('songDownload').href = song.downloadUrl;
     $('songDownload').setAttribute('download', `${song.title.replace(/[^\p{L}\p{N}-]+/gu, '-').replace(/^-|-$/g, '') || 'song'}.mp3`);
@@ -404,7 +406,7 @@ const updateCapHints = () => {
 };
 
 const renderProductImages = () => {
-  $('productImagesList').innerHTML = state.productImages.map((image) => `<div class="input-group"><label class="switch"><input type="checkbox" value="${escapeHtml(image.id)}" checked /><span class="track"></span><span>${escapeHtml(image.name)}</span></label><button type="button" class="btn btn-ghost btn-icon btn-sm" data-product-image-delete="${escapeHtml(image.id)}" title="${escapeHtml(t('common.delete'))}">${icon('trash', 14)}</button></div>`).join('');
+  $('productImagesList').innerHTML = state.productImages.map((image) => `<div class="input-group"><label class="switch"><input type="checkbox" value="${escapeHtml(image.id)}" checked /><span class="track"></span><span>${escapeHtml(image.name)}</span></label><button type="button" class="btn btn-ghost btn-icon btn-sm" data-product-image-delete="${escapeHtml(image.id)}" title="${escapeHtml(t('common.delete'))}">${icon('trash', 14)}</button></div>${image.description ? `<p class="hint">${escapeHtml(t('create.productImageSeen'))} ${escapeHtml(image.description)}</p>` : ''}`).join('');
 };
 
 const loadProductImages = async () => {
@@ -1296,6 +1298,7 @@ const COMMERCE_FIELDS = [
   ['proMaxDurationSec', 'admin.commerce.proDuration'],
   ['correctionsPerVideo', 'admin.commerce.videoCorrections'],
   ['correctionsPerSong', 'admin.commerce.songCorrections'],
+  ['songPreviewSec', 'admin.commerce.songPreview'],
   ['maxProductImages', 'admin.commerce.maxImages'],
   ['maxProductImageMb', 'admin.commerce.maxImageSize'],
 ];

@@ -103,3 +103,13 @@ export const deleteSong = (db: Db, userId: string, id: string): Promise<{ id: st
     "DELETE FROM songs WHERE id = $1 AND user_id = $2 AND status NOT IN ('queued', 'running') RETURNING id",
     [id, userId],
   );
+
+/** Free-listening excerpt of a completed song; the length is part of the name so an admin change rebuilds it. */
+export const songPreviewFile = (song: SongRow, seconds: number): string =>
+  path.join(path.dirname(song.audio_file!), `preview-${seconds}s.mp3`);
+
+/** Drop excerpts of a previous version of the song (after a lyrics correction). */
+export const removeSongPreviews = (dir: string): void => {
+  if (!fs.existsSync(dir)) return;
+  for (const name of fs.readdirSync(dir)) if (/^preview-\d+s\.mp3(\.tmp)?$/.test(name)) fs.rmSync(path.join(dir, name), { force: true });
+};

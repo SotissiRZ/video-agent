@@ -47,11 +47,12 @@ import { sendPassReminders } from './reminders';
 import { createJob, deleteJob, getJob, JOB_ID, listJobs, publicJob, queuePosition, refundCredits, requestCancel, useCredit, userJobsDir, type JobRow } from './jobs';
 import { applyCommerceLimits, checkQuota, checkSongQuota, getPlan, getUsage, listPlans, PLAN_IDS, planOfUser } from './plans';
 import { exportPrice, getCommerceSettings, saveCommerceSettings } from './commerce';
-import { deleteProductImage, listProductImages, productImageFiles, saveProductImage } from './product-images';
+import { deleteProductImage, describeProductImage, listProductImages, productImageFiles, publicProductImage, saveProductImage } from './product-images';
 import { ensureCleanVideoExport } from './export';
 import { cancelPublication, createPublication, listPublications, publicPublication } from './publications';
 import { Worker } from './worker';
-import { createSongDraft, deleteSong, getSong, listSongs, publicSong, SONG_ID, songDirectory, updateSongLyrics, type SongRow } from './songs';
+import { createSongDraft, deleteSong, getSong, listSongs, publicSong, removeSongPreviews, SONG_ID, songDirectory, songPreviewFile, updateSongLyrics, type SongRow } from './songs';
+import { makeAudioPreview } from '../audio/ffmpeg';
 
 export const CreateJobSchema = z.object({
   prompt: z.string().trim().min(3).max(4000),
@@ -129,6 +130,8 @@ export interface SaasOptions {
   /** Test seam for the standalone song provider. */
   songGenerator?: (request: { lyrics: string; style: string; mood: string; durationSec: number }) => Promise<Buffer>;
   /** Test seam for song lyric drafting. */
+  /** Test seam: builds the free-listening excerpt of a song (ffmpeg by default). */
+  songPreviewer?: (input: string, output: string, seconds: number) => Promise<void>;
   songLyricsGenerator?: (request: { prompt: string; style: string; mood: string }) => Promise<{ title: string; lyrics: string }>;
   workerOptions?: Partial<ConstructorParameters<typeof Worker>[0]>;
 }
@@ -298,6 +301,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       const audio = await generate({ lyrics: song.lyrics, style: song.style, mood: song.mood, durationSec: song.duration_sec });
       if (!audio.length) throw new Error('ElevenLabs a renvoyé un fichier audio vide.');
       fs.mkdirSync(dir, { recursive: true });
+      removeSongPreviews(dir);
       fs.rmSync(temporaryFile, { force: true });
       fs.writeFileSync(temporaryFile, audio, { flag: 'wx' });
       fs.renameSync(temporaryFile, audioFile);
@@ -315,6 +319,28 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     } finally {
       clearInterval(heartbeat);
     }
+  };
+
+  const songPreviews = new Map<string, Promise<string>>();
+  const ensureSongPreview = (song: SongRow, seconds: number): Promise<string> => {
+    const target = songPreviewFile(song, seconds);
+    if (fs.existsSync(target)) return Promise.resolve(target);
+    const existing = songPreviews.get(target);
+    if (existing) return existing;
+    const temporary = `${target}.tmp`;
+    const task = (options.songPreviewer ?? makeAudioPreview)(song.audio_file!, temporary, seconds)
+      .then(() => {
+        fs.renameSync(temporary, target);
+        return target;
+      })
+      .catch((err) => {
+        fs.rmSync(temporary, { force: true });
+        logger.warn(`song ${song.id} preview failed: ${errorMessage(err)}`);
+        throw new HttpError(503, 'L’extrait d’écoute est momentanément indisponible.', 'song_preview_unavailable');
+      })
+      .finally(() => songPreviews.delete(target));
+    songPreviews.set(target, task);
+    return task;
   };
 
   const api = async (req: http.IncomingMessage, res: http.ServerResponse, url: URL, parts: string[]): Promise<void> => {
@@ -543,8 +569,12 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       }
       if (sub === 'audio' && song.audio_file && method === 'GET') {
         const download = url.searchParams.get('download') === '1';
-        if (download && planOfUser(config, user).id === 'free' && !song.export_paid) throw new HttpError(402, 'Débloquez cet export pour télécharger la chanson.', 'export_payment_required', { product: 'song', targetId: song.id });
-        return sendFile(req, res, song.audio_file, { download, cache: 'private, max-age=3600' });
+        const entitled = planOfUser(config, user).id !== 'free' || song.export_paid;
+        if (download && !entitled) throw new HttpError(402, 'Débloquez cet export pour télécharger la chanson.', 'export_payment_required', { product: 'song', targetId: song.id });
+        if (entitled) return sendFile(req, res, song.audio_file, { download, cache: 'private, no-cache' });
+        // Not unlocked: listening on the platform only gets a short excerpt, never the full master.
+        const preview = await ensureSongPreview(song, (await getCommerceSettings(db)).songPreviewSec);
+        return sendFile(req, res, preview, { cache: 'no-store' });
       }
       throw new HttpError(404, 'not found', 'not_found');
     }
@@ -552,13 +582,15 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     if (resource === 'product-images') {
       if (!id && method === 'GET') {
         const images = await listProductImages(db, user.id);
-        return json(res, 200, images.map((image) => ({ id: image.id, name: image.name, createdAt: new Date(image.created_at).toISOString() })));
+        return json(res, 200, images.map(publicProductImage));
       }
       if (!id && method === 'POST') {
         const commerce = await getCommerceSettings(db);
         const maxBytes = commerce.maxProductImageMb * 1024 * 1024;
         const image = await saveProductImage(db, config, user.id, url.searchParams.get('filename') ?? '', await readBuffer(req, maxBytes + 1), commerce.maxProductImages, maxBytes);
-        return json(res, 201, { id: image.id, name: image.name, createdAt: new Date(image.created_at).toISOString() });
+        // Shown back to the customer so they can check what the AI understood of their product.
+        const described = await describeProductImage(db, llm(), image, (message) => logger.warn(`product image ${image.id} not described: ${summarizeError(message)}`));
+        return json(res, 201, publicProductImage(described));
       }
       if (id && method === 'DELETE') {
         const image = await deleteProductImage(db, user.id, id);
@@ -603,7 +635,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
           style: job.options.style === 'auto' ? undefined : job.options.style,
           template: job.options.template === 'auto' ? undefined : job.options.template,
         };
-        const retried = await createJob(db, config, user.id, job.prompt, options, withCredit, job.product_image_ids ?? [], job.revision_of, job.export_paid, job.corrections_used);
+        const retried = await createJob(db, config, user.id, job.prompt, options, withCredit, job.product_image_ids ?? [], job.revision_of, job.export_paid, job.corrections_used, job.correction ? { instruction: job.correction, sourceId: job.correction_of } : null);
         worker?.poke();
         return json(res, 201, publicJob(retried));
       }
@@ -622,7 +654,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
           );
           if (!root) throw new HttpError(409, 'La correction incluse a déjà été utilisée.', 'correction_limit');
           const entitled = root.export_paid || planOfUser(config, user).id !== 'free';
-          return createJob(tx, config, user.id, `${job.prompt}\n\nCorrection demandée : ${instruction}`, job.options, false, job.product_image_ids ?? [], root.id, entitled, root.corrections_used);
+          return createJob(tx, config, user.id, `${job.prompt}\n\nCorrection demandée : ${instruction}`, job.options, false, job.product_image_ids ?? [], root.id, entitled, root.corrections_used, { instruction, sourceId: job.id });
         });
         worker?.poke();
         return json(res, 201, publicJob(corrected));
@@ -659,7 +691,6 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         if (job.status !== 'completed' || !job.video_file) throw new HttpError(409, 'La vidéo doit être générée avant publication', 'job_not_completed');
         const plan = planOfUser(config, user);
         if (!plan.publish && !job.export_paid) throw new HttpError(402, 'Débloquez cet export pour le publier.', 'export_payment_required', { product: 'video', targetId: job.id });
-        await ensureCleanVideoExport(db, config, job, options.deps?.renderer);
         const body = parse(PublishSchema, await readJson(req));
         const allowed = new Set(publishablePlatforms(vault, await listConnections(db, user.id)));
         const missing = body.platforms.filter((p) => !allowed.has(p));

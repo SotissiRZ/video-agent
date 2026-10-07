@@ -38,6 +38,7 @@ const sign = (secret: string, raw: string) => crypto.createHmac('sha256', secret
 
 /** Fake gateways: GeniusPay status per reference, YouCan Pay tokens. */
 const remote = new Map<string, { status: string; amount: number; currency: string }>();
+let tokens = 0;
 const calls: Array<{ url: string; init?: RequestInit }> = [];
 const gatewayFetch: typeof fetch = async (input, init) => {
   const url = String(input);
@@ -50,7 +51,8 @@ const gatewayFetch: typeof fetch = async (input, init) => {
   }
   const m = /merchant\/payments\/([^/?]+)$/.exec(url);
   if (m) return remote.has(m[1]!) ? Response.json({ success: true, data: { reference: m[1], ...remote.get(m[1]!) } }) : Response.json({ success: false }, { status: 404 });
-  if (url === 'https://youcanpay.com/sandbox/api/tokenize') return Response.json({ token: { id: 'tok_123' } });
+  // Real tokens are unique per checkout (payments.provider_ref is unique).
+  if (url === 'https://youcanpay.com/sandbox/api/tokenize') return Response.json({ token: { id: tokens++ ? `tok_123_${tokens}` : 'tok_123' } });
   return new Response('not found', { status: 404 });
 };
 

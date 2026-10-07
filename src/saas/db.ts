@@ -255,6 +255,12 @@ export const MIGRATIONS: string[] = [
   CREATE INDEX product_images_user ON product_images(user_id, created_at DESC);
   CREATE UNIQUE INDEX payments_pending_export ON payments(user_id, target_id) WHERE target_id IS NOT NULL AND status = 'pending';
   `,
+  // 8 — what the vision model sees in product photos, targeted corrections of a rendered video
+  `
+  ALTER TABLE product_images ADD COLUMN description text;
+  ALTER TABLE jobs ADD COLUMN correction text;
+  ALTER TABLE jobs ADD COLUMN correction_of text REFERENCES jobs(id) ON DELETE SET NULL;
+  `,
 ];
 
 /** Apply pending migrations (serialized with an advisory lock: several containers may start together). */

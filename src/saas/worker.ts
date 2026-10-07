@@ -6,12 +6,13 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
-import { VideoAgent, type AgentDependencies } from '../agent/orchestrator';
+import { VideoAgent, type AgentDependencies, type VideoResult } from '../agent/orchestrator';
 import type { AppConfig } from '../config/config';
 import { errorMessage } from '../core/errors';
 import type { Logger } from '../core/logger';
-import type { VideoOptions } from '../core/types';
+import type { ProgressEvent, VideoOptions } from '../core/types';
 import { resolveLLM } from '../llm/registry';
+import type { LLMProvider } from '../llm/types';
 import { publishJob, type PublishOutcome } from '../publish/service';
 import type { PlatformId, Publisher } from '../publish/types';
 import { createConnectionPublisher, getConnection, providerFor, saveConnection, type ConnectionData } from './connections';
@@ -22,7 +23,8 @@ import { claimNextJob, failStaleJobs, purgeOldJobs, type JobRow, refundCredits }
 import { applyCommerceLimits, planOfUser } from './plans';
 import { getCommerceSettings } from './commerce';
 import { claimDuePublication, finishPublication, type PublicationRow } from './publications';
-import { productImageFiles } from './product-images';
+import { productPhotos } from './product-images';
+import { ensureCleanVideoExport } from './export';
 
 export interface WorkerOptions {
   db: Db;
@@ -155,17 +157,30 @@ export class Worker {
     };
     try {
       const agent = new VideoAgent(config, { logger, ...this.o.deps });
-      const result = await agent.run(
-        { prompt: job.prompt, options, productImages: await productImageFiles(db, job.user_id, job.product_image_ids ?? [], Number.MAX_SAFE_INTEGER) },
-        {
-          signal: controller.signal,
-          onProgress: (e) => {
-            progress = { overall: e.overall, step: e.step, message: e.message };
-            steps[e.step] = { status: e.status, message: e.message };
-            dirty = true;
-          },
+      const photos = await productPhotos(db, this.llm(config), job.user_id, job.product_image_ids ?? [], (message) => logger.warn(`job ${job.id}: product photo not described: ${message}`));
+      const runOptions = {
+        signal: controller.signal,
+        onProgress: (e: ProgressEvent) => {
+          progress = { overall: e.overall, step: e.step, message: e.message };
+          steps[e.step] = { status: e.status, message: e.message };
+          dirty = true;
         },
-      );
+      };
+      const source = job.correction && job.correction_of
+        ? await db.one<JobRow>("SELECT * FROM jobs WHERE id = $1 AND user_id = $2 AND status = 'completed'", [job.correction_of, job.user_id])
+        : undefined;
+      let result: VideoResult | undefined;
+      if (source && fs.existsSync(source.dir)) {
+        // A correction edits the rendered video; only a request that needs a new video goes through the full pipeline.
+        try {
+          result = await agent.revise({ sourceDir: source.dir, outDir: job.dir, instruction: job.correction!, productImages: photos, badge: options.badge }, runOptions);
+        } catch (err) {
+          if (controller.signal.aborted) throw err;
+          logger.info(`job ${job.id}: targeted correction not possible (${errorMessage(err)}), regenerating the video`);
+          for (const key of Object.keys(steps)) delete steps[key];
+        }
+      }
+      result ??= await agent.run({ prompt: job.prompt, options, productImages: photos }, runOptions);
       clearInterval(ticker);
       dirty = true;
       await flush();
@@ -182,6 +197,15 @@ export class Worker {
       await db.query("UPDATE jobs SET status = $2, error = $3, finished_at = now() WHERE id = $1", [job.id, cancelled ? 'cancelled' : 'failed', cancelled ? null : errorMessage(err)]);
       if (!cancelled) logger.warn(`job ${job.id} failed: ${errorMessage(err)}`);
       if (job.paid_with_credit) await refundCredits(db).catch(() => 0);
+    }
+  }
+
+  private llm(config: AppConfig): LLMProvider | null {
+    if (this.o.deps?.llm !== undefined) return this.o.deps.llm;
+    try {
+      return resolveLLM(config);
+    } catch {
+      return null;
     }
   }
 
@@ -219,14 +243,11 @@ export class Worker {
       pending.push({ provider, persist, name: connection.name });
       return publisher;
     };
-    let llm = null;
+    const llm = this.llm(config);
     try {
-      llm = this.o.deps?.llm !== undefined ? this.o.deps.llm : resolveLLM(config);
-    } catch {
-      llm = null;
-    }
-    try {
-      const { outcomes } = await publishJob(config, job.dir, { platforms: p.platforms, llm, publisherFactory: factory });
+      // Publishing is only queued for entitled users, so it always ships the badge-free export.
+      const videoFile = await ensureCleanVideoExport(db, config, job, this.o.deps?.renderer);
+      const { outcomes } = await publishJob(config, job.dir, { platforms: p.platforms, llm, publisherFactory: factory, videoFile });
       await finishPublication(db, p.id, outcomes.every((o) => o.ok) ? 'done' : outcomes.some((o) => o.ok) ? 'partial' : 'failed', outcomes);
     } catch (err) {
       await finishPublication(db, p.id, 'failed', [] as PublishOutcome[], errorMessage(err));

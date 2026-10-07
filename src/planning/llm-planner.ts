@@ -31,6 +31,8 @@ const briefSummary = (brief: VideoBrief, template: TemplateDefinition): string =
     `Template: ${template.name} — ${template.description}`,
     `Template guidance: ${template.guidance}`,
     `Visual style: ${brief.styleId}`,
+    brief.productPhotos?.length &&
+      `Customer product photos (they WILL be shown in the video: describe exactly this product, never contradict what they show):\n${brief.productPhotos.map((d, i) => `${i + 1}. ${d}`).join('\n')}`,
   ]
     .filter(Boolean)
     .join('\n');
@@ -102,6 +104,7 @@ Scene kinds and the fields they use:
 - image: headline, body (caption); visualPrompt describes the picture to generate
 - quote: headline (the quote), subheadline (who says it)
 - cta: headline, subheadline (button label, max 3 words), body (optional)
+${brief.productPhotos?.length ? `productPhoto: number of the customer photo (1-${brief.productPhotos.length}) shown in this scene, 0 for none. Show every photo at least once, on the scenes that present the product; the headline and narration of that scene must match the photo.` : 'productPhoto: always 0.'}
 Every scene also needs: narration (use the word range given: the voice-over must fill the scene), visualKeywords (3-6 concrete English stock-photo search terms showing this scene in the brief's industry: objects, places, professionals at work, e.g. "cybersecurity analyst monitors" for a security product; never children, toys or games unless the brief is about them), visualPrompt (English, one sentence, same industry).
 Stay strictly on the subject of the brief in every scene.
 Keep the role names exactly as given. Return {"scenes": [...]}.`,
@@ -126,6 +129,7 @@ Keep the role names exactly as given. Return {"scenes": [...]}.`,
       narration: s?.narration ?? '',
       visualKeywords: s?.visualKeywords ?? [],
       visualPrompt: s?.visualPrompt ?? '',
+      productPhoto: s?.productPhoto || undefined,
       weight: slot.weight,
     };
   });

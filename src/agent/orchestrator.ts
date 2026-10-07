@@ -14,6 +14,7 @@ import { buildMusicPrompt } from '../providers/music/prompt';
 import { resolveMusicProvider } from '../providers/music/registry';
 import type { MusicProvider } from '../providers/music/types';
 import { AssetLibrary, importAsset } from '../assets/manager';
+import { placeProductPhotos, type ProductPhoto } from '../media/product-photos';
 import type { AppConfig } from '../config/config';
 import { errorMessage, StoryboardValidationError } from '../core/errors';
 import { createLogger, type Logger } from '../core/logger';
@@ -42,7 +43,7 @@ import type { StockProvider } from '../providers/stock/types';
 import { MediaDirector, wantsMedia, type MediaCredit } from '../media/director';
 import type { VoiceProvider } from '../providers/voice/types';
 import { renderStoryboard, type RenderOptions, type RenderResult } from '../render/renderer';
-import type { Storyboard } from '../remotion/contract/storyboard';
+import { StoryboardSchema, type Storyboard } from '../remotion/contract/storyboard';
 import { getStyle } from '../remotion/contract/styles';
 import { applyAnimations } from '../storyboard/animations';
 import { buildStoryboard } from '../storyboard/builder';
@@ -56,6 +57,7 @@ import { buildSubtitleCues, toSrt, toVtt } from '../subtitles/subtitles';
 import { getTemplate } from '../templates/registry';
 import { ensureJobDirs, jobPaths, newJobId, writeJson, type JobPaths } from './job';
 import { jobReadme, scriptMarkdown } from './project';
+import { applyRevision, planRevision, RevisionNotApplicable } from './revise';
 
 export interface AgentDependencies {
   /** `null` forces procedural planning. `undefined` = resolve from configuration. */
@@ -68,6 +70,17 @@ export interface AgentDependencies {
   stock?: StockProvider[];
   renderer?: (options: RenderOptions) => Promise<RenderResult>;
   logger?: Logger;
+}
+
+export interface RevisionRequest {
+  /** Job directory of the rendered video to correct. */
+  sourceDir: string;
+  /** Directory of the corrected copy. */
+  outDir: string;
+  instruction: string;
+  productImages?: VideoRequest['productImages'];
+  /** Corner badge of the account's current plan. */
+  badge?: string;
 }
 
 export interface RunOptions {
@@ -107,10 +120,9 @@ export class VideoAgent {
     this.logger = deps.logger ?? createLogger(config.logLevel);
   }
 
-  async run(request: VideoRequest, runOptions: RunOptions = {}): Promise<VideoResult> {
-    const options = request.options ?? {};
+  /** Progress bookkeeping shared by run() and revise(): weighted steps reported through onProgress. */
+  private stepper(runOptions: RunOptions) {
     const { signal } = runOptions;
-    const warnings: string[] = [];
     const timings: Partial<Record<StepId, number>> = {};
     let completedWeight = 0;
 
@@ -150,6 +162,14 @@ export class VideoAgent {
       completedWeight += STEP_WEIGHTS[id];
       emit(id, 'skipped', message);
     };
+    return { step, skip, timings };
+  }
+
+  async run(request: VideoRequest, runOptions: RunOptions = {}): Promise<VideoResult> {
+    const options = request.options ?? {};
+    const { signal } = runOptions;
+    const warnings: string[] = [];
+    const { step, skip, timings } = this.stepper(runOptions);
 
     // ---- 1. Analyse ------------------------------------------------------------
     const { brief, template, style, structured } = await step(
@@ -179,6 +199,9 @@ export class VideoAgent {
         (brief.audience ? ` · cible ${brief.audience}` : ''),
     );
     const script: StructuredScript | undefined = structured;
+    const productPhotos: ProductPhoto[] = (request.productImages ?? []).map((photo) => (typeof photo === 'string' ? { file: photo } : photo)).filter((photo) => fs.existsSync(photo.file));
+    // The script is written knowing what the customer's photos show.
+    if (productPhotos.length) brief.productPhotos = productPhotos.map((photo) => photo.description || photo.name || path.basename(photo.file));
 
     const llm = options.offline ? null : this.deps.llm !== undefined ? this.deps.llm : resolveLLM(this.config, options.llmProvider);
     const planner = new Planner(llm, this.logger);
@@ -275,15 +298,11 @@ export class VideoAgent {
       'assets',
       'Sélection des visuels',
       async (progress) => {
-        const sb = await director.run(storyboard, planned, brief, paths, warnings, progress, signal);
-        const customerImages = (request.productImages ?? []).filter((file) => fs.existsSync(file));
-        const mediaScenes = sb.scenes.filter((scene) => wantsMedia(scene, options.mediaCoverage ?? this.config.env.VIDEO_AGENT_MEDIA_COVERAGE));
-        if (mediaScenes.length) {
-          customerImages.forEach((file, imageIndex) => {
-            const scene = mediaScenes[imageIndex % mediaScenes.length]!;
-            scene.media = { type: 'image', src: importAsset(file, paths.publicDir, 'product'), fit: 'cover', origin: 'user:product' };
-            scene.shots = undefined;
-          });
+        let sb = await director.run(storyboard, planned, brief, paths, warnings, progress, signal);
+        if (productPhotos.length) {
+          const srcs = productPhotos.map((photo) => importAsset(photo.file, paths.publicDir, 'product'));
+          const preferred = sb.scenes.flatMap((scene, i) => (wantsMedia(scene, options.mediaCoverage ?? this.config.env.VIDEO_AGENT_MEDIA_COVERAGE) ? [i] : []));
+          sb = { ...sb, scenes: placeProductPhotos(sb.scenes, srcs, planned.map((scene) => scene.productPhoto), preferred) };
         }
         // Brand kit logo (uploaded by the customer) wins over the shared assets library.
         if (options.brandLogo && fs.existsSync(options.brandLogo)) {
@@ -364,18 +383,7 @@ export class VideoAgent {
       'project',
       'Génération du projet Remotion',
       () => {
-        const validation = validateStoryboard(storyboard, { publicDir: paths.publicDir, requireEvenDimensions: brief.outputFormat !== 'gif' });
-        validation.warnings.forEach((w) => this.logger.debug(`storyboard: ${w}`));
-        if (!validation.valid) throw new StoryboardValidationError(validation.errors);
-        storyboard = validation.storyboard!;
-        writeJson(paths.storyboardFile, storyboard);
-        writeJson(paths.propsFile, { storyboard });
-        fs.writeFileSync(paths.scriptFile, scriptMarkdown(brief, concept, storyboard));
-        if (storyboard.subtitles.cues.length) {
-          fs.writeFileSync(paths.srtFile, toSrt(storyboard.subtitles.cues, storyboard.format.fps));
-          fs.writeFileSync(paths.vttFile, toVtt(storyboard.subtitles.cues, storyboard.format.fps));
-        }
-        fs.writeFileSync(paths.readmeFile, jobReadme(paths.dir, storyboard, options.skipRender ? undefined : path.basename(paths.videoFile(brief.outputFormat)), this.config.paths.root));
+        storyboard = this.writeProject(storyboard, paths, brief, concept, options.skipRender ? undefined : path.basename(paths.videoFile(brief.outputFormat)));
       },
       () => path.relative(process.cwd(), paths.storyboardFile) || paths.storyboardFile,
     );
@@ -385,32 +393,7 @@ export class VideoAgent {
     if (options.skipRender) {
       skip('render', 'Rendu ignoré (--no-render)');
     } else {
-      const renderer = this.deps.renderer ?? renderStoryboard;
-      render = await step(
-        'render',
-        'Rendu Remotion',
-        (progress) =>
-          renderer({
-            storyboard,
-            publicDir: paths.publicDir,
-            outputFile: paths.videoFile(brief.outputFormat),
-            outputFormat: brief.outputFormat,
-            posterFile: paths.posterFile,
-            browserExecutable: this.config.browserExecutable,
-            concurrency: this.config.env.VIDEO_AGENT_RENDER_CONCURRENCY,
-            crf: this.config.env.VIDEO_AGENT_CRF,
-            x264Preset: this.config.env.VIDEO_AGENT_X264_PRESET,
-            gl: this.config.env.VIDEO_AGENT_RENDER_GL,
-            timeoutMs: this.config.env.VIDEO_AGENT_RENDER_TIMEOUT_MS,
-            signal,
-            onProgress: ({ stage, progress: p }) => {
-              const label = { bundle: 'Bundle Remotion', render: 'Rendu des images', encode: 'Encodage', poster: 'Miniature' }[stage];
-              const overall = stage === 'bundle' ? p * 0.1 : stage === 'render' ? 0.1 + p * 0.85 : 0.97;
-              progress(overall, `${label} ${Math.round(p * 100)}%`);
-            },
-          }),
-        (r) => `${path.basename(r.file)} (${r.durationSec.toFixed(1)}s)`,
-      );
+      render = await step('render', 'Rendu Remotion', (progress) => this.render(storyboard, paths, brief.outputFormat, progress, signal), (r) => `${path.basename(r.file)} (${r.durationSec.toFixed(1)}s)`);
     }
 
     // ---- 12. Output --------------------------------------------------------------------
@@ -461,6 +444,149 @@ export class VideoAgent {
 
   // ------------------------------------------------------------------------------------
 
+  /**
+   * Targeted correction of a rendered video: copy it, let the model edit its storyboard, record the
+   * voice-over of the changed sentences only, then render. Throws RevisionNotApplicable when the
+   * request needs a brand-new video (the caller then runs the full pipeline).
+   */
+  async revise(request: RevisionRequest, runOptions: RunOptions = {}): Promise<VideoResult> {
+    const { signal } = runOptions;
+    const warnings: string[] = [];
+    const llm = this.deps.llm !== undefined ? this.deps.llm : safeResolve(() => resolveLLM(this.config), warnings);
+    if (!llm) throw new RevisionNotApplicable('no LLM available to edit the storyboard');
+    const source = jobPaths(request.sourceDir);
+    const paths = jobPaths(request.outDir);
+    const { step, skip, timings } = this.stepper(runOptions);
+    const readJson = <T>(file: string): T => JSON.parse(fs.readFileSync(file, 'utf8')) as T;
+
+    const { original, brief, concept, photos } = await step(
+      'analyze',
+      'Reprise de la vidéo à corriger',
+      () => {
+        const original = StoryboardSchema.parse(readJson(source.storyboardFile));
+        const brief = readJson<VideoBrief>(source.briefFile);
+        const concept = readJson<VideoConcept>(source.conceptFile);
+        // Everything but the rendered outputs: media, voice-over and music are reused as they are.
+        const outputs = /^(video|export)\.|^export\.tmp\.|^poster\.jpg$|^captions\.json$|^job\.json$|^credits\.md$/;
+        fs.cpSync(source.dir, paths.dir, { recursive: true, filter: (file) => !(path.dirname(path.resolve(file)) === source.dir && outputs.test(path.basename(file))) });
+        ensureJobDirs(paths);
+        const photos = (request.productImages ?? [])
+          .map((photo) => (typeof photo === 'string' ? { file: photo } : photo))
+          .filter((photo) => fs.existsSync(photo.file))
+          .map((photo) => ({ src: importAsset(photo.file, paths.publicDir, 'product'), description: photo.description || photo.name || path.basename(photo.file) }));
+        return { original, brief, concept, photos };
+      },
+      ({ original }) => `${original.scenes.length} scènes reprises`,
+    );
+    for (const id of ['concept', 'storyboard', 'scenes', 'assets', 'animations'] as const) skip(id, 'conservé de la vidéo d’origine');
+
+    const edited = await step(
+      'script',
+      'Correction du storyboard',
+      async () => {
+        const revision = await planRevision(llm, original, brief, request.instruction, photos, signal);
+        if (!revision.feasible) throw new RevisionNotApplicable(revision.reason || 'the correction needs a new video');
+        try {
+          return applyRevision(original, revision, photos.map((photo) => photo.src));
+        } catch (err) {
+          throw new RevisionNotApplicable(errorMessage(err));
+        }
+      },
+      ({ narrationChanged }) => `${narrationChanged.size} narration(s) modifiée(s)`,
+    );
+    const { narrationChanged } = edited;
+    let storyboard: Storyboard = { ...edited.storyboard, brand: { ...edited.storyboard.brand, badge: request.badge } };
+
+    const voiced = original.scenes.some((scene) => scene.voiceover);
+    let voiceSource = 'none';
+    storyboard = await step(
+      'audio',
+      'Voix-off des passages modifiés',
+      async (progress) => {
+        if (!voiced) return recomputeDuration(storyboard);
+        let sb: Storyboard = { ...storyboard, scenes: storyboard.scenes.map((scene) => (narrationChanged.has(scene.id) ? { ...scene, voiceover: undefined } : scene)) };
+        if (narrationChanged.size) {
+          const voice = this.deps.voice !== undefined ? this.deps.voice : safeResolve(() => resolveVoiceProvider(this.config, undefined, brief.locale), warnings);
+          if (voice) {
+            voiceSource = voice.id;
+            sb = await this.generateVoiceover(sb, brief, paths, voice, warnings, progress, signal, narrationChanged);
+          } else warnings.push('no voice available: the corrected sentences have no voice-over');
+        }
+        return paceScenesToVoiceover(sb, { targetFrames: original.format.durationInFrames });
+      },
+      () => `voix-off : ${voiced && narrationChanged.size ? `${narrationChanged.size} scène(s) réenregistrée(s)` : 'inchangée'}`,
+    );
+
+    storyboard = await step('subtitles', 'Sous-titres', () => ({ ...storyboard, subtitles: { ...storyboard.subtitles, cues: original.subtitles.cues.length ? buildSubtitleCues(storyboard) : [] } }));
+    for (const file of [paths.srtFile, paths.vttFile]) fs.rmSync(file, { force: true });
+    storyboard = await step('project', 'Mise à jour du projet Remotion', () => this.writeProject(storyboard, paths, brief, concept, path.basename(paths.videoFile(brief.outputFormat))));
+    const render = await step('render', 'Rendu Remotion', (progress) => this.render(storyboard, paths, brief.outputFormat, progress, signal), (r) => `${path.basename(r.file)} (${r.durationSec.toFixed(1)}s)`);
+
+    return step(
+      'output',
+      'Finalisation',
+      (): VideoResult => {
+        const credits: MediaCredit[] = storyboard.scenes.flatMap((scene) => (scene.media?.credit ? [{ sceneId: scene.id, provider: scene.media.credit.source, author: scene.media.credit.author, url: scene.media.credit.url ?? '' }] : []));
+        if (credits.length) fs.writeFileSync(path.join(paths.dir, 'credits.md'), ['# Crédits des médias', '', ...credits.map((c) => `- ${c.sceneId} : ${c.author} — ${c.provider} — ${c.url}`), ''].join('\n'));
+        const providers = { planner: `${llm.id}:${llm.model}`, voice: voiceSource, image: 'none', stock: 'none', video: 'none', music: 'reused' };
+        writeJson(paths.jobFile, {
+          id: paths.id,
+          correctionOf: source.id,
+          instruction: request.instruction,
+          status: 'completed',
+          createdAt: new Date().toISOString(),
+          videoFile: path.basename(render.file),
+          posterFile: render.posterFile && path.basename(render.posterFile),
+          providers,
+          warnings,
+          timingsMs: timings,
+        });
+        return { jobId: paths.id, jobDir: paths.dir, videoFile: render.file, posterFile: render.posterFile, storyboardFile: paths.storyboardFile, storyboard, brief, concept, warnings, providers, credits, timingsMs: timings };
+      },
+      (r) => r.videoFile ?? r.storyboardFile,
+    );
+  }
+
+  private render(storyboard: Storyboard, paths: JobPaths, outputFormat: VideoBrief['outputFormat'], progress: (p: number, msg?: string) => void, signal?: AbortSignal): Promise<RenderResult> {
+    const renderer = this.deps.renderer ?? renderStoryboard;
+    return renderer({
+      storyboard,
+      publicDir: paths.publicDir,
+      outputFile: paths.videoFile(outputFormat),
+      outputFormat,
+      posterFile: paths.posterFile,
+      browserExecutable: this.config.browserExecutable,
+      concurrency: this.config.env.VIDEO_AGENT_RENDER_CONCURRENCY,
+      crf: this.config.env.VIDEO_AGENT_CRF,
+      x264Preset: this.config.env.VIDEO_AGENT_X264_PRESET,
+      gl: this.config.env.VIDEO_AGENT_RENDER_GL,
+      timeoutMs: this.config.env.VIDEO_AGENT_RENDER_TIMEOUT_MS,
+      signal,
+      onProgress: ({ stage, progress: p }) => {
+        const label = { bundle: 'Bundle Remotion', render: 'Rendu des images', encode: 'Encodage', poster: 'Miniature' }[stage];
+        const overall = stage === 'bundle' ? p * 0.1 : stage === 'render' ? 0.1 + p * 0.85 : 0.97;
+        progress(overall, `${label} ${Math.round(p * 100)}%`);
+      },
+    });
+  }
+
+  /** Validate the storyboard and write it with the files derived from it (props, script, subtitles, README). */
+  private writeProject(storyboard: Storyboard, paths: JobPaths, brief: VideoBrief, concept: VideoConcept, videoName: string | undefined): Storyboard {
+    const validation = validateStoryboard(storyboard, { publicDir: paths.publicDir, requireEvenDimensions: brief.outputFormat !== 'gif' });
+    validation.warnings.forEach((w) => this.logger.debug(`storyboard: ${w}`));
+    if (!validation.valid) throw new StoryboardValidationError(validation.errors);
+    const valid = validation.storyboard!;
+    writeJson(paths.storyboardFile, valid);
+    writeJson(paths.propsFile, { storyboard: valid });
+    fs.writeFileSync(paths.scriptFile, scriptMarkdown(brief, concept, valid));
+    if (valid.subtitles.cues.length) {
+      fs.writeFileSync(paths.srtFile, toSrt(valid.subtitles.cues, valid.format.fps));
+      fs.writeFileSync(paths.vttFile, toVtt(valid.subtitles.cues, valid.format.fps));
+    }
+    fs.writeFileSync(paths.readmeFile, jobReadme(paths.dir, valid, videoName, this.config.paths.root));
+    return valid;
+  }
+
   private async generateVoiceover(
     storyboard: Storyboard,
     brief: VideoBrief,
@@ -469,13 +595,17 @@ export class VideoAgent {
     warnings: string[],
     progress: (p: number, msg?: string) => void,
     signal?: AbortSignal,
+    /** Only record these scenes (targeted correction); the others keep their voice-over. */
+    only?: Set<string>,
   ): Promise<Storyboard> {
     const fps = storyboard.format.fps;
     const scenes = [...storyboard.scenes];
+    let attempted = 0;
     for (let i = 0; i < scenes.length; i++) {
       const scene = scenes[i]!;
       const text = scene.narration.replace(/\*/g, '').trim();
-      if (!text) continue;
+      if (!text || (only && !only.has(scene.id))) continue;
+      attempted++;
       progress(i / scenes.length, `Voix-off ${i + 1}/${scenes.length}`);
       const outFile = path.join(paths.publicDir, 'voice', `${scene.id}.wav`);
       try {
@@ -490,7 +620,7 @@ export class VideoAgent {
       } catch (err) {
         if (signal?.aborted) throw err;
         warnings.push(`voice-over failed for ${scene.id}: ${errorMessage(err)}`);
-        if (i === 0) {
+        if (attempted === 1) {
           // Most likely a configuration problem: do not retry for every scene.
           warnings.push('voice-over disabled for this video');
           break;

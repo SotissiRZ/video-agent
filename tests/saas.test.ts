@@ -28,7 +28,7 @@ class Client {
   }
 }
 
-const published: Array<{ platform: PlatformId; userId: string }> = [];
+const published: Array<{ platform: PlatformId; userId: string; videoFile: string }> = [];
 
 let base: string;
 let db: Db;
@@ -82,8 +82,8 @@ beforeAll(async () => {
         id: platform,
         label: platform,
         constraints: { maxCaption: 2200, maxHashtags: 30, minDurationSec: 1, maxDurationSec: 600, vertical: false, nativeScheduling: false },
-        publish: async () => {
-          published.push({ platform, userId });
+        publish: async (request) => {
+          published.push({ platform, userId, videoFile: path.basename(request.videoFile) });
           return { platform, status: 'published', url: `https://${platform}.test/v` };
         },
       }),
@@ -91,6 +91,9 @@ beforeAll(async () => {
     songLyricsGenerator: async () => {
       if (failSongLyricsGeneration) throw new Error('provider unavailable');
       return { title: 'Joyeux anniversaire', lyrics: '[Verse 1]\nLe soleil se lève pour toi\n[Chorus]\nJoyeux anniversaire Aïcha\n' };
+    },
+    songPreviewer: async (input, output) => {
+      fs.writeFileSync(output, `preview of ${fs.readFileSync(input, 'utf8')}`);
     },
     songGenerator: async () => {
       if (failSongAudioGeneration) throw new Error('[elevenlabs-music] HTTP 402: {"detail":{"status":"paid_plan_required"}}');
@@ -265,6 +268,24 @@ describe('videos', () => {
     expect((await owner.json('DELETE', `/api/jobs/${original.id}?remove=1`)).body.removed).toBe(true);
   }, 30_000);
 
+  it('applies the included correction once, as a new version of the video', async () => {
+    const owner = new Client(base);
+    await owner.json('POST', '/api/auth/signup', { email: 'correct-video@example.com', password: 'motdepasse9' });
+    const original = (await owner.json('POST', '/api/jobs', { prompt: 'Une vidéo de 10 secondes pour une boulangerie', durationSec: 10 })).body;
+    await waitFor(async () => ((await owner.json('GET', `/api/jobs/${original.id}`)).body.status === 'completed' ? true : undefined));
+    const corrected = await owner.json('POST', `/api/jobs/${original.id}/correct`, { instruction: 'Mets le nom de la boulangerie en titre' });
+    expect(corrected.status).toBe(201);
+    expect(corrected.body).toMatchObject({ correction: 'Mets le nom de la boulangerie en titre', status: 'queued' });
+    // No LLM in this environment: the correction falls back to a full regeneration and still completes.
+    const done = await waitFor(async () => {
+      const result = await owner.json('GET', `/api/jobs/${corrected.body.id}`);
+      return ['completed', 'failed'].includes(result.body.status) ? result.body : undefined;
+    });
+    expect(done.status).toBe('completed');
+    expect((await owner.json('POST', `/api/jobs/${original.id}/correct`, { instruction: 'Encore une correction' })).body.code).toBe('correction_limit');
+    expect((await owner.json('GET', '/api/me')).body.usage.videos).toBe(1);
+  }, 30_000);
+
   it('publishes on connected accounts with a paid plan (tokens stored encrypted)', async () => {
     // Free users can connect accounts before paying for an export.
     expect((await alice.json('POST', '/api/connections/youtube/start')).status).toBe(200);
@@ -309,6 +330,8 @@ describe('videos', () => {
     });
     expect(finished.status).toBe('done');
     expect(published.map((p) => p.platform).sort()).toEqual(['instagram', 'youtube']);
+    // The video was rendered with the free-plan badge: what goes out is the badge-free export.
+    expect(published.map((p) => p.videoFile)).toEqual(['export.mp4', 'export.mp4']);
 
     // Scheduled publication can be cancelled.
     const later = await alice.json('POST', `/api/jobs/${jobId}/publish`, { platforms: ['facebook'], at: new Date(Date.now() + 3600_000).toISOString() });
@@ -346,7 +369,7 @@ describe('songs', () => {
       return ['completed', 'failed'].includes(result.body.status) ? result.body : undefined;
     });
     expect(finished.status).toBe('completed');
-    expect(await (await singer.req('GET', finished.audioUrl)).text()).toBe('fake mp3');
+    expect(await (await singer.req('GET', finished.audioUrl)).text()).toBe('preview of fake mp3');
     expect((await singer.json('GET', '/api/me')).body.usage.songs).toBe(1);
     expect((await singer.req('GET', `${finished.audioUrl}?download=1`)).status).toBe(402);
     const userId = (await singer.json('GET', '/api/me')).body.user.id;
@@ -357,6 +380,7 @@ describe('songs', () => {
     );
     expect(await activatePayment(db, 'pay_song_export_test')).toBe(true);
     expect((await singer.req('GET', `${finished.audioUrl}?download=1`)).status).toBe(200);
+    expect(await (await singer.req('GET', finished.audioUrl)).text()).toBe('fake mp3');
 
     const corrected = await singer.json('PUT', `/api/songs/${draft.body.id}/lyrics`, { title: 'Pour Aïcha, version corrigée', lyrics: '[Verse 1]\nPour toi encore' });
     expect(corrected.status).toBe(200);

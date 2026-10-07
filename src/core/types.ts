@@ -44,8 +44,8 @@ export interface VideoOptions {
 export interface VideoRequest {
   prompt: string;
   options?: VideoOptions;
-  /** Product images selected by the account owner; absolute paths resolved server-side. */
-  productImages?: string[];
+  /** Product images selected by the account owner: absolute paths, optionally with what a vision model saw in them. */
+  productImages?: Array<string | { file: string; name?: string; description?: string }>;
 }
 
 /** Result of the deterministic prompt analysis. */
@@ -98,6 +98,8 @@ export interface VideoBrief {
   subtitles: boolean;
   /** Corner badge (plan watermark). */
   badge?: string;
+  /** Customer product photos shown in the video (descriptions, numbered from 1). */
+  productPhotos?: string[];
   parsed: ParsedPrompt;
 }
 
@@ -125,6 +127,8 @@ export interface PlannedScene {
   visualKeywords: string[];
   /** Prompt for an image/video generation provider. */
   visualPrompt: string;
+  /** Customer product photo to show (1-based), when the script asked for one. */
+  productPhoto?: number;
   /** Relative weight used to split the total duration. */
   weight: number;
 }

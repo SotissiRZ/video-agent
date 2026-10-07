@@ -33,7 +33,11 @@ export class OpenAICompatibleProvider implements LLMProvider {
   async generate(request: LLMRequest): Promise<LLMResponse> {
     const messages = [
       ...(request.system ? [{ role: 'system', content: request.system }] : []),
-      ...request.messages,
+      ...request.messages.map(({ role, content, images }) =>
+        images?.length
+          ? { role, content: [{ type: 'text', text: content }, ...images.map((image) => ({ type: 'image_url', image_url: { url: `data:${image.mediaType};base64,${image.data}` } }))] }
+          : { role, content },
+      ),
     ];
     const body: Record<string, unknown> = {
       model: this.model,

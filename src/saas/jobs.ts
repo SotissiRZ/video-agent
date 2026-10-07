@@ -20,6 +20,9 @@ export interface JobRow {
   product_image_ids: string[];
   corrections_used: number;
   revision_of: string | null;
+  /** Targeted correction: the customer's instruction and the rendered job it edits. */
+  correction: string | null;
+  correction_of: string | null;
   created_at: Date | string;
   started_at: Date | string | null;
   finished_at: Date | string | null;
@@ -70,15 +73,16 @@ export const publicJob = (job: JobRow) => ({
   credits: job.credits,
   exportPaid: job.export_paid,
   correctionsUsed: job.corrections_used,
+  correction: job.correction ?? undefined,
 });
 export type PublicJob = ReturnType<typeof publicJob>;
 
 export const userJobsDir = (config: AppConfig, userId: string): string => path.join(config.paths.output, 'users', userId);
 
-export const createJob = async (db: Db, config: AppConfig, userId: string, prompt: string, options: VideoOptions, paidWithCredit = false, productImageIds: string[] = [], revisionOf: string | null = null, exportPaid = false, correctionsUsed = 0): Promise<JobRow> => {
+export const createJob = async (db: Db, config: AppConfig, userId: string, prompt: string, options: VideoOptions, paidWithCredit = false, productImageIds: string[] = [], revisionOf: string | null = null, exportPaid = false, correctionsUsed = 0, correction: { instruction: string; sourceId: string | null } | null = null): Promise<JobRow> => {
   // Timestamp + slug for readability, random suffix: several users may submit the same prompt.
   const id = `${newJobId(prompt.split(/\s+/).slice(0, 6).join(' '))}-${crypto.randomBytes(3).toString('hex')}`.slice(0, 100);
-  const rows = await db.query<JobRow>('INSERT INTO jobs (id, user_id, prompt, options, dir, paid_with_credit, product_image_ids, revision_of, export_paid, corrections_used) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *', [
+  const rows = await db.query<JobRow>('INSERT INTO jobs (id, user_id, prompt, options, dir, paid_with_credit, product_image_ids, revision_of, export_paid, corrections_used, correction, correction_of) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *', [
     id,
     userId,
     prompt,
@@ -89,6 +93,8 @@ export const createJob = async (db: Db, config: AppConfig, userId: string, promp
     revisionOf,
     exportPaid,
     correctionsUsed,
+    correction?.instruction ?? null,
+    correction?.sourceId ?? null,
   ]);
   return rows[0]!;
 };

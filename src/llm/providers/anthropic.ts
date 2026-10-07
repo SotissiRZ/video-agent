@@ -35,7 +35,11 @@ export class AnthropicProvider implements LLMProvider {
       model: this.model,
       max_tokens: request.maxTokens ?? 16000,
       ...(request.system ? { system: request.system } : {}),
-      messages: request.messages,
+      messages: request.messages.map(({ role, content, images }) =>
+        images?.length
+          ? { role, content: [...images.map((image) => ({ type: 'image', source: { type: 'base64', media_type: image.mediaType, data: image.data } })), { type: 'text', text: content }] }
+          : { role, content },
+      ),
       ...(Object.keys(outputConfig).length ? { output_config: outputConfig } : {}),
       // Re-route automatically if a safety classifier declines the request.
       ...(fallbacks ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' } : {}),

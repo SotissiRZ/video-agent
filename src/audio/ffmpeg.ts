@@ -57,3 +57,21 @@ const fixWavSizes = (wav: Buffer): Buffer => {
   }
   return wav;
 };
+
+/** Short, faded-out, lower-bitrate MP3 excerpt used as the free listening preview of a song. */
+export const makeAudioPreview = (input: string, output: string, seconds: number): Promise<void> => {
+  const bin = findFfmpeg();
+  const fade = Math.min(3, seconds / 4);
+  // Remotion's bundled ffmpeg has no afade filter: the fade-out is a time-based volume expression.
+  const args = ['-hide_banner', '-loglevel', 'error', '-y', '-i', input, '-t', String(seconds), '-af', `volume='if(gt(t,${seconds - fade}),max(0,(${seconds}-t)/${fade}),1)':eval=frame`, '-vn', '-ac', '2', '-b:a', '96k', '-f', 'mp3', output];
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, args, {
+      stdio: ['ignore', 'ignore', 'pipe'],
+      env: { ...process.env, LD_LIBRARY_PATH: [path.dirname(bin), process.env.LD_LIBRARY_PATH].filter(Boolean).join(':') },
+    });
+    let err = '';
+    child.stderr.on('data', (d) => (err += d));
+    child.on('error', reject);
+    child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg exited with ${code}: ${err.slice(0, 300)}`))));
+  });
+};
