@@ -50,7 +50,7 @@ afterAll(async () => {
 describe('e-mail verification', () => {
   it('sends a confirmation link at sign-up and blocks videos until confirmed', async () => {
     const c = new Client(base);
-    const s = await c.json('POST', '/api/auth/signup', { email: 'awa@example.com', password: 'motdepasse1', locale: 'fr' });
+    const s = await c.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'awa@example.com', password: 'motdepasse1', locale: 'fr' });
     expect(s.body.user.emailVerified).toBe(false);
     await new Promise((r) => setTimeout(r, 50));
     expect(mails.at(-1)).toMatchObject({ to: 'awa@example.com', subject: 'Confirmez votre adresse e-mail — ZSR-TechNum' });
@@ -69,7 +69,7 @@ describe('e-mail verification', () => {
 describe('password reset', () => {
   it('sends a one-time link without revealing which addresses exist', async () => {
     const owner = new Client(base);
-    await owner.json('POST', '/api/auth/signup', { email: 'bob@example.com', password: 'ancienmotdepasse', locale: 'en' });
+    await owner.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'bob@example.com', password: 'ancienmotdepasse', locale: 'en' });
     const before = mails.length;
     const anon = new Client(base);
     expect((await anon.json('POST', '/api/auth/forgot', { email: 'nobody@example.com' })).body).toEqual({ ok: true });

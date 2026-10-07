@@ -3,8 +3,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>SOVID AI — Vidéos marketing générées par IA</title>
-  <meta name="description" content="Décrivez votre vidéo en une phrase : script, voix-off, vraies photos, sous-titres et publication automatique sur TikTok, Instagram, YouTube et LinkedIn." />
+  <title>SOVID AI — Vos vidéos publicitaires et chansons créées par IA</title>
+  <meta name="description" content="Décrivez votre vidéo en une phrase et ajoutez vos photos produit : script, voix-off, sous-titres et montage animé, prêts pour WhatsApp, TikTok, Instagram et Facebook. Essai gratuit, paiement en FCFA." />
+  <meta property="og:title" content="SOVID AI — Vidéos publicitaires et chansons créées par IA" />
+  <meta property="og:description" content="Une phrase, vos photos produit, et votre vidéo publicitaire est prête. Essai gratuit, paiement seulement si vous la gardez." />
+  <meta property="og:type" content="website" />
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
   <script src="/assets/boot.js"></script>
   <link rel="stylesheet" href="/assets/style.css" />
@@ -14,16 +17,16 @@
     <div class="container">
       <a class="brand" href="/"><i data-icon="logo" data-size="26"></i>SOVID AI</a>
       <nav class="site-nav">
-        <a href="#how" data-i18n="landing.nav.how">Comment ça marche</a>
-        <a href="#features" data-i18n="landing.nav.features">Fonctionnalités</a>
-        <a href="#pricing" data-i18n="landing.nav.pricing">Tarifs</a>
-        <a href="#faq" data-i18n="landing.nav.faq">FAQ</a>
+        <a href="#how" data-i18n="landing.nav.how"></a>
+        <a href="#features" data-i18n="landing.nav.features"></a>
+        <a href="#pricing" data-i18n="landing.nav.pricing"></a>
+        <a href="#faq" data-i18n="landing.nav.faq"></a>
       </nav>
       <div class="actions">
         <div class="segmented" data-lang-switch></div>
         <button type="button" class="btn btn-ghost btn-icon" data-theme-toggle></button>
-        <a class="btn btn-ghost" id="loginLink" href="/app#login" data-i18n="landing.login">Se connecter</a>
-        <a class="btn btn-primary hide-sm" id="startLink" href="/app#signup" data-i18n="landing.start">Commencer gratuitement</a>
+        <a class="btn btn-ghost" id="loginLink" href="/app#login" data-i18n="landing.login"></a>
+        <a class="btn btn-primary hide-sm" id="startLink" href="/app#signup" data-i18n="landing.start"></a>
       </div>
     </div>
   </header>
@@ -37,9 +40,9 @@
           <p class="lead" data-i18n="landing.hero.subtitle"></p>
           <div class="cta">
             <a class="btn btn-primary btn-lg" href="/app#signup" data-start><span data-i18n="landing.start"></span><i data-icon="arrow"></i></a>
-            <a class="btn btn-secondary btn-lg" href="#pricing" data-i18n="landing.hero.cta2"></a>
+            <a class="btn btn-secondary btn-lg" href="#how" data-i18n="landing.hero.cta2"></a>
           </div>
-          <p class="note"><i data-icon="check" data-size="15"></i><span data-i18n="landing.hero.note"></span></p>
+          <p class="note"><i data-icon="check" data-size="15"></i><span id="heroNote"></span></p>
         </div>
         <div class="mock" aria-hidden="true">
           <div class="mock-prompt"><i data-icon="sparkles"></i><span data-i18n="landing.mock.prompt"></span></div>
@@ -48,7 +51,7 @@
               <span class="tag">SOVID AI</span>
               <div class="big" data-i18n="landing.mock.title"></div>
               <span class="pill" data-i18n="landing.mock.sub"></span>
-              <span class="caption">♪ SOVID AI</span>
+              <span class="caption" data-i18n="landing.mock.caption"></span>
             </div>
           </div>
         </div>
@@ -57,57 +60,72 @@
 
     <section class="section alt" id="how">
       <div class="container">
-        <div class="section-head"><h2 data-i18n="landing.how.title"></h2></div>
+        <div class="section-head"><h2 data-i18n="landing.how.title"></h2><p data-i18n="landing.how.subtitle"></p></div>
         <div class="steps-3">
           <div class="card step-card"><div class="num">1</div><h3 data-i18n="landing.how.1.title"></h3><p data-i18n="landing.how.1.text"></p></div>
           <div class="card step-card"><div class="num">2</div><h3 data-i18n="landing.how.2.title"></h3><p data-i18n="landing.how.2.text"></p></div>
-          <div class="card step-card"><div class="num">3</div><h3 data-i18n="landing.how.3.title"></h3><p data-i18n="landing.how.3.text"></p></div>
+          <div class="card step-card"><div class="num">3</div><h3 data-i18n="landing.how.3.title"></h3><p id="howStep3"></p></div>
         </div>
       </div>
     </section>
 
     <section class="section" id="features">
       <div class="container">
-        <div class="section-head"><h2 data-i18n="landing.features.title"></h2></div>
+        <div class="section-head"><h2 data-i18n="landing.features.title"></h2><p data-i18n="landing.features.subtitle"></p></div>
         <div class="features">
+          <div class="card feature"><div class="icon-wrap"><i data-icon="image"></i></div><h3 data-i18n="landing.f.photos.title"></h3><p data-i18n="landing.f.photos.text"></p></div>
           <div class="card feature"><div class="icon-wrap"><i data-icon="type"></i></div><h3 data-i18n="landing.f.script.title"></h3><p data-i18n="landing.f.script.text"></p></div>
-          <div class="card feature"><div class="icon-wrap"><i data-icon="image"></i></div><h3 data-i18n="landing.f.media.title"></h3><p data-i18n="landing.f.media.text"></p></div>
-          <div class="card feature"><div class="icon-wrap"><i data-icon="mic"></i></div><h3 data-i18n="landing.f.voice.title"></h3><p data-i18n="landing.f.voice.text"></p></div>
-          <div class="card feature"><div class="icon-wrap"><i data-icon="layout"></i></div><h3 data-i18n="landing.f.formats.title"></h3><p data-i18n="landing.f.formats.text"></p></div>
+          <div class="card feature"><div class="icon-wrap"><i data-icon="mic"></i></div><h3 data-i18n="landing.f.voice.title"></h3><p id="featureVoice"></p></div>
+          <div class="card feature"><div class="icon-wrap"><i data-icon="edit"></i></div><h3 data-i18n="landing.f.fix.title"></h3><p data-i18n="landing.f.fix.text"></p></div>
+          <div class="card feature"><div class="icon-wrap"><i data-icon="sparkles"></i></div><h3 data-i18n="landing.f.styles.title"></h3><p data-i18n="landing.f.styles.text"></p></div>
+          <div class="card feature"><div class="icon-wrap"><i data-icon="layout"></i></div><h3 data-i18n="landing.f.formats.title"></h3><p id="featureFormats"></p></div>
           <div class="card feature"><div class="icon-wrap"><i data-icon="file"></i></div><h3 data-i18n="landing.f.subs.title"></h3><p data-i18n="landing.f.subs.text"></p></div>
-          <div class="card feature"><div class="icon-wrap"><i data-icon="send"></i></div><h3 data-i18n="landing.f.publish.title"></h3><p data-i18n="landing.f.publish.text"></p></div>
+          <div class="card feature" data-feature="publish" hidden><div class="icon-wrap"><i data-icon="send"></i></div><h3 data-i18n="landing.f.publish.title"></h3><p id="featurePublish"></p></div>
+          <div class="card feature" data-feature-off="publish"><div class="icon-wrap"><i data-icon="download"></i></div><h3 data-i18n="landing.f.download.title"></h3><p data-i18n="landing.f.download.text"></p></div>
         </div>
       </div>
     </section>
 
-    <section class="section alt" id="africa">
+    <section class="section alt" id="songs" data-feature="songs" hidden>
+      <div class="container split">
+        <div>
+          <span class="eyebrow"><i data-icon="music" data-size="15"></i><span data-i18n="landing.songs.eyebrow"></span></span>
+          <h2 data-i18n="landing.songs.title"></h2>
+          <p class="lead" data-i18n="landing.songs.text"></p>
+          <ul class="checklist">
+            <li><i data-icon="check" data-size="16"></i><span data-i18n="landing.songs.1"></span></li>
+            <li><i data-icon="check" data-size="16"></i><span data-i18n="landing.songs.2"></span></li>
+            <li><i data-icon="check" data-size="16"></i><span data-i18n="landing.songs.3"></span></li>
+          </ul>
+        </div>
+        <div class="card quote-card"><p class="muted small" data-i18n="landing.songs.example.label"></p><p class="lyrics" data-i18n="landing.songs.example"></p></div>
+      </div>
+    </section>
+
+    <section class="section" id="africa">
       <div class="container">
         <div class="section-head"><h2 data-i18n="landing.africa.title"></h2><p data-i18n="landing.africa.subtitle"></p></div>
         <div class="africa">
-          <div class="card feature"><div class="icon-wrap"><i data-icon="phone"></i></div><h3 data-i18n="landing.africa.pay.title"></h3><p data-i18n="landing.africa.pay.text"></p></div>
+          <div class="card feature"><div class="icon-wrap"><i data-icon="phone"></i></div><h3 data-i18n="landing.africa.pay.title"></h3><p id="africaPay"></p></div>
           <div class="card feature"><div class="icon-wrap"><i data-icon="globe"></i></div><h3 data-i18n="landing.africa.lang.title"></h3><p data-i18n="landing.africa.lang.text"></p></div>
           <div class="card feature"><div class="icon-wrap"><i data-icon="whatsapp"></i></div><h3 data-i18n="landing.africa.wa.title"></h3><p data-i18n="landing.africa.wa.text"></p></div>
-          <div class="card feature"><div class="icon-wrap"><i data-icon="zap"></i></div><h3 data-i18n="landing.africa.music.title"></h3><p data-i18n="landing.africa.music.text"></p></div>
+          <div class="card feature"><div class="icon-wrap"><i data-icon="zap"></i></div><h3 data-i18n="landing.africa.biz.title"></h3><p data-i18n="landing.africa.biz.text"></p></div>
         </div>
       </div>
     </section>
 
-    <section class="section" id="pricing">
+    <section class="section alt" id="pricing">
       <div class="container">
-        <div class="section-head"><h2 data-i18n="landing.pricing.title"></h2><p data-i18n="landing.pricing.subtitle"></p></div>
+        <div class="section-head"><h2 data-i18n="landing.pricing.title"></h2><p id="pricingSubtitle"></p></div>
         <div class="plans" id="plans"></div>
+        <p class="muted small center" data-i18n="landing.pricing.note"></p>
       </div>
     </section>
 
-    <section class="section alt" id="faq">
+    <section class="section" id="faq">
       <div class="container">
         <div class="section-head"><h2 data-i18n="landing.faq.title"></h2></div>
-        <div class="faq">
-          <details><summary data-i18n="landing.faq.1.q"></summary><p data-i18n="landing.faq.1.a"></p></details>
-          <details><summary data-i18n="landing.faq.2.q"></summary><p data-i18n="landing.faq.2.a"></p></details>
-          <details><summary data-i18n="landing.faq.3.q"></summary><p data-i18n="landing.faq.3.a"></p></details>
-          <details><summary data-i18n="landing.faq.4.q"></summary><p data-i18n="landing.faq.4.a"></p></details>
-        </div>
+        <div class="faq" id="faqList"></div>
       </div>
     </section>
 
@@ -125,11 +143,14 @@
     <div class="container">
       <a class="brand" href="/"><i data-icon="logo" data-size="22"></i>SOVID AI</a>
       <nav class="footer-links">
-        <a href="/legal#terms" data-i18n="legal.terms"></a>
-        <a href="/legal#privacy" data-i18n="legal.privacy"></a>
         <a href="/legal#notice" data-i18n="legal.notice"></a>
+        <a href="/legal#terms" data-i18n="legal.terms"></a>
+        <a href="/legal#sales" data-i18n="legal.sales"></a>
+        <a href="/legal#privacy" data-i18n="legal.privacy"></a>
+        <a href="/legal#ai" data-i18n="legal.ai"></a>
+        <a id="footerContact" hidden></a>
       </nav>
-      <span>© <span id="year"></span> SOVID AI. <span data-i18n="landing.footer.rights"></span></span>
+      <span>© <span id="year"></span> <span id="footerCompany">SOVID AI</span>. <span data-i18n="landing.footer.rights"></span></span>
     </div>
   </footer>
 

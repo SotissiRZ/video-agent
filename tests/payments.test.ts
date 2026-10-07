@@ -93,7 +93,7 @@ describe('prepaid passes', () => {
 
   it('GeniusPay: checkout, signed webhook, confirmation with the gateway, 30-day pass extended on renewal', async () => {
     const c = new Client(base);
-    await c.json('POST', '/api/auth/signup', { email: 'awa@shop.ci', password: 'motdepasse1', name: 'Awa' });
+    await c.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'awa@shop.ci', password: 'motdepasse1', name: 'Awa' });
     const pay = await c.json('POST', '/api/billing/pay', { plan: 'creator', provider: 'geniuspay' });
     expect(pay.status).toBe(200);
     expect(pay.body.url).toBe('https://geniuspay.ci/checkout/MTX-1');
@@ -129,7 +129,7 @@ describe('prepaid passes', () => {
 
   it('GeniusPay: an underpaid or foreign-currency payment is not activated', async () => {
     const c = new Client(base);
-    await c.json('POST', '/api/auth/signup', { email: 'koffi@shop.ci', password: 'motdepasse1' });
+    await c.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'koffi@shop.ci', password: 'motdepasse1' });
     const pay = await c.json('POST', '/api/billing/pay', { plan: 'creator', provider: 'geniuspay' });
     const ref = new URL(pay.body.url).pathname.split('/').pop()!;
     remote.set(ref, { status: 'completed', amount: 200, currency: 'XOF' });
@@ -140,7 +140,7 @@ describe('prepaid passes', () => {
 
   it('YouCan Pay: hosted payment form, webhook signed with the private key, amounts in centimes', async () => {
     const c = new Client(base);
-    await c.json('POST', '/api/auth/signup', { email: 'youssef@shop.ma', password: 'motdepasse1', locale: 'fr' });
+    await c.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'youssef@shop.ma', password: 'motdepasse1', locale: 'fr' });
     const pay = await c.json('POST', '/api/billing/pay', { plan: 'creator', provider: 'youcanpay', months: 3 });
     expect(pay.body.url).toBe('https://youcanpay.com/sandbox/payment-form/tok_123?lang=fr');
     const form = calls.find((x) => x.url.endsWith('/tokenize'))!.init!.body as FormData;
@@ -161,7 +161,7 @@ describe('prepaid passes', () => {
 
   it('charges a one-off song export and unlocks the download after a signed payment', async () => {
     const c = new Client(base);
-    await c.json('POST', '/api/auth/signup', { email: 'export@shop.ma', password: 'motdepasse1', locale: 'fr' });
+    await c.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'export@shop.ma', password: 'motdepasse1', locale: 'fr' });
     const userId = (await c.json('GET', '/api/me')).body.user.id;
     const id = crypto.randomUUID();
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'video-agent-export-'));
@@ -221,7 +221,7 @@ describe('prepaid passes', () => {
 
   it('extra-video packs: bought with mobile money, used beyond the quota, refunded when a video fails', async () => {
     const c = new Client(base);
-    await c.json('POST', '/api/auth/signup', { email: 'fatou@shop.sn', password: 'motdepasse1' });
+    await c.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'fatou@shop.sn', password: 'motdepasse1' });
     const cfg = (await c.json('GET', '/api/public/config')).body;
     expect(cfg.creditPack).toEqual({ videos: 10, prices: { XOF: 5000, MAD: 90 } });
 

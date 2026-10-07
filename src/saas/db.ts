@@ -298,6 +298,11 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE jobs ADD COLUMN pronunciation_fix jsonb;
   ALTER TABLE jobs ADD COLUMN pronunciation_fixes_used integer NOT NULL DEFAULT 0;
   `,
+  // 12 — proof of acceptance of the terms (version and date) at sign-up
+  `
+  ALTER TABLE users ADD COLUMN terms_version text;
+  ALTER TABLE users ADD COLUMN terms_accepted_at timestamptz;
+  `,
 ];
 
 /** Apply pending migrations (serialized with an advisory lock: several containers may start together). */

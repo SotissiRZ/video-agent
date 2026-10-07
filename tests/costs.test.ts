@@ -74,7 +74,7 @@ describe('commerce settings and cost report', () => {
   beforeAll(async () => {
     db = await connectPglite();
     await migrate(db);
-  });
+  }, 60_000);
   afterAll(async () => db?.close());
 
   it('moves an existing install from the old quotas to the profitable ones', async () => {
@@ -84,6 +84,19 @@ describe('commerce settings and cost report', () => {
       proVideosPerMonth: 80, proMinutesPerMonth: 60, proSongsPerMonth: 20, proMaxDurationSec: 300,
       songPreviewSec: 30, freeSongMaxSec: 60, freeVideosPerMonth: 3, videoPriceXof: 1000,
     });
+  });
+
+  it('deletes songs past the retention period, unless a payment is pending', async () => {
+    const { purgeOldSongs } = await import('../src/saas/songs');
+    await db.query("INSERT INTO users (id, email, password_hash) VALUES ('u-old', 'old@b.c', 'x')");
+    await db.query(
+      `INSERT INTO songs (id, user_id, prompt, title, lyrics, style, mood, duration_sec, status, created_at) VALUES
+       ('old-song', 'u-old', 'p', 't', 'l', 's', 'm', 60, 'completed', now() - interval '200 days'),
+       ('paying-song', 'u-old', 'p', 't', 'l', 's', 'm', 60, 'completed', now() - interval '200 days'),
+       ('new-song', 'u-old', 'p', 't', 'l', 's', 'm', 60, 'completed', now())`,
+    );
+    await db.query("INSERT INTO payments (id, user_id, provider, plan, amount, currency, target_id) VALUES ('pay-pending', 'u-old', 'geniuspay', 'export_song', 1500, 'XOF', 'paying-song')");
+    expect((await purgeOldSongs(db, 180)).map((s) => s.id)).toEqual(['old-song']);
   });
 
   it('saves one section without resetting the others', async () => {

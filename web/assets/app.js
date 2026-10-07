@@ -99,6 +99,14 @@ const bindAuthForm = (form, path, extra = () => ({})) =>
       return;
     }
     delete data.confirmPassword;
+    if (form.id === 'signupForm') {
+      if (!form.elements.namedItem('acceptTerms').checked) {
+        error.textContent = t('auth.acceptTermsRequired');
+        error.hidden = false;
+        return;
+      }
+      data.acceptTerms = true;
+    }
     const button = form.querySelector('button[type=submit]');
     button.disabled = true;
     try {
@@ -161,9 +169,17 @@ const refreshMe = async () => {
 
 const renderShell = () => {
   const { user, plan, usage } = state.me;
-  $('verifyBanner').hidden = user.emailVerified;
+  $('verifyBanner').hidden = user.emailVerified || (state.me.mail !== 'smtp' && !state.me.requireVerification);
   $('verifyText').textContent = t(state.me.requireVerification ? 'verify.required' : 'verify.banner', { email: user.email });
   $('adminLink').hidden = user.role !== 'admin';
+  // Pages for services this server does not offer stay out of the way (admins still see them to set up).
+  const features = state.publicConfig?.features;
+  if (features) {
+    const admin = user.role === 'admin';
+    $('scheduleLink').hidden = !features.publish?.length && !admin;
+    $('connectionsLink').hidden = !features.publish?.length && !admin;
+    $('songsLink').hidden = !features.songs && !admin;
+  }
   $('userName').textContent = user.name || user.email.split('@')[0];
   $('userEmail').textContent = user.email;
   $('avatar').textContent = (user.name || user.email).trim()[0].toUpperCase();
@@ -209,7 +225,7 @@ const renderExportActions = (container, product, targetId, unlocked) => {
     : currency === 'XOF' ? prices?.songPriceXof : prices?.songPriceMad;
   container.innerHTML = providers.map((provider, index) =>
     `<button type="button" class="btn ${index ? 'btn-secondary' : 'btn-primary'} btn-sm" data-export-pay="${product}" data-target="${escapeHtml(targetId)}" data-provider="${escapeHtml(provider.id)}">${icon(provider.id === 'geniuspay' ? 'phone' : 'card', 15)}<span>${escapeHtml(t('export.unlock'))} · ${escapeHtml(formatMoney(amount(provider.currency), provider.currency))}</span></button>`,
-  ).join('');
+  ).join('') + (providers.length ? `<p class="hint" style="flex-basis: 100%">${escapeHtml(t('export.consent'))} <a href="/legal#sales" target="_blank">${escapeHtml(t('legal.sales'))}</a></p>` : '');
 };
 
 const showSong = (song) => {
@@ -577,7 +593,6 @@ $('createForm').addEventListener('submit', async (e) => {
       return choice === 'clone' ? { voiceClone: true } : { voiceGender: choice };
     })(),
     stock: $('stock').checked,
-    offline: $('offline').checked,
   };
   const format = document.querySelector('input[name=format]:checked').value;
   if (format) body.format = format;
@@ -1023,6 +1038,9 @@ document.addEventListener('click', async (event) => {
 
 // ---- Library -----------------------------------------------------------------------------------
 const loadLibrary = async () => {
+  const retention = state.publicConfig?.retentionDays ?? 0;
+  $('retentionNote').hidden = !retention;
+  $('retentionNoteText').textContent = t('library.retention', { n: retention });
   const jobs = await api('/api/jobs').catch(() => []);
   $('libraryEmpty').hidden = jobs.length > 0;
   $('videoGrid').innerHTML = jobs
@@ -1317,6 +1335,7 @@ const loadBilling = async (params) => {
   const stripeSubscriber = Boolean(user.subscriptionStatus) && !prepaid;
   $('billingPlans').innerHTML = renderPlans(plans, {
     current: plan.id,
+    features: state.publicConfig?.features,
     action: (p) => {
       if (p.id === 'free') return p.id === plan.id ? { label: t('plan.current'), disabled: true } : stripeSubscriber ? { label: t('billing.manage'), attrs: 'data-portal' } : null;
       if (stripeSubscriber) return p.id === plan.id ? { label: t('plan.current'), disabled: true } : { label: t('plan.choose', { name: t(`plan.${p.id}`) }), attrs: 'data-portal' };
@@ -1458,6 +1477,13 @@ const loadAdmin = async () => {
   ]);
   renderAdminCommerce(commerceResult);
   renderAdminProviders(commerceResult);
+  // The public legal pages need the publisher's identity: remind the admin until it is complete.
+  const company = state.publicConfig?.company ?? {};
+  const missing = [['email', 'contact'], ['address', 'address'], ['registration', 'registration'], ['director', 'director'], ['country', 'country'], ['hosting', 'hosting']]
+    .filter(([field]) => !company[field])
+    .map(([, label]) => t(`admin.legal.${label}`));
+  $('adminLegal').hidden = !missing.length;
+  $('adminLegalText').textContent = t('admin.legal.missing', { fields: missing.join(', ') });
   void loadAdminCosts();
   if ('error' in statsResult) {
     $('adminStats').innerHTML = `<div class="alert danger">${escapeHtml(friendlyText(statsResult.error))}</div>`;

@@ -27,6 +27,7 @@ import { productPhotos } from './product-images';
 import { planConfig, planLLM } from './plan-providers';
 import { UsageMeter } from '../core/usage';
 import { getVoiceClone, listPronunciations } from './voices';
+import { purgeOldSongs, songDirectory } from './songs';
 import { ensureCleanVideoExport } from './export';
 
 export interface WorkerOptions {
@@ -67,14 +68,17 @@ export class Worker {
     for (const wake of [...this.wakers]) wake();
   }
 
-  /** Delete videos past VIDEO_AGENT_RETENTION_DAYS (hourly; harmless when several workers do it). */
+  /** Delete videos and songs past VIDEO_AGENT_RETENTION_DAYS (hourly; harmless when several workers do it). */
   async purge(): Promise<number> {
-    const days = this.o.config().env.VIDEO_AGENT_RETENTION_DAYS;
+    const config = this.o.config();
+    const days = config.env.VIDEO_AGENT_RETENTION_DAYS;
     if (!days) return 0;
     const removed = await purgeOldJobs(this.o.db, days);
     for (const job of removed) fs.rmSync(job.dir, { recursive: true, force: true });
-    if (removed.length) this.o.logger.info(`retention: ${removed.length} video(s) older than ${days} days deleted`);
-    return removed.length;
+    const songs = await purgeOldSongs(this.o.db, days);
+    for (const song of songs) fs.rmSync(songDirectory(config, song.user_id, song.id), { recursive: true, force: true });
+    if (removed.length || songs.length) this.o.logger.info(`retention: ${removed.length} video(s) and ${songs.length} song(s) older than ${days} days deleted`);
+    return removed.length + songs.length;
   }
 
   private async loop(tick: () => Promise<boolean>): Promise<void> {

@@ -64,7 +64,7 @@
         <label class="field"><span class="label" data-i18n="auth.password"></span><input class="input" type="password" name="password" autocomplete="new-password" minlength="8" required /><span class="hint" data-i18n="auth.passwordHint"></span></label>
         <label class="field"><span class="label" data-i18n="auth.confirmPassword"></span><input class="input" type="password" name="confirmPassword" autocomplete="new-password" required /></label>
         <div class="alert danger" data-error hidden></div>
-        <p class="hint" data-i18n-html="auth.consent"></p>
+        <label class="consent"><input type="checkbox" name="acceptTerms" required /><span data-i18n-html="auth.acceptTerms"></span></label>
         <button class="btn btn-primary btn-lg btn-block" type="submit" data-i18n="auth.signup"></button>
         <p class="switch-link" data-i18n-html="auth.toLogin"></p>
       </form>
@@ -77,10 +77,10 @@
       <a class="brand" href="/"><i data-icon="logo" data-size="26"></i>SOVID AI</a>
       <nav class="nav">
         <a href="#create" data-page="create"><i data-icon="film"></i><span data-i18n="nav.create"></span></a>
-        <a href="#songs" data-page="songs"><i data-icon="mic"></i><span data-i18n="nav.songs"></span></a>
+        <a href="#songs" data-page="songs" id="songsLink"><i data-icon="music"></i><span data-i18n="nav.songs"></span></a>
         <a href="#library" data-page="library"><i data-icon="film"></i><span data-i18n="nav.library"></span></a>
-        <a href="#schedule" data-page="schedule"><i data-icon="calendar"></i><span data-i18n="nav.schedule"></span><span class="count" id="pendingCount" hidden></span></a>
-        <a href="#connections" data-page="connections"><i data-icon="link"></i><span data-i18n="nav.connections"></span></a>
+        <a href="#schedule" data-page="schedule" id="scheduleLink"><i data-icon="calendar"></i><span data-i18n="nav.schedule"></span><span class="count" id="pendingCount" hidden></span></a>
+        <a href="#connections" data-page="connections" id="connectionsLink"><i data-icon="link"></i><span data-i18n="nav.connections"></span></a>
         <a href="#brand" data-page="brand"><i data-icon="palette"></i><span data-i18n="nav.brand"></span></a>
       </nav>
       <div class="nav-section" data-i18n="nav.settings"></div>
@@ -198,7 +198,7 @@
                 </div>
                 <div class="field" id="voiceChoiceField">
                   <span class="label" data-i18n="create.voiceChoice"></span>
-                  <div class="segmented" id="voiceChoice" role="radiogroup">
+                  <div class="choice-group" id="voiceChoice" role="radiogroup">
                     <label><input type="radio" name="voiceChoice" value="female" checked /><span data-i18n="create.voice.female"></span></label>
                     <label><input type="radio" name="voiceChoice" value="male" /><span data-i18n="create.voice.male"></span></label>
                     <label><input type="radio" name="voiceChoice" value="clone" /><span data-i18n="create.voice.clone"></span></label>
@@ -222,7 +222,6 @@
                         <option value="visual" data-i18n="create.media.visual"></option><option value="none" data-i18n="create.media.none"></option>
                       </select>
                     </label>
-                    <label class="switch" style="align-self: end; padding-bottom: 8px"><input type="checkbox" id="offline" /><span class="track"></span><span data-i18n="create.offline"></span></label>
                   </div>
                 </details>
                 <div class="alert neutral" id="planNote" hidden><i data-icon="info"></i><span id="planNoteText"></span><a href="#billing" data-i18n="common.upgrade"></a></div>
@@ -298,6 +297,7 @@
                           <button type="button" class="btn btn-secondary" id="prepareCaptions"><i data-icon="edit" data-size="16"></i><span data-i18n="publish.prepare"></span></button>
                         </div>
                         <div id="captionEditors" style="display: grid; gap: 10px; margin-top: 12px"></div>
+                        <div class="alert info" style="margin-top: 12px"><i data-icon="info" data-size="16"></i><span data-i18n="publish.aiNotice"></span></div>
                         <div class="result-actions" id="publishActions" style="margin-top: 12px" hidden>
                           <button type="button" class="btn btn-secondary" id="dryRun"><i data-icon="eye" data-size="16"></i><span data-i18n="publish.check"></span></button>
                           <button type="button" class="btn btn-primary" id="publishBtn"><i data-icon="send" data-size="16"></i><span id="publishBtnLabel" data-i18n="publish.submit"></span></button>
@@ -356,6 +356,7 @@
         <!-- ---------------- Library ---------------- -->
         <section class="page" id="page-library">
           <div class="page-header"><div><h1 data-i18n="library.title"></h1><p data-i18n="library.subtitle"></p></div></div>
+          <div class="alert neutral" id="retentionNote" hidden style="margin-bottom: 16px"><i data-icon="clock" data-size="16"></i><span id="retentionNoteText"></span></div>
           <div class="video-grid" id="videoGrid"></div>
           <div class="card" id="libraryEmpty" hidden>
             <div class="empty-state">
@@ -507,6 +508,10 @@
                 <div class="card-footer"><button class="btn btn-primary" type="submit" data-i18n="account.change"></button></div>
               </form>
               <div class="card">
+                <div class="card-header"><div><h2 data-i18n="account.export"></h2><p data-i18n="account.exportText"></p></div></div>
+                <div class="card-footer"><a class="btn btn-secondary" href="/api/me/export" download><i data-icon="download" data-size="16"></i><span data-i18n="account.export"></span></a></div>
+              </div>
+              <div class="card">
                 <div class="card-header"><div><h2 data-i18n="account.danger"></h2><p data-i18n="account.deleteText"></p></div></div>
                 <div class="card-footer"><button class="btn btn-danger-ghost" type="button" id="deleteAccount"><i data-icon="trash" data-size="16"></i><span data-i18n="account.delete"></span></button></div>
               </div>
@@ -518,6 +523,7 @@
         <section class="page" id="page-admin">
           <div class="page-header"><div><h1 data-i18n="admin.title"></h1><p data-i18n="admin.subtitle"></p></div></div>
           <div class="grid-3" id="adminStats" style="grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); margin-bottom: 20px"></div>
+          <div class="alert warning" id="adminLegal" hidden style="margin-bottom: 20px"><i data-icon="alert" data-size="16"></i><span id="adminLegalText"></span></div>
           <div id="adminCommerce" style="margin-bottom: 20px"></div>
           <div id="adminProviders" style="margin-bottom: 20px"></div>
           <div id="adminCosts" style="margin-bottom: 20px"></div>

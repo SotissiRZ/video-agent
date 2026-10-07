@@ -602,7 +602,7 @@ Les limites sont définies dans `src/saas/plans.ts` ; les prix affichés dans `P
 
 **Plans multiples** : les scènes longues enchaînent jusqu'à `VIDEO_AGENT_SHOTS_PER_SCENE` photos ou clips (3 par défaut), en fondu, pour un rythme de 2 à 4 s par plan.
 
-**Pages légales** : `/legal` (conditions d'utilisation, confidentialité, mentions légales) en français et en anglais, remplies avec `COMPANY_NAME`, `COMPANY_ADDRESS` et `CONTACT_EMAIL`. Ce sont des modèles : faites-les relire pour votre pays et votre activité.
+**Pages légales** : `/legal` (mentions légales, conditions d'utilisation, conditions de vente, confidentialité, IA et voix) en français et en anglais. Elles sont remplies avec l'identité de l'éditeur (`COMPANY_NAME`, `COMPANY_REGISTRATION`, `COMPANY_ADDRESS`, `COMPANY_COUNTRY`, `COMPANY_DIRECTOR`, `CONTACT_EMAIL`, `HOSTING_PROVIDER`), modifiables dans Administration › Réglages › Entreprise, et listent automatiquement les prestataires réellement configurés. Tant qu'un champ manque, l'administration l'affiche en alerte. L'inscription exige une case « 18 ans et plus, conditions acceptées », enregistrée avec la version des conditions (`TERMS_VERSION`). Le site public n'annonce que les fonctions disponibles sur le serveur (paiements, publication, chansons, clonage de voix). Ce sont des modèles : faites-les relire pour votre pays et votre activité.
 
 **Conservation** : `VIDEO_AGENT_RETENTION_DAYS=30` supprime chaque heure les vidéos de plus de 30 jours (sauf celles dont une publication est programmée).
 

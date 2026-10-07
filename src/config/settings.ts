@@ -32,6 +32,22 @@ const opt = (...pairs: Array<[string, string]>) => pairs.map(([value, label]) =>
 
 export const SETTING_GROUPS: SettingGroup[] = [
   {
+    id: 'company',
+    title: 'Entreprise et mentions légales',
+    description: 'Identité de l’éditeur affichée dans les mentions légales, les conditions et la politique de confidentialité. Obligatoire avant d’ouvrir le site au public.',
+    fields: [
+      { key: 'COMPANY_NAME', label: 'Nom commercial ou raison sociale' },
+      { key: 'COMPANY_REGISTRATION', label: 'Forme juridique et immatriculation', placeholder: 'SARL au capital de … FCFA, RCCM …, IFU …' },
+      { key: 'COMPANY_ADDRESS', label: 'Adresse du siège' },
+      { key: 'COMPANY_COUNTRY', label: 'Pays (droit applicable)', placeholder: 'Burkina Faso' },
+      { key: 'COMPANY_DIRECTOR', label: 'Directeur de la publication', placeholder: 'Prénom Nom' },
+      { key: 'CONTACT_EMAIL', label: 'E-mail de contact (affiché publiquement)' },
+      { key: 'HOSTING_PROVIDER', label: 'Hébergeur (nom, adresse, téléphone)', placeholder: 'Hetzner Online GmbH, Industriestr. 25, 91710 Gunzenhausen, Allemagne' },
+      { key: 'PUBLIC_URL', label: 'Adresse publique du site', placeholder: 'https://sovid.ai' },
+      { key: 'VIDEO_AGENT_RETENTION_DAYS', label: 'Conservation des vidéos (jours, 0 = illimitée)', help: 'Affichée dans les conditions et la politique de confidentialité.' },
+    ],
+  },
+  {
     id: 'llm',
     title: 'Textes et script (LLM)',
     description: 'Écrit le concept, le script et les légendes. Plusieurs fournisseurs = relais automatique si l’un échoue (crédit épuisé, clé invalide). Sans LLM : textes génériques.',
@@ -131,7 +147,6 @@ export const SETTING_GROUPS: SettingGroup[] = [
     title: 'Publication (applications développeur)',
     description: 'Vos applications développeur : chaque client connecte ensuite ses propres comptes dans « Comptes connectés ». URL de retour OAuth : <PUBLIC_URL>/api/connections/<youtube|tiktok|linkedin|meta>/callback.',
     fields: [
-      { key: 'VIDEO_AGENT_PUBLISH_PLATFORMS', label: 'Plateformes par défaut', placeholder: 'tiktok,instagram,youtube' },
       { key: 'YOUTUBE_CLIENT_ID', label: 'YouTube : Client ID', credential: true, free: true, link: 'https://console.cloud.google.com/apis/credentials' },
       { key: 'YOUTUBE_CLIENT_SECRET', label: 'YouTube : Client secret', secret: true },
       { key: 'YOUTUBE_PRIVACY', label: 'YouTube : visibilité', options: opt(['public', 'Publique'], ['unlisted', 'Non répertoriée'], ['private', 'Privée']) },

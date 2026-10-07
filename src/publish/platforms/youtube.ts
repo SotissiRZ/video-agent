@@ -59,6 +59,8 @@ export class YouTubePublisher implements Publisher {
         ...(scheduled ? { publishAt: req.scheduledAt!.toISOString() } : {}),
         selfDeclaredMadeForKids: false,
         embeddable: true,
+        // YouTube's disclosure for realistic altered or synthetic content: every video here is AI-made.
+        containsSyntheticMedia: true,
       },
     };
     req.onProgress?.('YouTube : initialisation de l’envoi');

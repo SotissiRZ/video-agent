@@ -171,7 +171,7 @@ describe('accounts', () => {
     expect(pub.body.commerce.usdRateXof).toBeUndefined();
 
     const admin = new Client(base);
-    const s = await admin.json('POST', '/api/auth/signup', { email: 'Admin@Example.com', password: 'motdepasse1', name: 'Admin' });
+    const s = await admin.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'Admin@Example.com', password: 'motdepasse1', name: 'Admin' });
     expect(s.status).toBe(200);
     expect(s.body.user).toMatchObject({ email: 'admin@example.com', role: 'admin', plan: 'free' });
     expect(admin.cookie).toMatch(/^va_session=/);
@@ -179,12 +179,12 @@ describe('accounts', () => {
 
     const anon = new Client(base);
     expect((await anon.json('GET', '/api/me')).status).toBe(401);
-    expect((await anon.json('POST', '/api/auth/signup', { email: 'admin@example.com', password: 'motdepasse2' })).body.code).toBe('email_taken');
-    expect((await anon.json('POST', '/api/auth/signup', { email: 'x@y.z', password: 'court' })).body.code).toBe('weak_password');
+    expect((await anon.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'admin@example.com', password: 'motdepasse2' })).body.code).toBe('email_taken');
+    expect((await anon.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'x@y.z', password: 'court' })).body.code).toBe('weak_password');
     expect((await anon.json('POST', '/api/auth/login', { email: 'admin@example.com', password: 'nope-nope' })).body.code).toBe('invalid_credentials');
 
     const bob = new Client(base);
-    expect((await bob.json('POST', '/api/auth/signup', { email: 'bob@example.com', password: 'motdepasse2', locale: 'en' })).body.user).toMatchObject({ role: 'user', locale: 'en' });
+    expect((await bob.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'bob@example.com', password: 'motdepasse2', locale: 'en' })).body.user).toMatchObject({ role: 'user', locale: 'en' });
     await bob.json('POST', '/api/auth/logout');
     expect((await bob.json('GET', '/api/me')).status).toBe(401);
     expect((await bob.json('POST', '/api/auth/login', { email: 'BOB@example.com', password: 'motdepasse2' })).status).toBe(200);
@@ -216,7 +216,7 @@ describe('videos', () => {
 
   it('queues, renders (embedded worker) and serves a video, scoped to its owner', async () => {
     alice = new Client(base);
-    await alice.json('POST', '/api/auth/signup', { email: 'alice@example.com', password: 'motdepasse3' });
+    await alice.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'alice@example.com', password: 'motdepasse3' });
     const created = await alice.json('POST', '/api/jobs', { prompt: 'Crée une vidéo de 2 minutes pour promouvoir un café à Dakar', subtitles: false });
     expect(created.status).toBe(201);
     jobId = created.body.id;
@@ -234,7 +234,7 @@ describe('videos', () => {
     expect(await (await alice.req('GET', `/api/jobs/${jobId}/video`)).text()).toBe('fake video');
 
     const mallory = new Client(base);
-    await mallory.json('POST', '/api/auth/signup', { email: 'mallory@example.com', password: 'motdepasse4' });
+    await mallory.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'mallory@example.com', password: 'motdepasse4' });
     expect((await mallory.json('GET', `/api/jobs/${jobId}`)).status).toBe(404);
     expect((await mallory.req('GET', `/api/jobs/${jobId}/video`)).status).toBe(404);
     expect((await mallory.json('GET', '/api/jobs')).body).toEqual([]);
@@ -250,7 +250,7 @@ describe('videos', () => {
 
   it('enforces the monthly quota of the free plan', async () => {
     const eve = new Client(base);
-    await eve.json('POST', '/api/auth/signup', { email: 'eve@example.com', password: 'motdepasse5' });
+    await eve.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'eve@example.com', password: 'motdepasse5' });
     const ids: string[] = [];
     for (let i = 0; i < 3; i++) ids.push((await eve.json('POST', '/api/jobs', { prompt: `Vidéo ${i} pour un salon de coiffure`, durationSec: 10 })).body.id);
     const refused = await eve.json('POST', '/api/jobs', { prompt: 'Une de trop', durationSec: 10 });
@@ -262,7 +262,7 @@ describe('videos', () => {
 
   it('retries a failed video as a new owner-scoped job', async () => {
     const owner = new Client(base);
-    await owner.json('POST', '/api/auth/signup', { email: 'retry-video@example.com', password: 'motdepasse8' });
+    await owner.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'retry-video@example.com', password: 'motdepasse8' });
     const original = (await owner.json('POST', '/api/jobs', { prompt: 'Une vidéo de 10 secondes pour un café', durationSec: 10 })).body;
     await waitFor(async () => {
       const result = await owner.json('GET', `/api/jobs/${original.id}`);
@@ -276,7 +276,7 @@ describe('videos', () => {
     expect(retry.id).not.toBe(original.id);
     expect(retry).toMatchObject({ prompt: original.prompt, status: 'queued' });
     const stranger = new Client(base);
-    await stranger.json('POST', '/api/auth/signup', { email: 'retry-stranger@example.com', password: 'motdepasse8' });
+    await stranger.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'retry-stranger@example.com', password: 'motdepasse8' });
     expect((await stranger.json('POST', `/api/jobs/${original.id}/retry`)).status).toBe(404);
     const finishedRetry = await waitFor(async () => {
       const result = await owner.json('GET', `/api/jobs/${retry.id}`);
@@ -288,9 +288,34 @@ describe('videos', () => {
     expect((await owner.json('DELETE', `/api/jobs/${original.id}?remove=1`)).body.removed).toBe(true);
   }, 30_000);
 
+  it('requires explicit acceptance of the terms and lets customers download their data', async () => {
+    const visitor = new Client(base);
+    const refused = await visitor.json('POST', '/api/auth/signup', { email: 'no-terms@example.com', password: 'motdepasse9' });
+    expect(refused.status).toBe(400);
+    expect((await db.one('SELECT id FROM users WHERE email = $1', ['no-terms@example.com']))).toBeUndefined();
+    await visitor.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'terms@example.com', password: 'motdepasse9' });
+    const row = await db.one<{ terms_version: string; terms_accepted_at: Date | null }>('SELECT terms_version, terms_accepted_at FROM users WHERE email = $1', ['terms@example.com']);
+    expect(row?.terms_version).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(row?.terms_accepted_at).toBeTruthy();
+
+    const exported = await visitor.req('GET', '/api/me/export');
+    expect(exported.headers.get('content-disposition')).toContain('attachment');
+    const data = await exported.json();
+    expect(data.account).toMatchObject({ email: 'terms@example.com' });
+    expect(data).toHaveProperty('videos');
+    expect(data).toHaveProperty('payments');
+    expect(JSON.stringify(data)).not.toMatch(/password_hash|scrypt/);
+
+    // The public site only learns what is configured, never a secret.
+    const pub = (await visitor.json('GET', '/api/public/config')).body;
+    expect(pub.features).toMatchObject({ mobileMoney: expect.any(Boolean), publish: expect.any(Array), songs: expect.any(Boolean) });
+    expect(pub.company).toHaveProperty('hosting');
+    expect(JSON.stringify(pub)).not.toMatch(/sk_test|whsec|secret/i);
+  });
+
   it('stores product photos and serves their thumbnails to their owner only', async () => {
     const owner = new Client(base);
-    await owner.json('POST', '/api/auth/signup', { email: 'photos@example.com', password: 'motdepasse9' });
+    await owner.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'photos@example.com', password: 'motdepasse9' });
     const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
     const res = await fetch(`${base}/api/product-images?filename=bissap.png`, { method: 'POST', body: png, headers: { cookie: owner.cookie, 'content-type': 'application/octet-stream' } });
     expect(res.status).toBe(201);
@@ -300,13 +325,13 @@ describe('videos', () => {
     expect(thumbnail.status).toBe(200);
     expect(Buffer.from(await thumbnail.arrayBuffer())).toEqual(png);
     const stranger = new Client(base);
-    await stranger.json('POST', '/api/auth/signup', { email: 'photos-stranger@example.com', password: 'motdepasse9' });
+    await stranger.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'photos-stranger@example.com', password: 'motdepasse9' });
     expect((await stranger.req('GET', `/api/product-images/${image.id}/file`)).status).toBe(404);
   });
 
   it('clones the voice of paid customers, keeps their pronunciations and uses both in videos', async () => {
     const owner = new Client(base);
-    await owner.json('POST', '/api/auth/signup', { email: 'voice@example.com', password: 'motdepasse9' });
+    await owner.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'voice@example.com', password: 'motdepasse9' });
     const audio = Buffer.alloc(40_000, 1);
     const upload = (query: string, type = 'audio/webm') => fetch(`${base}/api/voice/clone?${query}`, { method: 'POST', body: audio, headers: { cookie: owner.cookie, 'content-type': type } });
 
@@ -358,7 +383,7 @@ describe('videos', () => {
 
   it('applies the included correction once, as a new version of the video', async () => {
     const owner = new Client(base);
-    await owner.json('POST', '/api/auth/signup', { email: 'correct-video@example.com', password: 'motdepasse9' });
+    await owner.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'correct-video@example.com', password: 'motdepasse9' });
     const original = (await owner.json('POST', '/api/jobs', { prompt: 'Une vidéo de 10 secondes pour une boulangerie', durationSec: 10 })).body;
     await waitFor(async () => ((await owner.json('GET', `/api/jobs/${original.id}`)).body.status === 'completed' ? true : undefined));
     const corrected = await owner.json('POST', `/api/jobs/${original.id}/correct`, { instruction: 'Mets le nom de la boulangerie en titre' });
@@ -433,7 +458,7 @@ describe('videos', () => {
 describe('songs', () => {
   it('returns an actionable error when lyric providers fail', async () => {
     const singer = new Client(base);
-    await singer.json('POST', '/api/auth/signup', { email: 'lyrics-error@example.com', password: 'motdepasse6' });
+    await singer.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'lyrics-error@example.com', password: 'motdepasse6' });
     failSongLyricsGeneration = true;
     try {
       const response = await singer.json('POST', '/api/songs', { prompt: 'Chanson anniversaire', style: 'Afrobeats', mood: 'Joyful and celebratory' });
@@ -446,7 +471,7 @@ describe('songs', () => {
 
   it('keeps lyrics editable until explicit generation, isolates audio, and enforces the separate quota', async () => {
     const singer = new Client(base);
-    await singer.json('POST', '/api/auth/signup', { email: 'singer@example.com', password: 'motdepasse6' });
+    await singer.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'singer@example.com', password: 'motdepasse6' });
     const draft = await singer.json('POST', '/api/songs', { prompt: 'Chanson romantique anniversaire pour Aïcha', style: 'Afrobeats', mood: 'Romantic and tender', durationSec: 90 });
     expect(draft.status).toBe(201);
     expect(draft.body).toMatchObject({ title: 'Joyeux anniversaire', status: 'draft', lyrics: expect.stringContaining('Aïcha') });
@@ -489,14 +514,14 @@ describe('songs', () => {
     const anotherDraft = await singer.json('POST', '/api/songs', { prompt: 'Another birthday song', style: 'Pop', mood: 'Joyful and celebratory' });
     expect((await singer.json('POST', `/api/songs/${anotherDraft.body.id}/generate`)).body).toMatchObject({ code: 'quota_songs', limit: 1 });
     const other = new Client(base);
-    await other.json('POST', '/api/auth/signup', { email: 'another-singer@example.com', password: 'motdepasse7' });
+    await other.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'another-singer@example.com', password: 'motdepasse7' });
     expect((await other.json('GET', `/api/songs/${draft.body.id}`)).status).toBe(404);
     expect((await other.req('GET', finished.audioUrl)).status).toBe(404);
   }, 30_000);
 
   it('shows a friendly paid-plan error, retries failed audio, and deletes songs only for their owner', async () => {
     const singer = new Client(base);
-    await singer.json('POST', '/api/auth/signup', { email: 'song-retry@example.com', password: 'motdepasse6' });
+    await singer.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'song-retry@example.com', password: 'motdepasse6' });
     const draft = await singer.json('POST', '/api/songs', { prompt: 'Une chanson de fête', style: 'Afrobeats', mood: 'Joyful and celebratory' });
 
     failSongAudioGeneration = true;
@@ -522,7 +547,7 @@ describe('songs', () => {
     expect(completed.status).toBe('completed');
 
     const stranger = new Client(base);
-    await stranger.json('POST', '/api/auth/signup', { email: 'song-stranger@example.com', password: 'motdepasse6' });
+    await stranger.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'song-stranger@example.com', password: 'motdepasse6' });
     expect((await stranger.json('DELETE', `/api/songs/${draft.body.id}`)).status).toBe(404);
     expect((await singer.json('DELETE', `/api/songs/${draft.body.id}`)).body.removed).toBe(true);
     expect((await singer.json('GET', `/api/songs/${draft.body.id}`)).status).toBe(404);
@@ -538,7 +563,7 @@ describe('songs', () => {
 describe('brand kit', () => {
   it('stores a logo and colours and applies them to the videos', async () => {
     const zsr = new Client(base);
-    await zsr.json('POST', '/api/auth/signup', { email: 'contact@zsr-technum.com', password: 'motdepasse9' });
+    await zsr.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'contact@zsr-technum.com', password: 'motdepasse9' });
     expect((await zsr.json('GET', '/api/brand')).body).toEqual({ name: '', colors: [] });
     expect((await zsr.json('PUT', '/api/brand', { name: 'ZSR-TechNum', colors: ['#0b1c8c', 'red'] })).body.code).toBe('invalid_colors');
     const saved = await zsr.json('PUT', '/api/brand', { name: 'ZSR-TechNum', colors: ['#0b1c8c', '#3cc8c8'] });
@@ -556,7 +581,7 @@ describe('brand kit', () => {
     expect((await zsr.req('GET', kit.logoUrl)).status).toBe(200);
     // Another customer never sees this logo.
     const other = new Client(base);
-    await other.json('POST', '/api/auth/signup', { email: 'other-brand@example.com', password: 'motdepasse8' });
+    await other.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'other-brand@example.com', password: 'motdepasse8' });
     expect((await other.req('GET', '/api/brand/logo')).status).toBe(404);
 
     const job = (await zsr.json('POST', '/api/jobs', { prompt: 'Une vidéo de 10 secondes pour présenter nos services numériques', durationSec: 10 })).body;

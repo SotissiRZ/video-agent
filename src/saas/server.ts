@@ -21,6 +21,7 @@ import { ensureCaptions, loadJob, publishJob, saveCaptions } from '../publish/se
 import { PLATFORM_IDS, type Captions, type PlatformId } from '../publish/types';
 import { STYLES } from '../remotion/contract/styles';
 import { listTemplates } from '../templates/registry';
+import { TERMS_VERSION } from './auth';
 import { AuthError, changePassword, consumeEmailToken, createEmailToken, createSession, destroySession, findUserByEmail, getUser, login, markEmailVerified, parseCookies, RateLimiter, resetPassword, SESSION_COOKIE, sessionCookie, signup, userForSession, type User } from './auth';
 import { buildEmail, createMailer, type Mailer } from './mail';
 import { createPayment, CURRENCY, enabledProviders, handleGeniusPayWebhook, handleYouCanPayWebhook, listPayments, localPrices, PAYMENT_PROVIDERS, publicPayment, refreshPayment, creditPack } from './payments';
@@ -91,7 +92,14 @@ export const PublishSchema = z.object({
   captions: z.record(z.enum(PLATFORM_IDS), CaptionSchema).optional(),
   dryRun: z.boolean().optional(),
 });
-const SignupSchema = z.object({ email: z.string().max(254), password: z.string().max(200), name: z.string().max(100).optional(), locale: z.enum(['fr', 'en']).optional() });
+const SignupSchema = z.object({
+  email: z.string().max(254),
+  password: z.string().max(200),
+  name: z.string().max(100).optional(),
+  locale: z.enum(['fr', 'en']).optional(),
+  /** Explicit box: 18 or older, terms of use and sale, privacy policy. */
+  acceptTerms: z.literal(true, { errorMap: () => ({ message: 'Vous devez avoir 18 ans et accepter les conditions pour créer un compte.' }) }),
+});
 const LoginSchema = z.object({ email: z.string().max(254), password: z.string().max(200) });
 const ProfileSchema = z.object({ name: z.string().max(100).optional(), locale: z.enum(['fr', 'en']).optional() });
 const PasswordSchema = z.object({ current: z.string().max(200), next: z.string().max(200) });
@@ -141,6 +149,8 @@ export interface SaasOptions {
   /** Test seam for song lyric drafting. */
   /** Test seam: ElevenLabs voice cloning. */
   voiceCloner?: VoiceCloner;
+  /** Test seam: what the ElevenLabs account allows (default: asked to ElevenLabs, cached one hour). */
+  elevenLabsAccess?: () => Promise<{ songs: boolean; voiceClone: boolean }>;
   /** Test seam: builds the free-listening excerpt of a song (ffmpeg by default). */
   songPreviewer?: (input: string, output: string, seconds: number) => Promise<void>;
   songLyricsGenerator?: (request: { prompt: string; style: string; mood: string }) => Promise<{ title: string; lyrics: string }>;
@@ -167,7 +177,8 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
   const stripe = () => options.stripe ?? stripeClient(config);
   const exchanger = () => options.exchanger ?? defaultExchanger(config);
   const loginLimiter = new RateLimiter(10, 15 * 60_000);
-  const signupLimiter = new RateLimiter(20, 60 * 60_000);
+  // Mobile carriers put many customers behind one IP (CGNAT): generous per-IP sign-up limit.
+  const signupLimiter = new RateLimiter(60, 60 * 60_000);
   const mailLimiter = new RateLimiter(5, 60 * 60_000);
   const songDraftLimiter = new RateLimiter(5, 60 * 60_000);
   const voiceCloneLimiter = new RateLimiter(3, 24 * 60 * 60_000);
@@ -202,6 +213,68 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
   };
   const reminderTimers = options.reminders === false ? [] : [setTimeout(() => void remind(), 30_000), setInterval(() => void remind(), 3600_000)];
   for (const timer of reminderTimers) timer.unref?.();
+
+  // A free ElevenLabs account has no Music API and no voice cloning: never advertise them then.
+  let elevenLabsCache: { key: string; at: number; value: { songs: boolean; voiceClone: boolean } } | undefined;
+  const elevenLabsAccess = async (): Promise<{ songs: boolean; voiceClone: boolean }> => {
+    if (options.elevenLabsAccess) return options.elevenLabsAccess();
+    const key = config.env.ELEVENLABS_API_KEY;
+    if (!key) return { songs: false, voiceClone: false };
+    if (elevenLabsCache?.key === key && Date.now() - elevenLabsCache.at < 3600_000) return elevenLabsCache.value;
+    try {
+      const res = await fetch('https://api.elevenlabs.io/v1/user/subscription', { headers: { 'xi-api-key': key }, signal: AbortSignal.timeout(8000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const sub = (await res.json()) as { tier?: string; can_use_instant_voice_cloning?: boolean };
+      const value = { songs: Boolean(sub.tier) && sub.tier !== 'free', voiceClone: Boolean(sub.can_use_instant_voice_cloning) };
+      elevenLabsCache = { key, at: Date.now(), value };
+      return value;
+    } catch (err) {
+      logger.warn(`ElevenLabs subscription check failed: ${errorMessage(err)}`);
+      // Unknown: keep the last answer, else assume the configured account works.
+      return elevenLabsCache?.value ?? { songs: true, voiceClone: true };
+    }
+  };
+
+  /** Capabilities that depend on the configured services (the landing and legal pages follow them). */
+  const platformFeatures = async () => {
+    const e = config.env;
+    const payments = enabledProviders(config);
+    const eleven = await elevenLabsAccess();
+    return {
+      mobileMoney: payments.includes('geniuspay'),
+      moroccoPayments: payments.includes('youcanpay'),
+      cardSubscriptions: billingEnabled(config),
+      publish: PROVIDERS.filter((provider) => providerAvailable(config, provider)),
+      voiceClone: eleven.voiceClone,
+      songs: eleven.songs,
+      aiImages: e.VIDEO_AGENT_IMAGE_PROVIDER !== 'none' && Boolean(e.CLOUDFLARE_API_TOKEN || e.HF_TOKEN || e.REPLICATE_API_TOKEN || e.STABILITY_API_KEY || e.OPENAI_API_KEY),
+      stock: Boolean(e.PEXELS_API_KEY || e.PIXABAY_API_KEY || e.UNSPLASH_ACCESS_KEY),
+    };
+  };
+
+  /** Third parties that receive customer data on this server (privacy policy, GDPR art. 13). */
+  const processors = () => {
+    const e = config.env;
+    const list: Array<{ name: string; purpose: string }> = [];
+    const add = (on: unknown, name: string, purpose: string) => on && list.push({ name, purpose });
+    add(e.ANTHROPIC_API_KEY, 'Anthropic (Claude)', 'ai_text');
+    add(e.GROQ_API_KEY, 'Groq', 'ai_text');
+    add(e.OPENAI_API_KEY, 'OpenAI', 'ai_text');
+    add(e.ELEVENLABS_API_KEY, 'ElevenLabs', 'voice_music');
+    add(e.CLOUDFLARE_API_TOKEN, 'Cloudflare (Workers AI)', 'ai_images');
+    add(e.HF_TOKEN, 'Hugging Face', 'ai_images');
+    add(e.REPLICATE_API_TOKEN, 'Replicate', 'ai_images');
+    add(e.STABILITY_API_KEY, 'Stability AI', 'ai_images');
+    add(e.PEXELS_API_KEY, 'Pexels', 'stock');
+    add(e.PIXABAY_API_KEY, 'Pixabay', 'stock');
+    add(e.UNSPLASH_ACCESS_KEY, 'Unsplash', 'stock');
+    const payments = enabledProviders(config);
+    add(payments.includes('geniuspay'), 'GeniusPay', 'payment');
+    add(payments.includes('youcanpay'), 'YouCan Pay', 'payment');
+    add(billingEnabled(config), 'Stripe', 'payment');
+    add(config.env.SMTP_URL, 'SMTP', 'email');
+    return list;
+  };
 
   const llm = () => {
     if (options.deps?.llm !== undefined) return options.deps.llm;
@@ -372,7 +445,20 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         signupOpen: config.env.SIGNUP_MODE === 'open' || users === 0,
         firstUser: users === 0,
         billing: billingEnabled(config),
-        company: { name: config.env.COMPANY_NAME, address: config.env.COMPANY_ADDRESS, email: config.env.CONTACT_EMAIL, url: config.env.PUBLIC_URL ?? '' },
+        company: {
+          name: config.env.COMPANY_NAME,
+          address: config.env.COMPANY_ADDRESS,
+          email: config.env.CONTACT_EMAIL,
+          url: config.env.PUBLIC_URL ?? '',
+          registration: config.env.COMPANY_REGISTRATION,
+          director: config.env.COMPANY_DIRECTOR,
+          country: config.env.COMPANY_COUNTRY,
+          hosting: config.env.HOSTING_PROVIDER,
+        },
+        termsVersion: TERMS_VERSION,
+        // What the platform really does on this server: the public site only promises these.
+        features: await platformFeatures(),
+        processors: processors(),
         retentionDays: config.env.VIDEO_AGENT_RETENTION_DAYS,
         plans: plans.map(({ stripePriceId: _stripePriceId, ...p }) => p),
         commerce: publicCommerce(commerce),
@@ -475,6 +561,23 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         await changePassword(db, user.id, body.current, body.next);
         const { token, maxAgeSec } = await createSession(db, user.id, req.headers['user-agent']);
         return json(res, 200, { ok: true }, { 'set-cookie': sessionCookie(token, maxAgeSec, baseUrl(req).startsWith('https://')) });
+      }
+      if (id === 'export' && method === 'GET') {
+        // Right of access and portability: everything the account holds, in one readable file.
+        const [account] = await db.query('SELECT id, email, name, role, plan, locale, subscription_status, current_period_end, credits, email_verified_at, terms_version, terms_accepted_at, created_at FROM users WHERE id = $1', [user.id]);
+        const data = {
+          exportedAt: new Date().toISOString(),
+          account,
+          brandKit: publicBrandKit(await getBrandKit(db, user.id)),
+          videos: (await listJobs(db, user.id, 1000)).map((job) => ({ id: job.id, prompt: job.prompt, title: job.title, status: job.status, createdAt: job.created_at, durationSec: job.duration_sec })),
+          songs: (await listSongs(db, user.id)).map((song) => ({ id: song.id, title: song.title, prompt: song.prompt, lyrics: song.lyrics, style: song.style, status: song.status, createdAt: song.created_at })),
+          productImages: (await listProductImages(db, user.id)).map(publicProductImage),
+          voice: { clone: publicClone(await getVoiceClone(db, user.id)), pronunciations: await listPronunciations(db, user.id) },
+          connections: (await listConnections(db, user.id)).map((c) => ({ platform: c.platform, accountName: c.account_name, connectedAt: c.created_at })),
+          payments: (await listPayments(db, user.id)).map(publicPayment),
+          publications: (await listPublications(db, user.id)).map(publicPublication),
+        };
+        return json(res, 200, data, { 'content-disposition': 'attachment; filename="mes-donnees-sovid.json"' });
       }
       if (!id && method === 'DELETE') {
         const body = parse(z.object({ password: z.string().max(200) }), await readJson(req));
@@ -609,7 +712,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       if (!id && method === 'GET') {
         return json(res, 200, {
           clone: publicClone(await getVoiceClone(db, user.id)),
-          cloneAvailable: planOfUser(config, user).id !== 'free' && Boolean(cloner()),
+          cloneAvailable: planOfUser(config, user).id !== 'free' && Boolean(cloner()) && (options.voiceCloner ? true : (await elevenLabsAccess()).voiceClone),
           pronunciations: await listPronunciations(db, user.id),
         });
       }
@@ -683,7 +786,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         if (quota && !withCredit) throw new HttpError(402, 'Quota atteint', `quota_${quota.code}`, { limit: quota.limit, plan: plan.id, credits: user.credits });
         if (body.voiceClone) {
           if (plan.id === 'free') throw new HttpError(402, 'Le clonage de voix est inclus dans les offres Créateur et Pro.', 'voice_clone_plan');
-          if (!(await getVoiceClone(db, user.id))) throw new HttpError(400, 'Enregistrez d’abord votre voix dans Marque › Ma voix.', 'voice_clone_missing');
+          if (!(await getVoiceClone(db, user.id))) throw new HttpError(400, 'Enregistrez d’abord votre voix dans Marque et voix › Ma voix.', 'voice_clone_missing');
         }
         const { prompt, productImageIds: _productImageIds, ...rest } = body;
         const job = await createJob(db, config, user.id, prompt, { ...rest, style: rest.style === 'auto' ? undefined : rest.style, template: rest.template === 'auto' ? undefined : rest.template }, withCredit, productImageIds);

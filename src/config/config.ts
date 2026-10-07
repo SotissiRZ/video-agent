@@ -240,6 +240,14 @@ const EnvSchema = z.object({
   COMPANY_NAME: z.preprocess(emptyToUndefined, z.string().default('SOVID AI')),
   COMPANY_ADDRESS: z.preprocess(emptyToUndefined, z.string().default('')),
   CONTACT_EMAIL: z.preprocess(emptyToUndefined, z.string().default('')),
+  /** Legal form and registration (e.g. "SARL au capital de 1 000 000 FCFA, RCCM BF-OUA-2026-B-1234, IFU 00012345A"). */
+  COMPANY_REGISTRATION: z.preprocess(emptyToUndefined, z.string().default('')),
+  /** Person legally responsible for the published content (directeur de la publication). */
+  COMPANY_DIRECTOR: z.preprocess(emptyToUndefined, z.string().default('')),
+  /** Country whose law applies and whose data protection authority is competent (e.g. "Burkina Faso"). */
+  COMPANY_COUNTRY: z.preprocess(emptyToUndefined, z.string().default('')),
+  /** Hosting provider: name, address and phone (legal notice). */
+  HOSTING_PROVIDER: z.preprocess(emptyToUndefined, z.string().default('')),
 
   VIDEO_AGENT_LOG_LEVEL: enumWithDefault(['debug', 'info', 'warn', 'error', 'silent'] as const, 'info'),
 });

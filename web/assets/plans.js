@@ -27,14 +27,18 @@ export const renderPlans = (plans, opts = {}) =>
   plans
     .map((p) => {
       const featured = p.id === 'creator';
+      // Only what this server can really do (opts.features from /api/public/config).
+      const f = opts.features;
       const features = [
-        [true, t('plan.videos', { n: p.videosPerMonth })],
-        [true, t('plan.songs', { n: p.songsPerMonth })],
+        [true, t(p.videosPerMonth === 1 ? 'plan.videos.one' : 'plan.videos', { n: p.videosPerMonth })],
         [true, t('plan.minutes', { n: p.minutesPerMonth })],
         [true, t('plan.maxDuration', { d: formatDuration(p.maxDurationSec) })],
-        [p.publish, t('plan.publish')],
+        (!f || f.songs) && [true, t(p.songsPerMonth === 1 ? 'plan.songs.one' : 'plan.songs', { n: p.songsPerMonth })],
+        [true, p.id === 'free' ? t('plan.payPerExport') : t('plan.exportsIncluded')],
+        (!f || f.voiceClone) && [p.id !== 'free', t('plan.voiceClone')],
+        (!f || f.publish?.length) && [p.publish, t('plan.publish')],
         [!p.badge, p.badge ? t('plan.badge') : t('plan.noBadge')],
-      ];
+      ].filter(Boolean);
       const raw = opts.action?.(p);
       const actions = (Array.isArray(raw) ? raw : raw ? [raw] : []).filter(Boolean);
       const buttons = actions

@@ -108,6 +108,15 @@ export const addSongUsage = async (db: Db, songId: string, lines: UsageLine[], p
   await db.query('UPDATE songs SET usage = $2, plan = $3 WHERE id = $1', [songId, JSON.stringify(mergeUsage(current, lines)), plan]);
 };
 
+/** Retention: songs older than `days` (not while one of their payments is pending). */
+export const purgeOldSongs = (db: Db, days: number): Promise<Array<{ id: string; user_id: string }>> =>
+  db.query<{ id: string; user_id: string }>(
+    `DELETE FROM songs s WHERE s.status IN ('draft', 'completed', 'failed') AND s.created_at < $1
+       AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.target_id = s.id AND p.status = 'pending')
+     RETURNING id, user_id`,
+    [new Date(Date.now() - days * 86_400_000).toISOString()],
+  );
+
 export const deleteSong = (db: Db, userId: string, id: string): Promise<{ id: string }[]> =>
   db.query<{ id: string }>(
     "DELETE FROM songs WHERE id = $1 AND user_id = $2 AND status NOT IN ('queued', 'running') RETURNING id",

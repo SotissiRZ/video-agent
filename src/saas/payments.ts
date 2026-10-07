@@ -64,8 +64,15 @@ export const creditPack = (config: AppConfig) => ({
   prices: Object.fromEntries(enabledProviders(config).map((p) => [CURRENCY[p], packPrice(config, CURRENCY[p])])) as Partial<Record<'XOF' | 'MAD', number>>,
 });
 
-export const localPrices = (config: AppConfig, plan: PlanId) =>
-  Object.fromEntries(enabledProviders(config).map((p) => [CURRENCY[p], passPrice(config, plan, CURRENCY[p])]).filter(([, v]) => v !== undefined)) as Partial<Record<'XOF' | 'MAD', number>>;
+export const localPrices = (config: AppConfig, plan: PlanId): Partial<Record<'XOF' | 'MAD', number>> => {
+  const prices = Object.fromEntries(enabledProviders(config).map((p) => [CURRENCY[p], passPrice(config, plan, CURRENCY[p])]).filter(([, v]) => v !== undefined)) as Partial<Record<'XOF' | 'MAD', number>>;
+  // No local payment configured yet: the pricing page still shows the FCFA price, never a card price in euros.
+  if (!Object.keys(prices).length) {
+    const xof = passPrice(config, plan, 'XOF');
+    if (xof !== undefined) prices.XOF = xof;
+  }
+  return prices;
+};
 
 const youcanSandbox = (config: AppConfig) => config.env.YOUCANPAY_SANDBOX || /^pri_sandbox/i.test(config.env.YOUCANPAY_PRIVATE_KEY ?? '');
 const youcanApi = (config: AppConfig) => `${YOUCANPAY}/${youcanSandbox(config) ? 'sandbox/' : ''}api`;

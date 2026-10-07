@@ -30,6 +30,9 @@ export const SECURITY_HEADERS: Record<string, string> = {
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'same-origin',
   'x-frame-options': 'DENY',
+  // Microphone: recording one's own voice for cloning (same origin only). Nothing else.
+  'permissions-policy': 'camera=(), microphone=(self), geolocation=(), payment=(), usb=()',
+  'cross-origin-opener-policy': 'same-origin',
   'content-security-policy':
     "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
 };
