@@ -22,7 +22,7 @@ export const applyAnimations = (storyboard: Storyboard, style: StyleDefinition):
       animation: {
         entrance: scene.kind === 'quote' ? 'blur' : style.entrances[i % style.entrances.length]!,
         stagger,
-        kenBurns: scene.media ? 0.08 : 0.04,
+        kenBurns: scene.media ? 0.025 : 0.04,
       },
       transitionOut: {
         type,

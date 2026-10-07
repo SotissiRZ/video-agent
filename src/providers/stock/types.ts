@@ -51,3 +51,19 @@ export const pickRendition = <T extends { width: number; height: number }>(items
   const bigEnough = valid.filter((i) => short(i) >= minShortSide * 0.9).sort((a, b) => short(a) - short(b));
   return bigEnough[0] ?? valid.sort((a, b) => short(b) - short(a))[0];
 };
+
+/** Pick stock media that can fill the output without an extreme crop or upscale. */
+export const pickStockResult = <T extends { width: number; height: number }>(items: T[], width: number, height: number): T | undefined => {
+  if (width <= 0 || height <= 0) return undefined;
+  const targetRatio = width / height;
+  const suitable = items
+    .filter((item) => item.width > 0 && item.height > 0)
+    .map((item) => {
+      const ratioDifference = Math.abs(Math.log(item.width / item.height / targetRatio));
+      const upscale = Math.max(width / item.width, height / item.height, 1);
+      return { item, ratioDifference, upscale };
+    })
+    .filter(({ ratioDifference, upscale }) => ratioDifference <= Math.log(1.5) && upscale <= 1.5)
+    .sort((a, b) => a.upscale - b.upscale || a.ratioDifference - b.ratioDifference);
+  return suitable[0]?.item;
+};

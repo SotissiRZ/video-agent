@@ -45,7 +45,10 @@ import { clientIp, HttpError, json, readBuffer, readJson, readRaw, redirect, sen
 import { deleteLogo, getBrandKit, MAX_LOGO_BYTES, publicBrandKit, saveBrandKit, saveLogo } from './brand';
 import { sendPassReminders } from './reminders';
 import { createJob, deleteJob, getJob, JOB_ID, listJobs, publicJob, queuePosition, refundCredits, requestCancel, useCredit, userJobsDir, type JobRow } from './jobs';
-import { checkQuota, checkSongQuota, getPlan, getUsage, listPlans, PLAN_IDS, planOfUser } from './plans';
+import { applyCommerceLimits, checkQuota, checkSongQuota, getPlan, getUsage, listPlans, PLAN_IDS, planOfUser } from './plans';
+import { exportPrice, getCommerceSettings, saveCommerceSettings } from './commerce';
+import { deleteProductImage, listProductImages, productImageFiles, saveProductImage } from './product-images';
+import { ensureCleanVideoExport } from './export';
 import { cancelPublication, createPublication, listPublications, publicPublication } from './publications';
 import { Worker } from './worker';
 import { createSongDraft, deleteSong, getSong, listSongs, publicSong, SONG_ID, songDirectory, updateSongLyrics, type SongRow } from './songs';
@@ -69,6 +72,7 @@ export const CreateJobSchema = z.object({
   mediaCoverage: z.enum(['all', 'visual', 'none']).optional(),
   /** Apply the customer's brand kit (default: yes when one exists). */
   brandKit: z.boolean().optional(),
+  productImageIds: z.array(z.string().uuid()).max(20).optional(),
 });
 
 const CaptionSchema = z.object({ title: z.string().max(300), caption: z.string().max(6000), hashtags: z.array(z.string().max(100)).max(30) });
@@ -94,6 +98,7 @@ const SongLyricsSchema = z.object({
   lyrics: z.string().trim().min(1).max(6000),
 });
 const SongUpdateSchema = SongLyricsSchema;
+const VideoCorrectionSchema = z.object({ instruction: z.string().trim().min(5).max(1000) });
 
 const parse = <T>(schema: z.ZodType<T>, data: unknown): T => {
   const r = schema.safeParse(data);
@@ -217,9 +222,10 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
   };
 
   const accountSummary = async (user: User) => {
-    const plan = planOfUser(config, user);
+    const commerce = await getCommerceSettings(db);
+    const plan = applyCommerceLimits(planOfUser(config, user), commerce);
     const usage = await getUsage(db, user.id);
-    return { user: userView(user), plan, usage, billing: billingEnabled(config), paymentProviders: enabledProviders(config).map((p) => ({ id: p, currency: CURRENCY[p] })), requireVerification: config.env.REQUIRE_EMAIL_VERIFICATION, mail: mailer.kind };
+    return { user: userView(user), plan, usage, commerce, billing: billingEnabled(config), paymentProviders: enabledProviders(config).map((p) => ({ id: p, currency: CURRENCY[p] })), requireVerification: config.env.REQUIRE_EMAIL_VERIFICATION, mail: mailer.kind };
   };
 
   const capabilities = () => {
@@ -319,13 +325,16 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     if (resource === 'health' && method === 'GET') return json(res, 200, { ok: true, db: db.kind });
     if (resource === 'public' && id === 'config' && method === 'GET') {
       const users = Number((await db.one<{ n: string | number }>('SELECT count(*) AS n FROM users'))?.n ?? 0);
+      const commerce = await getCommerceSettings(db);
+      const plans = listPlans(config).map((plan) => ({ ...applyCommerceLimits(plan, commerce), purchasable: Boolean(plan.stripePriceId) || (plan.id !== 'free' && enabledProviders(config).length > 0), localPrices: plan.id === 'free' ? {} : localPrices(config, plan.id) }));
       return json(res, 200, {
         signupOpen: config.env.SIGNUP_MODE === 'open' || users === 0,
         firstUser: users === 0,
         billing: billingEnabled(config),
         company: { name: config.env.COMPANY_NAME, address: config.env.COMPANY_ADDRESS, email: config.env.CONTACT_EMAIL, url: config.env.PUBLIC_URL ?? '' },
         retentionDays: config.env.VIDEO_AGENT_RETENTION_DAYS,
-        plans: listPlans(config).map(({ stripePriceId, ...p }) => ({ ...p, purchasable: Boolean(stripePriceId) || (p.id !== 'free' && enabledProviders(config).length > 0), localPrices: p.id === 'free' ? {} : localPrices(config, p.id) })),
+        plans: plans.map(({ stripePriceId: _stripePriceId, ...p }) => p),
+        commerce,
         paymentProviders: enabledProviders(config).map((p) => ({ id: p, currency: CURRENCY[p] })),
         creditPack: enabledProviders(config).length ? creditPack(config) : null,
       });
@@ -495,6 +504,8 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       const song = await songFor(user, id);
       if (!sub && method === 'GET') return json(res, 200, publicSong(song));
       if (!sub && method === 'DELETE') {
+        const pendingExport = await db.one<{ id: string }>("SELECT id FROM payments WHERE target_id = $1 AND status = 'pending' LIMIT 1", [song.id]);
+        if (pendingExport) throw new HttpError(409, 'Un paiement est en cours pour cette chanson. Terminez-le avant de supprimer le résultat.', 'export_payment_pending');
         const removed = await deleteSong(db, user.id, song.id);
         if (!removed.length) throw new HttpError(409, 'Une chanson en cours de génération ne peut pas être supprimée.', 'song_running');
         fs.rmSync(songDirectory(config, user.id, song.id), { recursive: true, force: true });
@@ -502,7 +513,8 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       }
       if (sub === 'lyrics' && method === 'PUT') {
         const body = parse(SongUpdateSchema, await readJson(req));
-        const updated = await updateSongLyrics(db, user.id, song.id, body.title, body.lyrics);
+        const settings = await getCommerceSettings(db);
+        const updated = await updateSongLyrics(db, user.id, song.id, body.title, body.lyrics, settings.correctionsPerSong);
         if (!updated) throw new HttpError(409, 'Les paroles ne peuvent plus être modifiées pendant ou après la génération.', 'song_not_editable');
         return json(res, 200, publicSong(updated));
       }
@@ -514,8 +526,10 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         }
         const updated = await db.tx(async (tx) => {
           await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [user.id]);
-          const quota = checkSongQuota(planOfUser(config, user), await getUsage(tx, user.id));
-          if (quota) throw new HttpError(402, 'Quota mensuel de chansons atteint', 'quota_songs', { limit: quota.limit, plan: planOfUser(config, user).id });
+          const commerce = await getCommerceSettings(tx);
+          const plan = applyCommerceLimits(planOfUser(config, user), commerce);
+          const quota = checkSongQuota(plan, await getUsage(tx, user.id));
+          if (quota) throw new HttpError(402, 'Quota mensuel de chansons atteint', 'quota_songs', { limit: quota.limit, plan: plan.id });
           return tx.one<SongRow>(
             `UPDATE songs SET status = 'running', error = NULL, finished_at = NULL, heartbeat_at = now(), updated_at = now()
              WHERE id = $1 AND user_id = $2 AND status IN ('draft', 'failed') RETURNING *`,
@@ -527,8 +541,31 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         songTasks.add(task);
         return json(res, 202, publicSong(updated));
       }
-      if (sub === 'audio' && song.audio_file && method === 'GET') return sendFile(req, res, song.audio_file, { download: url.searchParams.get('download') === '1', cache: 'private, max-age=3600' });
+      if (sub === 'audio' && song.audio_file && method === 'GET') {
+        const download = url.searchParams.get('download') === '1';
+        if (download && planOfUser(config, user).id === 'free' && !song.export_paid) throw new HttpError(402, 'Débloquez cet export pour télécharger la chanson.', 'export_payment_required', { product: 'song', targetId: song.id });
+        return sendFile(req, res, song.audio_file, { download, cache: 'private, max-age=3600' });
+      }
       throw new HttpError(404, 'not found', 'not_found');
+    }
+
+    if (resource === 'product-images') {
+      if (!id && method === 'GET') {
+        const images = await listProductImages(db, user.id);
+        return json(res, 200, images.map((image) => ({ id: image.id, name: image.name, createdAt: new Date(image.created_at).toISOString() })));
+      }
+      if (!id && method === 'POST') {
+        const commerce = await getCommerceSettings(db);
+        const maxBytes = commerce.maxProductImageMb * 1024 * 1024;
+        const image = await saveProductImage(db, config, user.id, url.searchParams.get('filename') ?? '', await readBuffer(req, maxBytes + 1), commerce.maxProductImages, maxBytes);
+        return json(res, 201, { id: image.id, name: image.name, createdAt: new Date(image.created_at).toISOString() });
+      }
+      if (id && method === 'DELETE') {
+        const image = await deleteProductImage(db, user.id, id);
+        if (!image) throw new HttpError(404, 'Image produit introuvable.', 'not_found');
+        fs.rmSync(image.file, { force: true });
+        return json(res, 200, { removed: true });
+      }
     }
 
     if (resource === 'jobs') {
@@ -536,13 +573,16 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       if (!id && method === 'POST') {
         if (config.env.REQUIRE_EMAIL_VERIFICATION && !user.email_verified_at) throw new HttpError(403, 'Confirmez votre adresse e-mail pour créer des vidéos', 'email_unverified');
         const body = parse(CreateJobSchema, await readJson(req));
-        const plan = planOfUser(config, user);
+        const commerce = await getCommerceSettings(db);
+        const plan = applyCommerceLimits(planOfUser(config, user), commerce);
+        const productImageIds = body.productImageIds ?? [];
+        await productImageFiles(db, user.id, productImageIds, commerce.maxProductImages);
         const quota = checkQuota(plan, await getUsage(db, user.id), body.durationSec);
         // Beyond the monthly quota, an extra-video credit is used (never for a video longer than the plan allows).
         const withCredit = Boolean(quota && quota.code !== 'duration' && (await useCredit(db, user.id)));
         if (quota && !withCredit) throw new HttpError(402, 'Quota atteint', `quota_${quota.code}`, { limit: quota.limit, plan: plan.id, credits: user.credits });
-        const { prompt, ...rest } = body;
-        const job = await createJob(db, config, user.id, prompt, { ...rest, style: rest.style === 'auto' ? undefined : rest.style, template: rest.template === 'auto' ? undefined : rest.template }, withCredit);
+        const { prompt, productImageIds: _productImageIds, ...rest } = body;
+        const job = await createJob(db, config, user.id, prompt, { ...rest, style: rest.style === 'auto' ? undefined : rest.style, template: rest.template === 'auto' ? undefined : rest.template }, withCredit, productImageIds);
         worker?.poke();
         return json(res, 201, publicJob(job));
       }
@@ -553,7 +593,8 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         if (job.status !== 'failed') throw new HttpError(409, 'Seules les vidéos en échec peuvent être relancées.', 'job_not_retryable');
         if (config.env.REQUIRE_EMAIL_VERIFICATION && !user.email_verified_at) throw new HttpError(403, 'Confirmez votre adresse e-mail pour générer des vidéos', 'email_unverified');
         const requestedDuration = Number(job.options.durationSec) || job.duration_sec || 30;
-        const plan = planOfUser(config, user);
+        const commerce = await getCommerceSettings(db);
+        const plan = applyCommerceLimits(planOfUser(config, user), commerce);
         const quota = checkQuota(plan, await getUsage(db, user.id), requestedDuration);
         const withCredit = Boolean(quota && quota.code !== 'duration' && (await useCredit(db, user.id)));
         if (quota && !withCredit) throw new HttpError(402, 'Quota atteint', `quota_${quota.code}`, { limit: quota.limit, plan: plan.id, credits: user.credits });
@@ -562,12 +603,34 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
           style: job.options.style === 'auto' ? undefined : job.options.style,
           template: job.options.template === 'auto' ? undefined : job.options.template,
         };
-        const retried = await createJob(db, config, user.id, job.prompt, options, withCredit);
+        const retried = await createJob(db, config, user.id, job.prompt, options, withCredit, job.product_image_ids ?? [], job.revision_of, job.export_paid, job.corrections_used);
         worker?.poke();
         return json(res, 201, publicJob(retried));
       }
+      if (sub === 'correct' && method === 'POST') {
+        if (job.status !== 'completed') throw new HttpError(409, 'Seule une vidéo terminée peut être corrigée.', 'job_not_correctable');
+        const settings = await getCommerceSettings(db);
+        if (job.corrections_used >= settings.correctionsPerVideo) throw new HttpError(409, 'La correction incluse a déjà été utilisée.', 'correction_limit');
+        const { instruction } = parse(VideoCorrectionSchema, await readJson(req));
+        const corrected = await db.tx(async (tx) => {
+          await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [user.id]);
+          const rootId = job.revision_of ?? job.id;
+          const root = await tx.one<JobRow>(
+            `UPDATE jobs SET corrections_used = corrections_used + 1
+             WHERE id = $1 AND user_id = $2 AND status = 'completed' AND corrections_used < $3 RETURNING *`,
+            [rootId, user.id, settings.correctionsPerVideo],
+          );
+          if (!root) throw new HttpError(409, 'La correction incluse a déjà été utilisée.', 'correction_limit');
+          const entitled = root.export_paid || planOfUser(config, user).id !== 'free';
+          return createJob(tx, config, user.id, `${job.prompt}\n\nCorrection demandée : ${instruction}`, job.options, false, job.product_image_ids ?? [], root.id, entitled, root.corrections_used);
+        });
+        worker?.poke();
+        return json(res, 201, publicJob(corrected));
+      }
       if (!sub && method === 'DELETE') {
         if (url.searchParams.get('remove') === '1') {
+          const pendingExport = await db.one<{ id: string }>("SELECT id FROM payments WHERE target_id = $1 AND status = 'pending' LIMIT 1", [job.id]);
+          if (pendingExport) throw new HttpError(409, 'Un paiement est en cours pour cette vidéo. Terminez-le avant de supprimer le résultat.', 'export_payment_pending');
           const removed = await deleteJob(db, user.id, job.id);
           if (!removed.length) throw new HttpError(409, 'Une vidéo en cours ne peut pas être supprimée', 'job_running');
           fs.rmSync(job.dir, { recursive: true, force: true });
@@ -578,7 +641,12 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         return json(res, 200, { cancelled });
       }
       if (sub === 'events' && method === 'GET') return streamJob(req, res, user.id, job.id);
-      if (sub === 'video' && job.video_file) return sendFile(req, res, job.video_file, { download: url.searchParams.get('download') === '1' });
+      if (sub === 'video' && job.video_file) {
+        const download = url.searchParams.get('download') === '1';
+        if (download && planOfUser(config, user).id === 'free' && !job.export_paid) throw new HttpError(402, 'Débloquez cet export pour télécharger la vidéo.', 'export_payment_required', { product: 'video', targetId: job.id });
+        const file = download ? await ensureCleanVideoExport(db, config, job, options.deps?.renderer) : job.video_file;
+        return sendFile(req, res, file, { download });
+      }
       if (sub === 'poster' && job.poster_file) return sendFile(req, res, job.poster_file, { cache: 'private, max-age=3600' });
       if (sub === 'files' && extra && JOB_FILES.includes(extra)) return sendFile(req, res, path.join(job.dir, extra), { download: url.searchParams.get('download') === '1' });
       if (sub === 'captions' && method === 'GET') {
@@ -590,7 +658,8 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       if (sub === 'publish' && method === 'POST') {
         if (job.status !== 'completed' || !job.video_file) throw new HttpError(409, 'La vidéo doit être générée avant publication', 'job_not_completed');
         const plan = planOfUser(config, user);
-        if (!plan.publish) throw new HttpError(402, 'La publication est disponible avec une offre payante', 'plan_publish');
+        if (!plan.publish && !job.export_paid) throw new HttpError(402, 'Débloquez cet export pour le publier.', 'export_payment_required', { product: 'video', targetId: job.id });
+        await ensureCleanVideoExport(db, config, job, options.deps?.renderer);
         const body = parse(PublishSchema, await readJson(req));
         const allowed = new Set(publishablePlatforms(vault, await listConnections(db, user.id)));
         const missing = body.platforms.filter((p) => !allowed.has(p));
@@ -646,7 +715,6 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       }
       if (id && isProvider(id)) {
         if (sub === 'start' && method === 'POST') {
-          if (!planOfUser(config, user).publish) throw new HttpError(402, 'La publication est disponible avec une offre payante', 'plan_publish');
           return json(res, 200, { url: await startConnection(db, config, user.id, id, baseUrl(req)) });
         }
         if (!sub && method === 'PATCH') {
@@ -666,11 +734,33 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         return json(res, 200, { url: await createCheckout(config, stripe(), full!, body.plan, baseUrl(req)) });
       }
       if (id === 'pay' && method === 'POST') {
-        const body = parse(z.object({ plan: z.enum(PLAN_IDS).optional(), packs: z.number().int().min(1).max(10).optional(), provider: z.enum(PAYMENT_PROVIDERS), months: z.number().int().min(1).max(12).optional() }).refine((b) => Boolean(b.plan) !== Boolean(b.packs), 'plan or packs'), await readJson(req));
+        const body = parse(z.object({
+          plan: z.enum(PLAN_IDS).optional(),
+          packs: z.number().int().min(1).max(10).optional(),
+          export: z.object({ product: z.enum(['video', 'song']), targetId: z.string().min(1).max(100) }).optional(),
+          provider: z.enum(PAYMENT_PROVIDERS),
+          months: z.number().int().min(1).max(12).optional(),
+        }).refine((b) => [Boolean(b.plan), Boolean(b.packs), Boolean(b.export)].filter(Boolean).length === 1, 'choose a plan, pack, or export'), await readJson(req));
+        let exportInput: { product: 'video' | 'song'; targetId: string; settings: Awaited<ReturnType<typeof getCommerceSettings>> } | undefined;
+        if (body.export) {
+          const commerce = await getCommerceSettings(db);
+          if (planOfUser(config, user).id !== 'free') throw new HttpError(409, 'Votre abonnement inclut déjà le téléchargement.', 'export_included');
+          const row = body.export.product === 'video'
+            ? await db.one<{ id: string; export_paid: boolean }>("SELECT id, export_paid FROM jobs WHERE id = $1 AND user_id = $2 AND status = 'completed'", [body.export.targetId, user.id])
+            : await db.one<{ id: string; export_paid: boolean }>("SELECT id, export_paid FROM songs WHERE id = $1 AND user_id = $2 AND status = 'completed'", [body.export.targetId, user.id]);
+          if (!row) throw new HttpError(404, 'Résultat introuvable ou pas encore terminé.', 'not_found');
+          if (row.export_paid) throw new HttpError(409, 'Cet export est déjà débloqué.', 'export_already_paid');
+          if (await db.one<{ id: string }>("SELECT id FROM payments WHERE user_id = $1 AND target_id = $2 AND status = 'pending' LIMIT 1", [user.id, row.id])) {
+            throw new HttpError(409, 'Un paiement est déjà en attente pour cet export.', 'export_payment_pending');
+          }
+          if (!enabledProviders(config).includes(body.provider)) throw new HttpError(503, 'Ce moyen de paiement n’est pas disponible.', 'payment_provider_unavailable');
+          if (exportPrice(commerce, body.export.product, CURRENCY[body.provider]) <= 0) throw new HttpError(503, 'Le tarif de cet export n’est pas configuré.', 'export_price_unavailable');
+          exportInput = { ...body.export, settings: commerce };
+        }
         const payment = await createPayment(
           db,
           config,
-          { user, plan: body.plan, packs: body.packs, provider: body.provider, months: body.months, baseUrl: baseUrl(req), clientIp: clientIp(req, config.env.VIDEO_AGENT_TRUST_PROXY) },
+          { user, plan: body.plan, packs: body.packs, export: exportInput, provider: body.provider, months: body.months, baseUrl: baseUrl(req), clientIp: clientIp(req, config.env.VIDEO_AGENT_TRUST_PROXY) },
           options.paymentFetch,
         );
         return json(res, 200, payment);
@@ -690,6 +780,13 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     // ---- admin -------------------------------------------------------------------------
     if (resource === 'admin') {
       await requireAdmin(req);
+      if (id === 'commerce') {
+        if (method === 'GET') return json(res, 200, await getCommerceSettings(db));
+        if (method === 'PUT') {
+          const settings = await saveCommerceSettings(db, await readJson(req));
+          return json(res, 200, settings);
+        }
+      }
       if (id === 'settings') {
         if (!config.env.VIDEO_AGENT_SETTINGS_UI) throw new HttpError(403, 'Réglages désactivés (VIDEO_AGENT_SETTINGS_UI=false)');
         if (method === 'GET') return json(res, 200, { envFile, groups: settingsView(config), providers: (({ secrets: _s, ...rest }) => rest)(providerStatus(config)) });

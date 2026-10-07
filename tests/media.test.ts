@@ -9,7 +9,7 @@ import { visibleShots } from '../src/remotion/components/MediaLayer';
 import { PexelsProvider } from '../src/providers/stock/pexels';
 import { PixabayProvider } from '../src/providers/stock/pixabay';
 import { resolveStockProviders } from '../src/providers/stock/registry';
-import { pickRendition, type StockProvider, type StockQuery, type StockResult } from '../src/providers/stock/types';
+import { pickRendition, pickStockResult, type StockProvider, type StockQuery, type StockResult } from '../src/providers/stock/types';
 import { UnsplashProvider } from '../src/providers/stock/unsplash';
 import { StoryboardSchema } from '../src/remotion/contract/storyboard';
 import { getStyle } from '../src/remotion/contract/styles';
@@ -28,6 +28,16 @@ describe('stock providers', () => {
     const files = [{ width: 640, height: 360 }, { width: 1920, height: 1080 }, { width: 3840, height: 2160 }];
     expect(pickRendition(files, 1080)).toEqual({ width: 1920, height: 1080 });
     expect(pickRendition([{ width: 640, height: 360 }], 1080)).toEqual({ width: 640, height: 360 });
+  });
+
+  it('prefers stock media close to the output aspect ratio and avoids extreme upscaling', () => {
+    const landscape = { width: 1280, height: 720 };
+    const portrait720 = { width: 720, height: 1280 };
+    const portrait1080 = { width: 1080, height: 1920 };
+    expect(pickStockResult([landscape, portrait720, portrait1080], 1080, 1920)).toBe(portrait1080);
+    expect(pickStockResult([landscape], 1080, 1920)).toBeUndefined();
+    expect(pickStockResult([portrait720], 1080, 1920)).toBe(portrait720);
+    expect(pickStockResult([landscape, { width: 1920, height: 1080 }], 1920, 1080)).toEqual({ width: 1920, height: 1080 });
   });
 
   it('parses Pexels photos and videos', async () => {

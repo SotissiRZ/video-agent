@@ -1,6 +1,7 @@
 /** Subscription plans and monthly quotas. Stripe prices map to plans through STRIPE_PRICE_*. */
 import type { AppConfig } from '../config/config';
 import type { Db } from './db';
+import type { CommerceSettings } from './commerce';
 
 export const PLAN_IDS = ['free', 'creator', 'pro'] as const;
 export type PlanId = (typeof PLAN_IDS)[number];
@@ -33,6 +34,15 @@ export const listPlans = (config: AppConfig): Plan[] => [
 
 export const getPlan = (config: AppConfig, id: string | null | undefined): Plan => listPlans(config).find((p) => p.id === id) ?? listPlans(config)[0]!;
 
+export const applyCommerceLimits = (plan: Plan, settings: CommerceSettings): Plan =>
+  ({
+    ...plan,
+    videosPerMonth: plan.id === 'free' ? settings.freeVideosPerMonth : plan.id === 'creator' ? settings.creatorVideosPerMonth : settings.proVideosPerMonth,
+    minutesPerMonth: plan.id === 'free' ? settings.freeMinutesPerMonth : plan.id === 'creator' ? settings.creatorMinutesPerMonth : settings.proMinutesPerMonth,
+    songsPerMonth: plan.id === 'free' ? settings.freeSongsPerMonth : plan.id === 'creator' ? settings.creatorSongsPerMonth : settings.proSongsPerMonth,
+    maxDurationSec: plan.id === 'free' ? settings.freeMaxDurationSec : plan.id === 'creator' ? settings.creatorMaxDurationSec : settings.proMaxDurationSec,
+  });
+
 /** Status of plans bought as prepaid passes (mobile money, cards without recurring billing). */
 export const PREPAID = 'prepaid';
 
@@ -61,7 +71,7 @@ export const getUsage = async (db: Db, userId: string, now = new Date()): Promis
   const start = periodStart(now);
   const row = await db.one<{ videos: string | number; seconds: string | number | null }>(
     `SELECT count(*) AS videos, coalesce(sum(duration_sec), 0) AS seconds FROM jobs
-     WHERE user_id = $1 AND created_at >= $2 AND status IN ('queued', 'running', 'completed') AND NOT paid_with_credit`,
+     WHERE user_id = $1 AND created_at >= $2 AND status IN ('queued', 'running', 'completed') AND NOT paid_with_credit AND revision_of IS NULL`,
     [userId, start.toISOString()],
   );
   const songRow = await db.one<{ songs: string | number }>(

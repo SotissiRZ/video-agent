@@ -54,7 +54,7 @@ export const AnimationSchema = z.object({
   /** Delay between successive elements (words, bullets) in frames. */
   stagger: z.number().int().min(0).default(4),
   /** Slow zoom applied to backgrounds / media (Ken Burns). 0 = none. */
-  kenBurns: z.number().min(0).max(0.5).default(0.06),
+  kenBurns: z.number().min(0).max(0.5).default(0.03),
 });
 export type Animation = z.infer<typeof AnimationSchema>;
 

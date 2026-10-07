@@ -18,7 +18,7 @@ import { BUSINESS, detectDomain, type Domain } from './domains';
 import { normalize } from '../prompt/parser';
 import { httpBuffer } from '../providers/http';
 import type { ImageProvider } from '../providers/image/types';
-import { orientationFor, type StockKind, type StockProvider, type StockResult } from '../providers/stock/types';
+import { orientationFor, pickStockResult, type StockKind, type StockProvider, type StockResult } from '../providers/stock/types';
 import type { VideoProvider } from '../providers/video/types';
 import type { Media, Scene, Storyboard } from '../remotion/contract/storyboard';
 
@@ -248,7 +248,7 @@ export class MediaDirector {
             this.handleProviderError(provider.id, err, warnings);
             continue;
           }
-          const result = results.find((r) => !this.used.has(r.id));
+          const result = pickStockResult(results.filter((r) => !this.used.has(r.id)), brief.width, brief.height);
           if (!result) continue;
           try {
             const file = path.join(paths.publicDir, 'media', `${scene.id}-${provider.id}-${++this.downloads}.${result.extension}`);

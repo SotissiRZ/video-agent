@@ -57,7 +57,7 @@ export const ImageScene: React.FC<SceneProps> = ({ scene, storyboard, index }) =
       )}
       <AbsoluteFill
         style={{
-          background: `linear-gradient(180deg, transparent 40%, ${withAlpha(palette.background, 0.92)} 100%)`,
+          background: `linear-gradient(180deg, transparent 40%, ${withAlpha(palette.background, 0.68)} 100%)`,
           opacity: interpolate(frame, [0, durationInFrames * 0.2], [0.6, 1], { extrapolateRight: 'clamp' }),
         }}
       />

@@ -12,6 +12,7 @@ import { newId } from './crypto';
 import type { Db } from './db';
 import { HttpError } from './http';
 import { getPlan, PREPAID, type PlanId } from './plans';
+import { exportPrice, type CommerceSettings } from './commerce';
 
 export const PAYMENT_PROVIDERS = ['geniuspay', 'youcanpay'] as const;
 export type PaymentProvider = (typeof PAYMENT_PROVIDERS)[number];
@@ -26,7 +27,7 @@ export interface PaymentRow {
   id: string;
   user_id: string;
   provider: PaymentProvider;
-  plan: PlanId | typeof CREDITS;
+  plan: PlanId | typeof CREDITS | 'export_video' | 'export_song';
   months: number;
   amount: string | number;
   currency: string;
@@ -37,6 +38,7 @@ export interface PaymentRow {
   paid_at: Date | string | null;
   /** Extra videos bought (credit packs); null for passes. */
   credits: number | null;
+  target_id: string | null;
 }
 
 export const providerEnabled = (config: AppConfig, provider: PaymentProvider): boolean =>
@@ -85,6 +87,7 @@ export interface CreatePaymentInput {
   plan?: PlanId;
   /** ...or this number of packs of extra videos. */
   packs?: number;
+  export?: { product: 'video' | 'song'; targetId: string; settings: CommerceSettings };
   provider: PaymentProvider;
   months?: number;
   baseUrl: string;
@@ -96,15 +99,20 @@ export const createPayment = async (db: Db, config: AppConfig, input: CreatePaym
   if (!providerEnabled(config, provider)) throw new ConfigError(`${provider} n'est pas configuré sur cette instance`);
   const currency = CURRENCY[provider];
   const packs = input.packs ? Math.max(1, Math.min(10, Math.round(input.packs))) : 0;
-  const plan = packs ? CREDITS : input.plan;
+  const plan = input.export ? `export_${input.export.product}` as const : packs ? CREDITS : input.plan;
   if (!plan || plan === 'free') throw new HttpError(400, 'Offre gratuite : rien à payer');
   const months = packs || Math.max(1, Math.min(12, Math.round(input.months ?? 1)));
   const credits = packs ? packs * config.env.CREDIT_PACK_VIDEOS : null;
-  const amount = (packs ? packPrice(config, currency) : passPrice(config, plan as PlanId, currency)!) * months;
+  const amount = input.export
+    ? exportPrice(input.export.settings, input.export.product, currency)
+    : (packs ? packPrice(config, currency) : passPrice(config, plan as PlanId, currency)!) * months;
+  if (!Number.isSafeInteger(amount) || amount <= 0) throw new HttpError(503, 'Le paiement de cet export n’est pas configuré.', 'export_price_unavailable');
   const id = `pay_${newId().replace(/-/g, '')}`;
-  await db.query('INSERT INTO payments (id, user_id, provider, plan, months, amount, currency, credits) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)', [id, user.id, provider, plan, months, amount, currency, credits]);
+  await db.query('INSERT INTO payments (id, user_id, provider, plan, months, amount, currency, credits, target_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)', [id, user.id, provider, plan, months, amount, currency, credits, input.export?.targetId ?? null]);
   const returnUrl = (status: string) => `${input.baseUrl}/app#billing?payment=${status}&ref=${id}`;
-  const description = credits ? `SOVID AI — ${credits} vidéos supplémentaires` : `SOVID AI — ${getPlan(config, plan).name} (${months * PASS_DAYS} jours)`;
+  const description = input.export
+    ? `SOVID AI — export ${input.export.product === 'video' ? 'vidéo' : 'chanson'}`
+    : credits ? `SOVID AI — ${credits} vidéos supplémentaires` : `SOVID AI — ${getPlan(config, plan as PlanId).name} (${months * PASS_DAYS} jours)`;
 
   try {
     if (provider === 'geniuspay') {
@@ -173,6 +181,16 @@ export const activatePayment = async (db: Db, paymentId: string, raw?: unknown):
     if (!p) return false;
     if (p.credits) {
       await t.query('UPDATE users SET credits = credits + $2 WHERE id = $1', [p.user_id, p.credits]);
+      return true;
+    }
+    if (p.plan === 'export_video' && p.target_id) {
+      const unlocked = await t.query("UPDATE jobs SET export_paid = true WHERE id = $1 AND user_id = $2 AND status = 'completed' RETURNING id", [p.target_id, p.user_id]);
+      if (!unlocked.length) throw new HttpError(409, 'Le résultat vidéo n’existe plus ou n’est plus disponible.', 'export_target_unavailable');
+      return true;
+    }
+    if (p.plan === 'export_song' && p.target_id) {
+      const unlocked = await t.query("UPDATE songs SET export_paid = true WHERE id = $1 AND user_id = $2 AND status = 'completed' RETURNING id", [p.target_id, p.user_id]);
+      if (!unlocked.length) throw new HttpError(409, 'La chanson n’existe plus ou n’est plus disponible.', 'export_target_unavailable');
       return true;
     }
     const user = await t.one<{ plan: string; subscription_status: string | null; current_period_end: Date | string | null }>('SELECT plan, subscription_status, current_period_end FROM users WHERE id = $1 FOR UPDATE', [p.user_id]);

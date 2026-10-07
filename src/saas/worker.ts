@@ -19,8 +19,10 @@ import type { Vault } from './crypto';
 import type { Db } from './db';
 import { getBrandKit } from './brand';
 import { claimNextJob, failStaleJobs, purgeOldJobs, type JobRow, refundCredits } from './jobs';
-import { planOfUser } from './plans';
+import { applyCommerceLimits, planOfUser } from './plans';
+import { getCommerceSettings } from './commerce';
 import { claimDuePublication, finishPublication, type PublicationRow } from './publications';
+import { productImageFiles } from './product-images';
 
 export interface WorkerOptions {
   db: Db;
@@ -117,7 +119,7 @@ export class Worker {
     const { db, logger } = this.o;
     const config = this.o.config();
     const user = await db.one<{ plan: string; subscription_status: string | null; current_period_end: Date | string | null }>('SELECT plan, subscription_status, current_period_end FROM users WHERE id = $1', [job.user_id]);
-    const plan = planOfUser(config, user);
+    const plan = applyCommerceLimits(planOfUser(config, user), await getCommerceSettings(db));
     const controller = new AbortController();
     const steps = { ...job.steps };
     let progress = { overall: 0, step: '', message: '' };
@@ -154,7 +156,7 @@ export class Worker {
     try {
       const agent = new VideoAgent(config, { logger, ...this.o.deps });
       const result = await agent.run(
-        { prompt: job.prompt, options },
+        { prompt: job.prompt, options, productImages: await productImageFiles(db, job.user_id, job.product_image_ids ?? [], Number.MAX_SAFE_INTEGER) },
         {
           signal: controller.signal,
           onProgress: (e) => {

@@ -44,6 +44,8 @@ export interface VideoOptions {
 export interface VideoRequest {
   prompt: string;
   options?: VideoOptions;
+  /** Product images selected by the account owner; absolute paths resolved server-side. */
+  productImages?: string[];
 }
 
 /** Result of the deterministic prompt analysis. */

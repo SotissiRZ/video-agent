@@ -33,7 +33,7 @@ export const SceneShell: React.FC<SceneProps & { children: React.ReactNode; just
           <MediaStack media={[scene.media, ...(scene.shots ?? [])]} kenBurns={scene.animation.kenBurns} />
           <AbsoluteFill
             style={{
-              background: `linear-gradient(180deg, ${withAlpha(theme.palette.background, 0.55)} 0%, ${withAlpha(theme.palette.background, 0.85)} 100%)`,
+              background: `linear-gradient(180deg, ${withAlpha(theme.palette.background, 0.2)} 0%, ${withAlpha(theme.palette.background, 0.52)} 100%)`,
             }}
           />
         </>

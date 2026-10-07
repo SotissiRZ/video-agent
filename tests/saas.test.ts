@@ -7,6 +7,7 @@ import { signStripePayload, stripeForm, verifyStripeSignature } from '../src/saa
 import { hashPassword, Vault, verifyPassword } from '../src/saas/crypto';
 import { connectPglite, migrate, type Db } from '../src/saas/db';
 import { checkQuota, checkSongQuota, getPlan } from '../src/saas/plans';
+import { activatePayment } from '../src/saas/payments';
 import { startSaasServer } from '../src/saas/server';
 import type { PlatformId } from '../src/publish/types';
 import { fakeRenderer, testConfig, tmpDir } from './helpers';
@@ -171,6 +172,12 @@ describe('accounts', () => {
     expect((await bob.json('POST', '/api/auth/login', { email: 'BOB@example.com', password: 'motdepasse2' })).status).toBe(200);
     expect((await bob.json('GET', '/api/admin/users')).status).toBe(403);
     expect((await admin.json('GET', '/api/admin/users')).body).toHaveLength(2);
+    const commerce = await admin.json('GET', '/api/admin/commerce');
+    expect(commerce.body).toMatchObject({ videoPriceXof: 1000, songPriceMad: 25, correctionsPerVideo: 1 });
+    expect((await admin.json('PUT', '/api/admin/commerce', { ...commerce.body, videoPriceXof: -1 })).status).toBe(400);
+    const updatedCommerce = await admin.json('PUT', '/api/admin/commerce', { ...commerce.body, correctionsPerSong: 2 });
+    expect(updatedCommerce.body.correctionsPerSong).toBe(2);
+    expect((await admin.json('PUT', '/api/admin/commerce', commerce.body)).status).toBe(200);
   });
 
   it('refuses cross-site requests', async () => {
@@ -259,9 +266,9 @@ describe('videos', () => {
   }, 30_000);
 
   it('publishes on connected accounts with a paid plan (tokens stored encrypted)', async () => {
-    // Free plan: no publishing, no connection.
-    expect((await alice.json('POST', '/api/connections/youtube/start')).status).toBe(402);
-    expect((await alice.json('POST', `/api/jobs/${jobId}/publish`, { platforms: ['youtube'] })).body.code).toBe('plan_publish');
+    // Free users can connect accounts before paying for an export.
+    expect((await alice.json('POST', '/api/connections/youtube/start')).status).toBe(200);
+    expect((await alice.json('POST', `/api/jobs/${jobId}/publish`, { platforms: ['youtube'] })).body.code).toBe('export_payment_required');
 
     // Stripe webhook → Creator plan.
     const me = (await alice.json('GET', '/api/me')).body.user;
@@ -341,6 +348,26 @@ describe('songs', () => {
     expect(finished.status).toBe('completed');
     expect(await (await singer.req('GET', finished.audioUrl)).text()).toBe('fake mp3');
     expect((await singer.json('GET', '/api/me')).body.usage.songs).toBe(1);
+    expect((await singer.req('GET', `${finished.audioUrl}?download=1`)).status).toBe(402);
+    const userId = (await singer.json('GET', '/api/me')).body.user.id;
+    await db.query(
+      `INSERT INTO payments (id, user_id, provider, plan, amount, currency, target_id)
+       VALUES ('pay_song_export_test', $1, 'youcanpay', 'export_song', 25, 'MAD', $2)`,
+      [userId, draft.body.id],
+    );
+    expect(await activatePayment(db, 'pay_song_export_test')).toBe(true);
+    expect((await singer.req('GET', `${finished.audioUrl}?download=1`)).status).toBe(200);
+
+    const corrected = await singer.json('PUT', `/api/songs/${draft.body.id}/lyrics`, { title: 'Pour Aïcha, version corrigée', lyrics: '[Verse 1]\nPour toi encore' });
+    expect(corrected.status).toBe(200);
+    expect(corrected.body).toMatchObject({ status: 'draft', correctionsUsed: 1, exportPaid: true });
+    expect((await singer.json('POST', `/api/songs/${draft.body.id}/generate`)).status).toBe(202);
+    const correctedSong = await waitFor(async () => {
+      const result = await singer.json('GET', `/api/songs/${draft.body.id}`);
+      return ['completed', 'failed'].includes(result.body.status) ? result.body : undefined;
+    });
+    expect(correctedSong.status).toBe('completed');
+    expect((await singer.req('GET', `${correctedSong.downloadUrl}`)).status).toBe(200);
     expect((await singer.json('PUT', `/api/songs/${draft.body.id}/lyrics`, { title: 'No', lyrics: 'No' })).status).toBe(409);
 
     const anotherDraft = await singer.json('POST', '/api/songs', { prompt: 'Another birthday song', style: 'Pop', mood: 'Joyful and celebratory' });

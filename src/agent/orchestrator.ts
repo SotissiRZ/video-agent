@@ -39,7 +39,7 @@ import type { VideoProvider } from '../providers/video/types';
 import { resolveVoiceProvider } from '../providers/voice/registry';
 import { resolveStockProviders } from '../providers/stock/registry';
 import type { StockProvider } from '../providers/stock/types';
-import { MediaDirector, type MediaCredit } from '../media/director';
+import { MediaDirector, wantsMedia, type MediaCredit } from '../media/director';
 import type { VoiceProvider } from '../providers/voice/types';
 import { renderStoryboard, type RenderOptions, type RenderResult } from '../render/renderer';
 import type { Storyboard } from '../remotion/contract/storyboard';
@@ -276,6 +276,15 @@ export class VideoAgent {
       'Sélection des visuels',
       async (progress) => {
         const sb = await director.run(storyboard, planned, brief, paths, warnings, progress, signal);
+        const customerImages = (request.productImages ?? []).filter((file) => fs.existsSync(file));
+        const mediaScenes = sb.scenes.filter((scene) => wantsMedia(scene, options.mediaCoverage ?? this.config.env.VIDEO_AGENT_MEDIA_COVERAGE));
+        if (mediaScenes.length) {
+          customerImages.forEach((file, imageIndex) => {
+            const scene = mediaScenes[imageIndex % mediaScenes.length]!;
+            scene.media = { type: 'image', src: importAsset(file, paths.publicDir, 'product'), fit: 'cover', origin: 'user:product' };
+            scene.shots = undefined;
+          });
+        }
         // Brand kit logo (uploaded by the customer) wins over the shared assets library.
         if (options.brandLogo && fs.existsSync(options.brandLogo)) {
           return { ...sb, brand: { ...sb.brand, logo: importAsset(options.brandLogo, paths.publicDir, 'brand'), showWatermark: true } };
@@ -542,4 +551,3 @@ const safeResolve = <T>(fn: () => T | null, warnings: string[]): T | null => {
     return null;
   }
 };
-

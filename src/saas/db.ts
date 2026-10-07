@@ -227,6 +227,34 @@ export const MIGRATIONS: string[] = [
   CREATE INDEX songs_user ON songs(user_id, created_at DESC);
   CREATE INDEX songs_usage ON songs(user_id, created_at) WHERE status IN ('queued', 'running', 'completed');
   `,
+  // 6 — paid export entitlements and admin-managed commerce settings
+  `
+  ALTER TABLE jobs ADD COLUMN export_paid boolean NOT NULL DEFAULT false;
+  ALTER TABLE songs ADD COLUMN export_paid boolean NOT NULL DEFAULT false;
+  ALTER TABLE payments ADD COLUMN target_id text;
+  CREATE TABLE commerce_settings (
+    id integer PRIMARY KEY CHECK (id = 1),
+    settings jsonb NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  );
+  INSERT INTO commerce_settings (id, settings) VALUES (1, '{"videoPriceXof":1000,"videoPriceMad":15,"songPriceXof":1500,"songPriceMad":25,"freeVideosPerMonth":3,"freeMinutesPerMonth":3,"freeSongsPerMonth":1,"freeMaxDurationSec":60,"creatorVideosPerMonth":30,"creatorMinutesPerMonth":60,"creatorSongsPerMonth":10,"creatorMaxDurationSec":180,"proVideosPerMonth":120,"proMinutesPerMonth":300,"proSongsPerMonth":40,"proMaxDurationSec":600,"correctionsPerVideo":1,"correctionsPerSong":1,"maxProductImages":4,"maxProductImageMb":5}'::jsonb);
+  `,
+  // 7 — customer product images and included corrections
+  `
+  ALTER TABLE jobs ADD COLUMN product_image_ids text[] NOT NULL DEFAULT '{}';
+  ALTER TABLE jobs ADD COLUMN corrections_used integer NOT NULL DEFAULT 0;
+  ALTER TABLE jobs ADD COLUMN revision_of text REFERENCES jobs(id) ON DELETE SET NULL;
+  ALTER TABLE songs ADD COLUMN corrections_used integer NOT NULL DEFAULT 0;
+  CREATE TABLE product_images (
+    id text PRIMARY KEY,
+    user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name text NOT NULL,
+    file text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  );
+  CREATE INDEX product_images_user ON product_images(user_id, created_at DESC);
+  CREATE UNIQUE INDEX payments_pending_export ON payments(user_id, target_id) WHERE target_id IS NOT NULL AND status = 'pending';
+  `,
 ];
 
 /** Apply pending migrations (serialized with an advisory lock: several containers may start together). */

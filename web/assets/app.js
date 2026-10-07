@@ -14,7 +14,7 @@ const PROVIDER_INFO = {
 };
 const PAGES = ['create', 'songs', 'library', 'schedule', 'connections', 'brand', 'billing', 'account', 'admin'];
 
-const state = { me: null, publicConfig: null, options: null, connections: null, job: null, source: null, publishJobId: null, brand: null, song: null, songPoll: null };
+const state = { me: null, publicConfig: null, options: null, connections: null, job: null, source: null, publishJobId: null, brand: null, song: null, songPoll: null, productImages: [] };
 
 const addPasswordVisibilityControls = () => {
   document.querySelectorAll('input[type="password"]').forEach((input) => {
@@ -148,6 +148,7 @@ const startApp = async () => {
   await loadOptions();
   loadConnectionsData().catch(() => undefined);
   loadBrandData().catch(() => undefined);
+  loadProductImages().catch(() => undefined);
   refreshPendingCount();
   onRoute();
 };
@@ -195,13 +196,29 @@ $('appView').addEventListener('click', (e) => {
 // ---- Songs ---------------------------------------------------------------------------------
 const SONG_STATUS = { draft: 'songs.status.draft', queued: 'songs.status.queued', running: 'songs.status.running', completed: 'songs.status.completed', failed: 'songs.status.failed' };
 
+const renderExportActions = (container, product, targetId, unlocked) => {
+  if (state.me.plan.id !== 'free' || unlocked) {
+    container.innerHTML = '';
+    return;
+  }
+  const providers = state.me.paymentProviders ?? [];
+  const prices = state.me.commerce ?? state.publicConfig?.commerce;
+  const amount = (currency) => product === 'video'
+    ? currency === 'XOF' ? prices?.videoPriceXof : prices?.videoPriceMad
+    : currency === 'XOF' ? prices?.songPriceXof : prices?.songPriceMad;
+  container.innerHTML = providers.map((provider, index) =>
+    `<button type="button" class="btn ${index ? 'btn-secondary' : 'btn-primary'} btn-sm" data-export-pay="${product}" data-target="${escapeHtml(targetId)}" data-provider="${escapeHtml(provider.id)}">${icon(provider.id === 'geniuspay' ? 'phone' : 'card', 15)}<span>${escapeHtml(t('export.unlock'))} · ${escapeHtml(formatMoney(amount(provider.currency), provider.currency))}</span></button>`,
+  ).join('');
+};
+
 const showSong = (song) => {
   state.song = song;
   $('songEditorCard').hidden = false;
   $('songTitle').value = song.title;
   $('songLyrics').value = song.lyrics;
   const running = song.status === 'queued' || song.status === 'running';
-  const editable = !running && song.status !== 'completed';
+  const correctionLimit = state.me.commerce?.correctionsPerSong ?? 1;
+  const editable = !running && (song.status !== 'completed' || song.correctionsUsed < correctionLimit);
   $('songTitle').disabled = !editable;
   $('songLyrics').disabled = !editable;
   $('songSaveLyrics').hidden = !editable;
@@ -212,6 +229,9 @@ const showSong = (song) => {
   $('songGenerateError').hidden = !song.error;
   $('songGenerateError').textContent = song.error ? t(`songs.error.${song.error}`) : '';
   $('songAudioResult').hidden = song.status !== 'completed' || !song.audioUrl;
+  $('songDownload').hidden = state.me.plan.id === 'free' && !song.exportPaid;
+  $('songPreviewNote').hidden = state.me.plan.id !== 'free' || song.exportPaid;
+  renderExportActions($('songExportPay'), 'song', song.id, song.exportPaid);
   if (song.audioUrl) {
     if ($('songAudio').dataset.song !== song.id) {
       $('songAudio').src = song.audioUrl;
@@ -382,6 +402,43 @@ const updateCapHints = () => {
   if ($('stock').checked && !caps.stock) hints.push(t('create.cap.stock'));
   $('capHints').innerHTML = hints.map((h) => `<div class="alert warning">${icon('alert', 16)}<span>${escapeHtml(h)}</span></div>`).join('');
 };
+
+const renderProductImages = () => {
+  $('productImagesList').innerHTML = state.productImages.map((image) => `<div class="input-group"><label class="switch"><input type="checkbox" value="${escapeHtml(image.id)}" checked /><span class="track"></span><span>${escapeHtml(image.name)}</span></label><button type="button" class="btn btn-ghost btn-icon btn-sm" data-product-image-delete="${escapeHtml(image.id)}" title="${escapeHtml(t('common.delete'))}">${icon('trash', 14)}</button></div>`).join('');
+};
+
+const loadProductImages = async () => {
+  state.productImages = await api('/api/product-images');
+  renderProductImages();
+};
+
+$('productImageInput').addEventListener('change', async (event) => {
+  const input = event.currentTarget;
+  input.disabled = true;
+  try {
+    for (const file of input.files) {
+      await api(`/api/product-images?filename=${encodeURIComponent(file.name)}`, { method: 'POST', body: file });
+    }
+    await loadProductImages();
+    toast(t('create.productImagesUploaded'), 'success');
+  } catch (err) {
+    toast(errorText(err), 'error');
+  } finally {
+    input.value = '';
+    input.disabled = false;
+  }
+});
+
+$('productImagesList').addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-product-image-delete]');
+  if (!button) return;
+  try {
+    await api(`/api/product-images/${encodeURIComponent(button.dataset.productImageDelete)}`, { method: 'DELETE' });
+    await loadProductImages();
+  } catch (err) {
+    toast(errorText(err), 'error');
+  }
+});
 ['voice', 'stock'].forEach((id) => $(id).addEventListener('change', updateCapHints));
 
 // Files open in the in-app viewer (formatted); Ctrl/Cmd-click still opens the raw file.
@@ -471,6 +528,7 @@ $('createForm').addEventListener('submit', async (e) => {
   if (!$('brandKitToggle').hidden) body.brandKit = $('brandKit').checked;
   const res = /^(\d{2,4})x(\d{2,4})$/.exec($('resolution').value.trim());
   if (res) Object.assign(body, { width: Number(res[1]), height: Number(res[2]) });
+  body.productImageIds = [...$('productImagesList').querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
   $('submit').disabled = true;
   try {
     const job = await post('/api/jobs', body);
@@ -540,6 +598,10 @@ const showJob = (job) => {
   }
   $('download').href = job.downloadUrl;
   $('download').setAttribute('download', job.videoName ?? 'video.mp4');
+  $('download').hidden = state.me.plan.id === 'free' && !job.exportPaid;
+  $('shareWhatsapp').hidden = state.me.plan.id === 'free' && !job.exportPaid;
+  renderExportActions($('videoExportPay'), 'video', job.id, job.exportPaid);
+  $('jobCorrection').hidden = (job.correctionsUsed ?? 0) >= (state.me.commerce?.correctionsPerVideo ?? 1);
   $('fileStoryboard').href = `/api/jobs/${job.id}/files/storyboard.json`;
   $('fileScript').href = `/api/jobs/${job.id}/files/script.md`;
   $('fileSrt').href = `/api/jobs/${job.id}/files/subtitles.srt`;
@@ -584,6 +646,26 @@ $('retryJob').addEventListener('click', async () => {
     $('retryJob').disabled = false;
   }
 });
+$('correctJob').addEventListener('click', async () => {
+  if (!state.job || !state.job.videoUrl) return;
+  const instruction = $('jobCorrectionText').value.trim();
+  if (instruction.length < 5) return toast(t('job.correctTooShort'), 'error');
+  const button = $('correctJob');
+  button.disabled = true;
+  try {
+    const job = await post(`/api/jobs/${encodeURIComponent(state.job.id)}/correct`, { instruction });
+    $('jobCorrectionText').value = '';
+    history.replaceState(null, '', `#create?job=${job.id}`);
+    showJob(job);
+    follow(job.id);
+    loadLibrary().catch((err) => toast(errorText(err), 'error'));
+    refreshMe().catch(() => undefined);
+  } catch (err) {
+    toast(errorText(err), 'error');
+  } finally {
+    button.disabled = false;
+  }
+});
 
 // ---- Publishing ------------------------------------------------------------------------------
 const loadConnectionsData = async () => {
@@ -596,7 +678,7 @@ const resetPublish = async (jobId) => {
   $('captionEditors').innerHTML = '';
   $('publishActions').hidden = true;
   $('publishOutcomes').innerHTML = '';
-  const canPublish = state.me.plan.publish;
+  const canPublish = state.me.plan.publish || Boolean(state.job?.exportPaid);
   $('publishUpsell').hidden = canPublish;
   if (!canPublish) {
     $('publishForm').hidden = true;
@@ -702,6 +784,22 @@ const sendPublish = async (dryRun) => {
 };
 $('dryRun').addEventListener('click', () => sendPublish(true));
 $('publishBtn').addEventListener('click', () => sendPublish(false));
+
+document.addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-export-pay]');
+  if (!button) return;
+  button.disabled = true;
+  try {
+    const response = await post('/api/billing/pay', {
+      export: { product: button.dataset.exportPay, targetId: button.dataset.target },
+      provider: button.dataset.provider,
+    });
+    location.href = response.url;
+  } catch (err) {
+    button.disabled = false;
+    toast(errorText(err), 'error');
+  }
+});
 
 // ---- Library -----------------------------------------------------------------------------------
 const loadLibrary = async () => {
@@ -950,8 +1048,12 @@ const followPayment = async (ref) => {
       if (r.payment.status === 'paid') {
         state.me = r.account;
         renderShell();
-        toast(t('billing.paymentDone'), 'success');
-        return loadBilling();
+        const isExport = r.payment.plan === 'export_video' || r.payment.plan === 'export_song';
+        toast(t(isExport ? 'billing.exportDone' : 'billing.paymentDone'), 'success');
+        await loadBilling();
+        if (r.payment.plan === 'export_video' && state.job) showJob(await api(`/api/jobs/${encodeURIComponent(state.job.id)}`));
+        if (r.payment.plan === 'export_song' && state.song) showSong(await api(`/api/songs/${encodeURIComponent(state.song.id)}`));
+        return;
       }
       if (r.payment.status === 'failed' || r.payment.status === 'cancelled') return toast(t('billing.paymentFailed'), 'error');
     } catch {
@@ -1012,7 +1114,7 @@ const loadBilling = async (params) => {
   const payments = await api('/api/billing/payments').catch(() => []);
   $('paymentsCard').hidden = !payments.length;
   $('paymentRows').innerHTML = payments
-    .map((p) => `<tr><td>${escapeHtml(formatDate(p.createdAt))}</td><td>${escapeHtml(p.credits ? t('credits.bought', { n: p.credits }) : `${t(`plan.${p.plan}`)} · ${t('billing.days', { n: p.months * 30 })}`)}</td><td>${escapeHtml(t(`pay.provider.${p.provider}`))}</td><td>${escapeHtml(formatMoney(p.amount, p.currency))}</td><td>${payBadge(p.status)}</td></tr>`)
+    .map((p) => `<tr><td>${escapeHtml(formatDate(p.createdAt))}</td><td>${escapeHtml(p.credits ? t('credits.bought', { n: p.credits }) : p.plan.startsWith('export_') ? t(`payment.${p.plan}`) : `${t(`plan.${p.plan}`)} · ${t('billing.days', { n: p.months * 30 })}`)}</td><td>${escapeHtml(t(`pay.provider.${p.provider}`))}</td><td>${escapeHtml(formatMoney(p.amount, p.currency))}</td><td>${payBadge(p.status)}</td></tr>`)
     .join('');
 };
 
@@ -1127,11 +1229,13 @@ const renderAdminSettings = (settings) => {
 const adminResult = (request) => request.then((value) => ({ value })).catch((err) => ({ error: errorText(err) }));
 
 const loadAdmin = async () => {
-  const [statsResult, usersResult, settingsResult] = await Promise.all([
+  const [statsResult, usersResult, settingsResult, commerceResult] = await Promise.all([
     adminResult(api('/api/admin/stats')),
     adminResult(api('/api/admin/users')),
     adminResult(api('/api/admin/settings')),
+    adminResult(api('/api/admin/commerce')),
   ]);
+  renderAdminCommerce(commerceResult);
   if ('error' in statsResult) {
     $('adminStats').innerHTML = `<div class="alert danger">${escapeHtml(friendlyText(statsResult.error))}</div>`;
   } else {
@@ -1164,7 +1268,7 @@ const loadAdmin = async () => {
     ? `<tr><td colspan="6"><div class="alert danger">${escapeHtml(friendlyText(paymentsResult.error))}</div></td></tr>`
     : paymentsResult.value
       .slice(0, 50)
-      .map((p) => `<tr><td>${escapeHtml(formatDate(p.createdAt))}</td><td>${escapeHtml(p.email ?? '')}</td><td>${escapeHtml(p.credits ? t('credits.bought', { n: p.credits }) : t(`plan.${p.plan}`))}</td><td>${escapeHtml(t(`pay.provider.${p.provider}`))}</td><td>${escapeHtml(formatMoney(p.amount, p.currency))}</td><td>${payBadge(p.status)}</td></tr>`)
+      .map((p) => `<tr><td>${escapeHtml(formatDate(p.createdAt))}</td><td>${escapeHtml(p.email ?? '')}</td><td>${escapeHtml(p.credits ? t('credits.bought', { n: p.credits }) : p.plan.startsWith('export_') ? t(`payment.${p.plan}`) : t(`plan.${p.plan}`))}</td><td>${escapeHtml(t(`pay.provider.${p.provider}`))}</td><td>${escapeHtml(formatMoney(p.amount, p.currency))}</td><td>${payBadge(p.status)}</td></tr>`)
       .join('');
   const settings = 'error' in settingsResult ? { error: settingsResult.error } : settingsResult.value;
   if (!settings.error) {
@@ -1172,6 +1276,60 @@ const loadAdmin = async () => {
   }
   renderAdminSettings(settings);
 };
+
+const COMMERCE_FIELDS = [
+  ['videoPriceXof', 'admin.commerce.videoPriceXof'],
+  ['videoPriceMad', 'admin.commerce.videoPriceMad'],
+  ['songPriceXof', 'admin.commerce.songPriceXof'],
+  ['songPriceMad', 'admin.commerce.songPriceMad'],
+  ['freeVideosPerMonth', 'admin.commerce.freeVideos'],
+  ['freeMinutesPerMonth', 'admin.commerce.freeMinutes'],
+  ['freeSongsPerMonth', 'admin.commerce.freeSongs'],
+  ['freeMaxDurationSec', 'admin.commerce.freeDuration'],
+  ['creatorVideosPerMonth', 'admin.commerce.creatorVideos'],
+  ['creatorMinutesPerMonth', 'admin.commerce.creatorMinutes'],
+  ['creatorSongsPerMonth', 'admin.commerce.creatorSongs'],
+  ['creatorMaxDurationSec', 'admin.commerce.creatorDuration'],
+  ['proVideosPerMonth', 'admin.commerce.proVideos'],
+  ['proMinutesPerMonth', 'admin.commerce.proMinutes'],
+  ['proSongsPerMonth', 'admin.commerce.proSongs'],
+  ['proMaxDurationSec', 'admin.commerce.proDuration'],
+  ['correctionsPerVideo', 'admin.commerce.videoCorrections'],
+  ['correctionsPerSong', 'admin.commerce.songCorrections'],
+  ['maxProductImages', 'admin.commerce.maxImages'],
+  ['maxProductImageMb', 'admin.commerce.maxImageSize'],
+];
+
+const renderAdminCommerce = (result) => {
+  if ('error' in result) {
+    $('adminCommerce').innerHTML = `<div class="alert danger">${escapeHtml(friendlyText(result.error))}</div>`;
+    return;
+  }
+  $('adminCommerce').innerHTML = `<form class="card" id="adminCommerceForm">
+    <div class="card-header"><div><h2>${escapeHtml(t('admin.commerce.title'))}</h2><p>${escapeHtml(t('admin.commerce.subtitle'))}</p></div></div>
+    <div class="card-body form-grid">${COMMERCE_FIELDS.map(([key, label]) => `<label class="field"><span class="label">${escapeHtml(t(label))}</span><input class="input" type="number" min="0" step="1" required name="${key}" value="${escapeHtml(result.value[key])}" /></label>`).join('')}</div>
+    <div class="card-footer"><button class="btn btn-primary" type="submit">${escapeHtml(t('common.save'))}</button></div>
+  </form>`;
+};
+
+$('adminCommerce').addEventListener('submit', async (e) => {
+  if (e.target.id !== 'adminCommerceForm') return;
+  e.preventDefault();
+  const form = e.target;
+  const settings = Object.fromEntries(COMMERCE_FIELDS.map(([key]) => [key, Number(form.elements.namedItem(key).value)]));
+  const button = form.querySelector('[type="submit"]');
+  button.disabled = true;
+  try {
+    const saved = await api('/api/admin/commerce', { method: 'PUT', body: JSON.stringify(settings) });
+    renderAdminCommerce({ value: saved });
+    state.publicConfig = await api('/api/public/config');
+    toast(t('common.saved'), 'success');
+  } catch (err) {
+    toast(errorText(err), 'error');
+  } finally {
+    button.disabled = false;
+  }
+});
 
 $('adminUsers').addEventListener('change', async (e) => {
   const sel = e.target.closest('[data-user]');

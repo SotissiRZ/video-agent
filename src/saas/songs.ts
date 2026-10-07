@@ -19,6 +19,8 @@ export interface SongRow {
   status: SongStatus;
   error: string | null;
   audio_file: string | null;
+  export_paid: boolean;
+  corrections_used: number;
   heartbeat_at: Date | string | null;
   created_at: Date | string;
   updated_at: Date | string;
@@ -36,6 +38,8 @@ export const publicSong = (song: SongRow) => ({
   mood: song.mood,
   durationSec: song.duration_sec,
   status: song.status,
+  exportPaid: song.export_paid,
+  correctionsUsed: song.corrections_used,
   error: song.error ? songErrorCode(song.error) : undefined,
   createdAt: iso(song.created_at),
   finishedAt: iso(song.finished_at),
@@ -86,11 +90,12 @@ export const getSong = (db: Db, userId: string, id: string): Promise<SongRow | u
 export const listSongs = (db: Db, userId: string): Promise<SongRow[]> =>
   db.query<SongRow>('SELECT * FROM songs WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100', [userId]);
 
-export const updateSongLyrics = async (db: Db, userId: string, id: string, title: string, lyrics: string): Promise<SongRow | undefined> =>
+export const updateSongLyrics = async (db: Db, userId: string, id: string, title: string, lyrics: string, correctionLimit = 0): Promise<SongRow | undefined> =>
   db.one<SongRow>(
-    `UPDATE songs SET title = $3, lyrics = $4, status = 'draft', error = NULL, updated_at = now()
-     WHERE id = $1 AND user_id = $2 AND status IN ('draft', 'failed') RETURNING *`,
-    [id, userId, title, lyrics],
+    `UPDATE songs SET title = $3, lyrics = $4, status = 'draft', error = NULL, audio_file = NULL,
+       corrections_used = corrections_used + CASE WHEN status = 'completed' THEN 1 ELSE 0 END, updated_at = now()
+     WHERE id = $1 AND user_id = $2 AND (status IN ('draft', 'failed') OR (status = 'completed' AND corrections_used < $5)) RETURNING *`,
+    [id, userId, title, lyrics, correctionLimit],
   );
 
 export const deleteSong = (db: Db, userId: string, id: string): Promise<{ id: string }[]> =>

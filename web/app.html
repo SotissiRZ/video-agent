@@ -131,6 +131,12 @@
                   <span class="label" data-i18n="create.prompt"></span>
                   <textarea class="textarea" id="prompt" rows="4" maxlength="4000" required data-i18n-placeholder="create.placeholder"></textarea>
                 </label>
+                <label class="field">
+                  <span class="label" data-i18n="create.productImages"></span>
+                  <input class="input" id="productImageInput" type="file" accept="image/png,image/jpeg,image/webp" multiple />
+                  <span class="hint" data-i18n="create.productImagesHint"></span>
+                </label>
+                <div id="productImagesList" class="form-stack"></div>
                 <div class="examples">
                   <span class="hint" data-i18n="create.examples"></span>
                   <button type="button" class="chip" data-example="create.ex.ad.text" data-i18n="create.ex.ad"></button>
@@ -247,11 +253,16 @@
                     <video class="player" id="player" controls playsinline preload="metadata"></video>
                     <div class="result-actions" style="margin-top: 14px">
                       <a class="btn btn-primary" id="download" download><i data-icon="download" data-size="16"></i><span data-i18n="job.download"></span></a>
+                      <div class="input-group" id="videoExportPay"></div>
                       <button type="button" class="btn btn-whatsapp" id="shareWhatsapp"><i data-icon="whatsapp" data-size="16"></i><span data-i18n="job.whatsapp"></span></button>
                       <a class="btn btn-ghost btn-sm" id="fileStoryboard" target="_blank" rel="noopener" data-i18n="job.file.storyboard"></a>
                       <a class="btn btn-ghost btn-sm" id="fileScript" target="_blank" rel="noopener" data-i18n="job.file.script"></a>
                       <a class="btn btn-ghost btn-sm" id="fileSrt" target="_blank" rel="noopener" data-i18n="job.file.srt"></a>
                       <a class="btn btn-ghost btn-sm" id="fileCredits" target="_blank" rel="noopener" data-i18n="job.file.credits" hidden></a>
+                    </div>
+                    <div class="form-stack" id="jobCorrection" style="margin-top: 14px" hidden>
+                      <label class="field"><span class="label" data-i18n="job.correctTitle"></span><textarea class="textarea" id="jobCorrectionText" rows="2" maxlength="1000" data-i18n-placeholder="job.correctPlaceholder"></textarea></label>
+                      <button type="button" class="btn btn-secondary btn-sm" id="correctJob"><i data-icon="edit" data-size="16"></i><span data-i18n="job.correct"></span></button>
                     </div>
                     <div id="jobWarnings" style="margin-top: 14px; display: grid; gap: 8px"></div>
 
@@ -314,7 +325,7 @@
                 <label class="field"><span class="label" data-i18n="songs.lyrics"></span><textarea class="textarea" id="songLyrics" rows="12" maxlength="6000"></textarea><span class="hint" data-i18n="songs.lyricsHint"></span></label>
                 <div class="alert warning"><i data-icon="alert"></i><span data-i18n="songs.fidelityWarning"></span></div>
                 <div class="alert danger" id="songGenerateError" hidden></div>
-                <div id="songAudioResult" hidden class="form-stack"><audio controls id="songAudio" style="width: 100%"></audio><a class="btn btn-secondary" id="songDownload"><i data-icon="download"></i><span data-i18n="songs.download"></span></a></div>
+                <div id="songAudioResult" hidden class="form-stack"><audio controls id="songAudio" style="width: 100%"></audio><p class="hint" id="songPreviewNote" data-i18n="songs.previewNote" hidden></p><div class="input-group"><a class="btn btn-secondary" id="songDownload"><i data-icon="download"></i><span data-i18n="songs.download"></span></a><div class="input-group" id="songExportPay"></div></div></div>
               </div>
               <div class="card-footer">
                 <button class="btn btn-secondary" type="button" id="songSaveLyrics"><i data-icon="check"></i><span data-i18n="songs.saveLyrics"></span></button>
@@ -465,6 +476,7 @@
         <section class="page" id="page-admin">
           <div class="page-header"><div><h1 data-i18n="admin.title"></h1><p data-i18n="admin.subtitle"></p></div></div>
           <div class="grid-3" id="adminStats" style="grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); margin-bottom: 20px"></div>
+          <div id="adminCommerce" style="margin-bottom: 20px"></div>
           <div class="card" style="margin-bottom: 20px">
             <div class="card-header"><h2 data-i18n="admin.users"></h2></div>
             <div class="card-body" style="padding: 8px 6px 6px">

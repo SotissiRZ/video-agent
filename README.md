@@ -629,6 +629,12 @@ Prix par mois : `PLAN_CREATOR_PRICE_XOF` / `PLAN_PRO_PRICE_XOF` (10 000 / 25 000
 
 **Sécurité** : un pass n'est activé qu'après un webhook à la signature valide **et** une confirmation auprès de la passerelle (statut payé, montant et devise vérifiés). Les webhooks rejoués n'ont aucun effet. Si le webhook tarde, le client peut cliquer sur « Vérifier » dans **Facturation**. L'administration affiche les paiements et le chiffre d'affaires en FCFA et en MAD.
 
+### Aperçu gratuit et exports à l'unité
+
+Les offres Free, Creator et Pro conservent leurs quotas et avantages. Les résultats restent lisibles sur la plateforme ; un compte Free peut payer une seule fois par résultat pour télécharger la vidéo ou la chanson et publier la vidéo depuis la plateforme. Les exports inclus par les abonnements payants ne nécessitent pas de paiement supplémentaire. Le filigrane « Made with SOVID AI » est retiré du fichier vidéo téléchargé ou publié, sans changer l'aperçu.
+
+Tarifs de lancement : **vidéo 1 000 FCFA / 15 MAD**, **chanson 1 500 FCFA / 25 MAD**. L'administrateur peut modifier les prix, les quotas Free/Creator/Pro, la durée maximale, le nombre de corrections incluses ainsi que le nombre et la taille des images produit dans **Administration → Réglages commerciaux**. Les clients peuvent téléverser des images de leurs produits et les associer à une génération vidéo. Une correction incluse est disponible par vidéo et par chanson par défaut ; les limites sont administrables.
+
 **Vidéos supplémentaires** : quand le quota du mois est atteint, le client achète des packs de `CREDIT_PACK_VIDEOS` vidéos (10 par défaut ; `CREDIT_PACK_PRICE_XOF` = 5 000 FCFA, `CREDIT_PACK_PRICE_MAD` = 90 MAD par pack) dans **Abonnement**. Ces vidéos n'expirent pas et s'utilisent automatiquement au-delà du quota, dans la limite de durée de son offre. Une vidéo annulée ou en échec rend son crédit.
 
 **Rappels de fin de pass** : `PASS_REMINDER_DAYS` jours avant la fin d'un pass (3 par défaut), puis le jour de l'expiration, le client reçoit un e-mail avec un lien de renouvellement (une seule fois par période ; nécessite `PUBLIC_URL` et `SMTP_URL`).
