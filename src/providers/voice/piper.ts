@@ -33,7 +33,8 @@ export const piperVoiceUrl = (voice: string, base = VOICES_BASE): string => {
 export interface PiperOptions {
   dataDir: string;
   binary?: string;
-  voices: { fr: string; en: string };
+  /** French and English have a female (default) and a male voice. */
+  voices: { fr: string; en: string; frMale?: string; enMale?: string };
   lengthScale: number;
   autoDownload: boolean;
 }
@@ -89,8 +90,10 @@ export class PiperVoiceProvider implements VoiceProvider {
     return ['fr', 'en'].includes(language) || Boolean(getLanguage(language)?.piper);
   }
 
-  private async voiceModel(language: string, signal?: AbortSignal): Promise<string> {
-    const voice = language === 'fr' ? this.o.voices.fr : language === 'en' ? this.o.voices.en : getLanguage(language)?.piper;
+  private async voiceModel(language: string, signal?: AbortSignal, gender?: VoiceRequest['gender']): Promise<string> {
+    const male = gender === 'male';
+    const voice =
+      language === 'fr' ? (male && this.o.voices.frMale) || this.o.voices.fr : language === 'en' ? (male && this.o.voices.enMale) || this.o.voices.en : getLanguage(language)?.piper;
     if (!voice) throw new ProviderError(this.id, `no Piper voice for "${language}"`);
     if (voice.endsWith('.onnx')) {
       if (!fs.existsSync(voice)) throw new ProviderError(this.id, `voice model not found: ${voice}`);
@@ -108,7 +111,7 @@ export class PiperVoiceProvider implements VoiceProvider {
   }
 
   async synthesize(req: VoiceRequest): Promise<VoiceResult> {
-    const [bin, model] = await Promise.all([this.binary(req.signal), this.voiceModel(req.language, req.signal)]);
+    const [bin, model] = await Promise.all([this.binary(req.signal), this.voiceModel(req.language, req.signal, req.gender)]);
     const text = req.text.replace(/\*/g, '').replace(/\s+/g, ' ').trim();
     await new Promise<void>((resolve, reject) => {
       const child = spawn(bin, ['--model', model, '--output_file', req.outFile, '--length_scale', String(this.o.lengthScale), '--sentence_silence', '0.15'], {

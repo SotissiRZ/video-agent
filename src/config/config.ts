@@ -91,7 +91,9 @@ const EnvSchema = z.object({
   OPENAI_TTS_MODEL: z.preprocess(emptyToUndefined, z.string().default('gpt-4o-mini-tts')),
   OPENAI_TTS_VOICE: z.preprocess(emptyToUndefined, z.string().default('alloy')),
   ELEVENLABS_API_KEY: optionalString,
-  ELEVENLABS_VOICE_ID: z.preprocess(emptyToUndefined, z.string().default('21m00Tcm4TlvDq8ikWAM')),
+  /** Female and male voices. Premade voices work on every ElevenLabs plan (library voices need a paid one). */
+  ELEVENLABS_VOICE_ID: z.preprocess(emptyToUndefined, z.string().default('EXAVITQu4vr4xnSDxMaL')),
+  ELEVENLABS_VOICE_ID_MALE: z.preprocess(emptyToUndefined, z.string().default('JBFqnCBsd6RMkjVDRZzb')),
   ELEVENLABS_MODEL: z.preprocess(emptyToUndefined, z.string().default('eleven_multilingual_v2')),
   VIDEO_AGENT_SYSTEM_VOICE: optionalString,
   /** Piper (free neural voices). Data dir holds the binary and downloaded voices. */
@@ -99,6 +101,8 @@ const EnvSchema = z.object({
   PIPER_BINARY: optionalString,
   PIPER_VOICE_FR: z.preprocess(emptyToUndefined, z.string().default('fr_FR-siwis-medium')),
   PIPER_VOICE_EN: z.preprocess(emptyToUndefined, z.string().default('en_US-lessac-medium')),
+  PIPER_VOICE_FR_MALE: z.preprocess(emptyToUndefined, z.string().default('fr_FR-tom-medium')),
+  PIPER_VOICE_EN_MALE: z.preprocess(emptyToUndefined, z.string().default('en_US-ryan-medium')),
   /** >1 = slower speech. */
   PIPER_LENGTH_SCALE: z.preprocess((v) => (emptyToUndefined(v) === undefined ? 1 : Number(v)), z.number().min(0.5).max(2)),
   PIPER_AUTO_DOWNLOAD: bool(true),

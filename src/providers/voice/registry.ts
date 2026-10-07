@@ -14,7 +14,7 @@ const factories = new Map<string, Factory>();
 export const registerVoiceProvider = (id: string, factory: Factory) => factories.set(id, factory);
 
 registerVoiceProvider('elevenlabs', ({ env }) =>
-  env.ELEVENLABS_API_KEY ? new ElevenLabsVoiceProvider({ apiKey: env.ELEVENLABS_API_KEY, voiceId: env.ELEVENLABS_VOICE_ID, model: env.ELEVENLABS_MODEL }) : null,
+  env.ELEVENLABS_API_KEY ? new ElevenLabsVoiceProvider({ apiKey: env.ELEVENLABS_API_KEY, voiceId: env.ELEVENLABS_VOICE_ID, maleVoiceId: env.ELEVENLABS_VOICE_ID_MALE, model: env.ELEVENLABS_MODEL }) : null,
 );
 registerVoiceProvider('openai', ({ env }) =>
   env.OPENAI_API_KEY ? new OpenAIVoiceProvider({ apiKey: env.OPENAI_API_KEY, baseUrl: env.OPENAI_BASE_URL, model: env.OPENAI_TTS_MODEL, voice: env.OPENAI_TTS_VOICE }) : null,
@@ -34,7 +34,7 @@ registerVoiceProvider('piper', (config) => {
   return new PiperVoiceProvider({
     dataDir: piperDataDir(config),
     binary: env.PIPER_BINARY,
-    voices: { fr: env.PIPER_VOICE_FR, en: env.PIPER_VOICE_EN },
+    voices: { fr: env.PIPER_VOICE_FR, en: env.PIPER_VOICE_EN, frMale: env.PIPER_VOICE_FR_MALE, enMale: env.PIPER_VOICE_EN_MALE },
     lengthScale: env.PIPER_LENGTH_SCALE,
     autoDownload: env.PIPER_AUTO_DOWNLOAD,
   });

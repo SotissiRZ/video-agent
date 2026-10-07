@@ -195,6 +195,15 @@
                   <label class="switch"><input type="checkbox" id="subtitles" checked /><span class="track"></span><span data-i18n="create.subtitles"></span></label>
                   <label class="switch"><input type="checkbox" id="music" checked /><span class="track"></span><span data-i18n="create.music"></span></label>
                   <label class="switch"><input type="checkbox" id="stock" checked /><span class="track"></span><span data-i18n="create.stock"></span></label>
+                </div>
+                <div class="field" id="voiceChoiceField">
+                  <span class="label" data-i18n="create.voiceChoice"></span>
+                  <div class="segmented" id="voiceChoice" role="radiogroup">
+                    <label><input type="radio" name="voiceChoice" value="female" checked /><span data-i18n="create.voice.female"></span></label>
+                    <label><input type="radio" name="voiceChoice" value="male" /><span data-i18n="create.voice.male"></span></label>
+                    <label><input type="radio" name="voiceChoice" value="clone" /><span data-i18n="create.voice.clone"></span></label>
+                  </div>
+                  <span class="hint" id="voiceChoiceHint"></span>
                   <label class="switch" id="brandKitToggle" hidden><input type="checkbox" id="brandKit" checked /><span class="track"></span><span data-i18n="create.brandKit"></span></label>
                 </div>
                 <div id="capHints"></div>
@@ -264,6 +273,12 @@
                     <div class="form-stack" id="jobCorrection" style="margin-top: 14px" hidden>
                       <label class="field"><span class="label" data-i18n="job.correctTitle"></span><textarea class="textarea" id="jobCorrectionText" rows="2" maxlength="1000" data-i18n-placeholder="job.correctPlaceholder"></textarea></label>
                       <button type="button" class="btn btn-secondary btn-sm" id="correctJob"><i data-icon="edit" data-size="16"></i><span data-i18n="job.correct"></span></button>
+                    </div>
+                    <div class="form-stack" id="jobPronunciation" style="margin-top: 14px" hidden>
+                      <span class="label" data-i18n="job.pron.title"></span>
+                      <div class="pron-row"><input class="input" id="jobPronWord" maxlength="60" data-i18n-placeholder="job.pron.word" /><span class="pron-arrow">→</span><input class="input" id="jobPronSpoken" maxlength="120" data-i18n-placeholder="job.pron.spoken" /></div>
+                      <label class="switch"><input type="checkbox" id="jobPronSave" checked /><span class="track"></span><span data-i18n="job.pron.save"></span></label>
+                      <div class="input-group"><button type="button" class="btn btn-secondary btn-sm" id="fixPronunciation"><i data-icon="mic" data-size="16"></i><span data-i18n="job.pron.fix"></span></button><span class="hint" id="jobPronHint"></span></div>
                     </div>
                     <div id="jobWarnings" style="margin-top: 14px; display: grid; gap: 8px"></div>
 
@@ -401,6 +416,32 @@
                 </div>
               </div>
             </div>
+            <div class="card" id="voiceCard">
+              <div class="card-header"><div><h2 data-i18n="voice.title"></h2><p data-i18n="voice.subtitle"></p></div></div>
+              <div class="card-body form-stack">
+                <div id="voiceStatus"></div>
+                <div id="voiceLocked" class="alert info" hidden><i data-icon="info" data-size="16"></i><span data-i18n="voice.locked"></span></div>
+                <div id="voiceCloneForm" class="form-stack" hidden>
+                  <div class="field"><span class="label" data-i18n="voice.read"></span><p class="voice-script" data-i18n="voice.script"></p></div>
+                  <label class="field"><span class="label" data-i18n="voice.name"></span><input class="input" id="voiceName" maxlength="60" /></label>
+                  <div class="result-actions">
+                    <button type="button" class="btn btn-secondary" id="voiceRecord"><i data-icon="mic" data-size="16"></i><span id="voiceRecordLabel" data-i18n="voice.record"></span></button>
+                    <label class="btn btn-ghost"><i data-icon="download" data-size="16"></i><span data-i18n="voice.upload"></span><input type="file" id="voiceFile" accept="audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a,audio/webm,audio/ogg" hidden /></label>
+                  </div>
+                  <audio id="voicePreview" controls hidden style="width: 100%"></audio>
+                  <label class="switch"><input type="checkbox" id="voiceConsent" /><span class="track"></span><span data-i18n="voice.consent"></span></label>
+                  <button type="button" class="btn btn-primary" id="voiceSubmit" disabled><span data-i18n="voice.create"></span></button>
+                </div>
+              </div>
+            </div>
+            <form class="card" id="pronunciationForm">
+              <div class="card-header"><div><h2 data-i18n="pron.title"></h2><p data-i18n="pron.subtitle"></p></div></div>
+              <div class="card-body form-stack">
+                <div id="pronunciationRows" class="form-stack"></div>
+                <button type="button" class="btn btn-ghost btn-sm" id="pronunciationAdd" style="justify-self: start"><i data-icon="plus" data-size="16"></i><span data-i18n="pron.add"></span></button>
+              </div>
+              <div class="card-footer"><button class="btn btn-primary" type="submit" data-i18n="common.save"></button></div>
+            </form>
           </div>
         </section>
 

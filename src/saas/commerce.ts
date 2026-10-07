@@ -59,6 +59,8 @@ export const COMMERCE_DEFAULTS = {
   proMaxDurationSec: 300,
   correctionsPerVideo: 1,
   correctionsPerSong: 1,
+  /** Pronunciation fixes of a rendered video (only the sentences with the word are recorded again). */
+  pronunciationFixesPerVideo: 3,
   songPreviewSec: 30,
   maxProductImages: 4,
   maxProductImageMb: 5,
@@ -87,6 +89,7 @@ const CommerceSchema = z.object({
   proMaxDurationSec: z.number().int().min(3).max(600),
   correctionsPerVideo: z.number().int().min(0).max(5),
   correctionsPerSong: z.number().int().min(0).max(5),
+  pronunciationFixesPerVideo: z.number().int().min(0).max(10),
   songPreviewSec: z.number().int().min(10).max(120),
   maxProductImages: z.number().int().min(0).max(20),
   maxProductImageMb: z.number().int().min(1).max(20),

@@ -26,6 +26,7 @@ import { claimDuePublication, finishPublication, type PublicationRow } from './p
 import { productPhotos } from './product-images';
 import { planConfig, planLLM } from './plan-providers';
 import { UsageMeter } from '../core/usage';
+import { getVoiceClone, listPronunciations } from './voices';
 import { ensureCleanVideoExport } from './export';
 
 export interface WorkerOptions {
@@ -163,6 +164,16 @@ export class Worker {
       badge: plan.badge ? BADGE_TEXT : undefined,
       skipRender: false,
     };
+    // Narrator: the cloned voice (ElevenLabs) when asked for, else a female or male voice.
+    // The customer's pronunciation dictionary applies to every sentence.
+    const jobVoice = job.options as { voiceClone?: boolean; voiceGender?: 'female' | 'male' };
+    const clone = jobVoice.voiceClone ? await getVoiceClone(db, job.user_id) : undefined;
+    const dictionary = await listPronunciations(db, job.user_id);
+    options.voiceGender = jobVoice.voiceGender;
+    options.voiceId = clone?.voice_id;
+    options.pronunciations = dictionary;
+    if (clone && runConfig.env.ELEVENLABS_API_KEY) runConfig.env.VIDEO_AGENT_VOICE_PROVIDER = 'elevenlabs';
+    if (jobVoice.voiceClone && !clone) warnProvider('cloned voice deleted: using the standard voice');
     try {
       const llm = this.o.deps?.llm !== undefined ? this.o.deps.llm : planLLM(runConfig, commerce.providers[plan.id], warnProvider);
       const agent = new VideoAgent(runConfig, { logger, ...this.o.deps, llm, meter });
@@ -180,10 +191,18 @@ export class Worker {
         ? await db.one<JobRow>("SELECT * FROM jobs WHERE id = $1 AND user_id = $2 AND status = 'completed'", [job.correction_of, job.user_id])
         : undefined;
       let result: VideoResult | undefined;
-      if (source && fs.existsSync(source.dir)) {
+      const voice = { voiceGender: options.voiceGender, voiceId: options.voiceId, pronunciations: dictionary };
+      const fix = job.pronunciation_fix;
+      if (fix?.length) {
+        // A pronunciation fix only records the sentences again: no fallback to a new video.
+        const source = job.correction_of ? await db.one<JobRow>("SELECT * FROM jobs WHERE id = $1 AND user_id = $2 AND status = 'completed'", [job.correction_of, job.user_id]) : undefined;
+        if (!source || !fs.existsSync(source.dir)) throw new Error('La vidéo d’origine n’existe plus.');
+        const merged = [...dictionary.filter((entry) => !fix.some((f) => f.word.toLowerCase() === entry.word.toLowerCase())), ...fix];
+        result = await agent.revoice({ sourceDir: source.dir, outDir: job.dir, changed: fix, ...voice, pronunciations: merged, badge: options.badge }, runOptions);
+      } else if (source && fs.existsSync(source.dir)) {
         // A correction edits the rendered video; only a request that needs a new video goes through the full pipeline.
         try {
-          result = await agent.revise({ sourceDir: source.dir, outDir: job.dir, instruction: job.correction!, productImages: photos, badge: options.badge }, runOptions);
+          result = await agent.revise({ sourceDir: source.dir, outDir: job.dir, instruction: job.correction!, productImages: photos, badge: options.badge, ...voice }, runOptions);
         } catch (err) {
           if (controller.signal.aborted) throw err;
           logger.info(`job ${job.id}: targeted correction not possible (${errorMessage(err)}), regenerating the video`);

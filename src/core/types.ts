@@ -39,6 +39,11 @@ export interface VideoOptions {
   brandName?: string;
   brandColors?: string[];
   brandLogo?: string;
+  /** Narrator: female (default) or male; a cloned voice (ElevenLabs voice id) wins over both. */
+  voiceGender?: 'female' | 'male';
+  voiceId?: string;
+  /** Words the voice must say differently from how they are written. */
+  pronunciations?: Array<{ word: string; spoken: string }>;
 }
 
 export interface VideoRequest {

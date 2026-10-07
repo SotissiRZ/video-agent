@@ -16,7 +16,7 @@ import type { MusicProvider } from '../providers/music/types';
 import { AssetLibrary, importAsset } from '../assets/manager';
 import { placeProductPhotos, type ProductPhoto } from '../media/product-photos';
 import type { AppConfig } from '../config/config';
-import { errorMessage, StoryboardValidationError } from '../core/errors';
+import { errorMessage, StoryboardValidationError, VideoAgentError } from '../core/errors';
 import { createLogger, type Logger } from '../core/logger';
 import {
   PIPELINE_STEPS,
@@ -38,11 +38,12 @@ import { resolveImageProvider } from '../providers/image/registry';
 import type { ImageProvider } from '../providers/image/types';
 import { resolveVideoProvider } from '../providers/video/registry';
 import type { VideoProvider } from '../providers/video/types';
-import { resolveVoiceProvider } from '../providers/voice/registry';
+import { isPiperInstalled, resolveVoiceProvider } from '../providers/voice/registry';
+import { applyPronunciations, mentionsAny, type Pronunciation } from '../core/pronunciation';
 import { resolveStockProviders } from '../providers/stock/registry';
 import type { StockProvider } from '../providers/stock/types';
 import { MediaDirector, wantsMedia, type MediaCredit } from '../media/director';
-import type { VoiceProvider } from '../providers/voice/types';
+import type { VoiceGender, VoiceProvider } from '../providers/voice/types';
 import { renderStoryboard, type RenderOptions, type RenderResult } from '../render/renderer';
 import { StoryboardSchema, type Storyboard } from '../remotion/contract/storyboard';
 import { getStyle } from '../remotion/contract/styles';
@@ -73,6 +74,8 @@ export interface AgentDependencies {
   logger?: Logger;
   /** Records the paid services used (tokens, voice characters, music seconds, images) for cost tracking. */
   meter?: UsageMeter;
+  /** Voice used when the chosen one fails. `undefined` = Piper or MMS when available. */
+  voiceFallback?: VoiceProvider | null;
 }
 
 export interface RevisionRequest {
@@ -83,6 +86,32 @@ export interface RevisionRequest {
   instruction: string;
   productImages?: VideoRequest['productImages'];
   /** Corner badge of the account's current plan. */
+  badge?: string;
+  voiceGender?: VoiceGender;
+  voiceId?: string;
+  pronunciations?: Pronunciation[];
+}
+
+export interface VoiceoverOptions {
+  /** Only record these scenes (targeted correction); the others keep their voice-over. */
+  only?: Set<string>;
+  gender?: VoiceGender;
+  /** Customer's cloned voice. */
+  voiceId?: string;
+  pronunciations?: Pronunciation[];
+  fallback?: VoiceProvider | null;
+  onSwitch?: (voice: VoiceProvider) => void;
+}
+
+export interface RevoiceRequest {
+  sourceDir: string;
+  outDir: string;
+  /** The words just fixed: the scenes saying them are recorded again. */
+  changed: Pronunciation[];
+  /** The customer's whole dictionary (applied to every recorded sentence). */
+  pronunciations: Pronunciation[];
+  voiceGender?: VoiceGender;
+  voiceId?: string;
   badge?: string;
 }
 
@@ -359,7 +388,14 @@ export class VideoAgent {
       async (progress) => {
         let sb = storyboard;
         if (voiceProvider) {
-          sb = await this.generateVoiceover(sb, brief, paths, voiceProvider, warnings, progress, signal);
+          const fallback = this.voiceFallback(voiceProvider, brief.locale, warnings);
+          sb = await this.generateVoiceover(sb, brief, paths, voiceProvider, warnings, progress, signal, {
+            gender: options.voiceGender,
+            voiceId: options.voiceId,
+            pronunciations: options.pronunciations,
+            fallback,
+            onSwitch: (voice) => (voiceProvider = voice),
+          });
           // The narration sets the pace: no long silences between sentences.
           // A script with a range ("45 à 60 s") aims at its lower bound, filled exactly.
           const targetSec = script?.minSec && script.minSec <= brief.durationSec ? script.minSec : brief.durationSec;
@@ -458,27 +494,20 @@ export class VideoAgent {
     const warnings: string[] = [];
     const llm = this.metered(this.deps.llm !== undefined ? this.deps.llm : safeResolve(() => resolveLLM(this.config), warnings));
     if (!llm) throw new RevisionNotApplicable('no LLM available to edit the storyboard');
-    const source = jobPaths(request.sourceDir);
     const paths = jobPaths(request.outDir);
-    const { step, skip, timings } = this.stepper(runOptions);
-    const readJson = <T>(file: string): T => JSON.parse(fs.readFileSync(file, 'utf8')) as T;
+    const steps = this.stepper(runOptions);
+    const { step, skip } = steps;
 
-    const { original, brief, concept, photos } = await step(
+    const { original, brief, concept, sourceVoice, photos } = await step(
       'analyze',
       'Reprise de la vidéo à corriger',
       () => {
-        const original = StoryboardSchema.parse(readJson(source.storyboardFile));
-        const brief = readJson<VideoBrief>(source.briefFile);
-        const concept = readJson<VideoConcept>(source.conceptFile);
-        // Everything but the rendered outputs: media, voice-over and music are reused as they are.
-        const outputs = /^(video|export)\.|^export\.tmp\.|^poster\.jpg$|^captions\.json$|^job\.json$|^credits\.md$/;
-        fs.cpSync(source.dir, paths.dir, { recursive: true, filter: (file) => !(path.dirname(path.resolve(file)) === source.dir && outputs.test(path.basename(file))) });
-        ensureJobDirs(paths);
+        const loaded = this.copyRendered(request.sourceDir, paths);
         const photos = (request.productImages ?? [])
           .map((photo) => (typeof photo === 'string' ? { file: photo } : photo))
           .filter((photo) => fs.existsSync(photo.file))
           .map((photo) => ({ src: importAsset(photo.file, paths.publicDir, 'product'), description: photo.description || photo.name || path.basename(photo.file) }));
-        return { original, brief, concept, photos };
+        return { ...loaded, photos };
       },
       ({ original }) => `${original.scenes.length} scènes reprises`,
     );
@@ -498,30 +527,108 @@ export class VideoAgent {
       },
       ({ narrationChanged }) => `${narrationChanged.size} narration(s) modifiée(s)`,
     );
-    const { narrationChanged } = edited;
-    let storyboard: Storyboard = { ...edited.storyboard, brand: { ...edited.storyboard.brand, badge: request.badge } };
+    const storyboard: Storyboard = { ...edited.storyboard, brand: { ...edited.storyboard.brand, badge: request.badge } };
+    const voiced = await this.revoiceScenes(storyboard, original, brief, paths, edited.narrationChanged, sourceVoice, request, warnings, step, signal);
+    return this.finishCorrection({ ...voiced, original, brief, concept, paths, steps, warnings, signal, planner: `${llm.id}:${llm.model}`, info: { correctionOf: path.basename(path.resolve(request.sourceDir)), instruction: request.instruction } });
+  }
 
+  /**
+   * Pronunciation fix of a rendered video: the scenes whose narration contains one of the words are
+   * recorded again with the same voice, everything else (texts, images, music) stays as it is.
+   */
+  async revoice(request: RevoiceRequest, runOptions: RunOptions = {}): Promise<VideoResult> {
+    const { signal } = runOptions;
+    const warnings: string[] = [];
+    const paths = jobPaths(request.outDir);
+    const steps = this.stepper(runOptions);
+    const { step, skip } = steps;
+    const { original, brief, concept, sourceVoice } = await step('analyze', 'Reprise de la vidéo', () => this.copyRendered(request.sourceDir, paths), ({ original }) => `${original.scenes.length} scènes reprises`);
+    for (const id of ['concept', 'script', 'storyboard', 'scenes', 'assets', 'animations'] as const) skip(id, 'conservé de la vidéo d’origine');
+    if (!original.scenes.some((scene) => scene.voiceover)) throw new VideoAgentError('Cette vidéo n’a pas de voix-off.', 'Activez la voix-off pour une nouvelle vidéo.');
+    const affected = new Set(original.scenes.filter((scene) => mentionsAny(scene.narration.replace(/\*/g, ''), request.changed)).map((scene) => scene.id));
+    if (!affected.size) throw new VideoAgentError(`« ${request.changed.map((entry) => entry.word).join(', ')} » n’est pas prononcé dans cette vidéo.`, 'Vérifiez l’orthographe du mot tel qu’il est écrit dans le script.');
+    const storyboard: Storyboard = { ...original, brand: { ...original.brand, badge: request.badge } };
+    const voiced = await this.revoiceScenes(storyboard, original, brief, paths, affected, sourceVoice, request, warnings, step, signal);
+    return this.finishCorrection({ ...voiced, original, brief, concept, paths, steps, warnings, signal, planner: 'none', info: { correctionOf: path.basename(path.resolve(request.sourceDir)), pronunciations: request.changed } });
+  }
+
+  /** Copy a rendered job (not its outputs) to a new directory and read what a correction needs. */
+  private copyRendered(sourceDir: string, paths: JobPaths) {
+    const source = jobPaths(sourceDir);
+    const readJson = <T>(file: string): T => JSON.parse(fs.readFileSync(file, 'utf8')) as T;
+    const original = StoryboardSchema.parse(readJson(source.storyboardFile));
+    const brief = readJson<VideoBrief>(source.briefFile);
+    const concept = readJson<VideoConcept>(source.conceptFile);
+    const job = fs.existsSync(source.jobFile) ? readJson<{ providers?: { voice?: string } }>(source.jobFile) : {};
+    // Everything but the rendered outputs: media, voice-over and music are reused as they are.
+    const outputs = /^(video|export)\.|^export\.tmp\.|^poster\.jpg$|^captions\.json$|^job\.json$|^credits\.md$/;
+    fs.cpSync(source.dir, paths.dir, { recursive: true, filter: (file) => !(path.dirname(path.resolve(file)) === source.dir && outputs.test(path.basename(file))) });
+    ensureJobDirs(paths);
+    return { original, brief, concept, sourceVoice: job.providers?.voice && job.providers.voice !== 'none' ? job.providers.voice : undefined };
+  }
+
+  /** Record again the narration of some scenes, with the voice the video was made with. */
+  private async revoiceScenes(
+    storyboard: Storyboard,
+    original: Storyboard,
+    brief: VideoBrief,
+    paths: JobPaths,
+    scenes: Set<string>,
+    sourceVoice: string | undefined,
+    voiceOptions: { voiceGender?: VoiceGender; voiceId?: string; pronunciations?: Pronunciation[] },
+    warnings: string[],
+    step: ReturnType<VideoAgent['stepper']>['step'],
+    signal?: AbortSignal,
+  ): Promise<{ storyboard: Storyboard; voiceSource: string }> {
     const voiced = original.scenes.some((scene) => scene.voiceover);
-    let voiceSource = 'none';
-    storyboard = await step(
+    let voiceSource = voiced ? sourceVoice ?? 'reused' : 'none';
+    const result = await step(
       'audio',
       'Voix-off des passages modifiés',
       async (progress) => {
         if (!voiced) return recomputeDuration(storyboard);
-        let sb: Storyboard = { ...storyboard, scenes: storyboard.scenes.map((scene) => (narrationChanged.has(scene.id) ? { ...scene, voiceover: undefined } : scene)) };
-        if (narrationChanged.size) {
-          const voice = this.meteredVoice(this.deps.voice !== undefined ? this.deps.voice : safeResolve(() => resolveVoiceProvider(this.config, undefined, brief.locale), warnings));
+        let sb: Storyboard = { ...storyboard, scenes: storyboard.scenes.map((scene) => (scenes.has(scene.id) ? { ...scene, voiceover: undefined } : scene)) };
+        if (scenes.size) {
+          // The same voice as the rest of the video, so the corrected sentences do not stand out.
+          const voice = this.meteredVoice(
+            this.deps.voice !== undefined ? this.deps.voice : safeResolve(() => (sourceVoice ? resolveVoiceProvider(this.config, sourceVoice) : resolveVoiceProvider(this.config, undefined, brief.locale)), warnings),
+          );
           if (voice) {
             voiceSource = voice.id;
-            sb = await this.generateVoiceover(sb, brief, paths, voice, warnings, progress, signal, narrationChanged);
+            sb = await this.generateVoiceover(sb, brief, paths, voice, warnings, progress, signal, {
+              only: scenes,
+              gender: voiceOptions.voiceGender,
+              voiceId: voiceOptions.voiceId,
+              pronunciations: voiceOptions.pronunciations,
+              fallback: this.voiceFallback(voice, brief.locale, warnings),
+              onSwitch: (switched) => (voiceSource = switched.id),
+            });
           } else warnings.push('no voice available: the corrected sentences have no voice-over');
         }
         return paceScenesToVoiceover(sb, { targetFrames: original.format.durationInFrames });
       },
-      () => `voix-off : ${voiced && narrationChanged.size ? `${narrationChanged.size} scène(s) réenregistrée(s)` : 'inchangée'}`,
+      () => `voix-off : ${voiced && scenes.size ? `${scenes.size} scène(s) réenregistrée(s)` : 'inchangée'}`,
     );
+    return { storyboard: result, voiceSource };
+  }
 
-    storyboard = await step('subtitles', 'Sous-titres', () => ({ ...storyboard, subtitles: { ...storyboard.subtitles, cues: original.subtitles.cues.length ? buildSubtitleCues(storyboard) : [] } }));
+  /** Subtitles, project files, render and job.json of a corrected copy. */
+  private async finishCorrection(c: {
+    storyboard: Storyboard;
+    voiceSource: string;
+    original: Storyboard;
+    brief: VideoBrief;
+    concept: VideoConcept;
+    paths: JobPaths;
+    steps: ReturnType<VideoAgent['stepper']>;
+    warnings: string[];
+    signal?: AbortSignal;
+    planner: string;
+    info: Record<string, unknown>;
+  }): Promise<VideoResult> {
+    const { paths, brief, concept, warnings, signal } = c;
+    const { step, timings } = c.steps;
+    let storyboard = await step('subtitles', 'Sous-titres', () => ({ ...c.storyboard, subtitles: { ...c.storyboard.subtitles, cues: c.original.subtitles.cues.length ? buildSubtitleCues(c.storyboard) : [] } }));
     for (const file of [paths.srtFile, paths.vttFile]) fs.rmSync(file, { force: true });
     storyboard = await step('project', 'Mise à jour du projet Remotion', () => this.writeProject(storyboard, paths, brief, concept, path.basename(paths.videoFile(brief.outputFormat))));
     const render = await step('render', 'Rendu Remotion', (progress) => this.render(storyboard, paths, brief.outputFormat, progress, signal), (r) => `${path.basename(r.file)} (${r.durationSec.toFixed(1)}s)`);
@@ -531,12 +638,11 @@ export class VideoAgent {
       'Finalisation',
       (): VideoResult => {
         const credits: MediaCredit[] = storyboard.scenes.flatMap((scene) => (scene.media?.credit ? [{ sceneId: scene.id, provider: scene.media.credit.source, author: scene.media.credit.author, url: scene.media.credit.url ?? '' }] : []));
-        if (credits.length) fs.writeFileSync(path.join(paths.dir, 'credits.md'), ['# Crédits des médias', '', ...credits.map((c) => `- ${c.sceneId} : ${c.author} — ${c.provider} — ${c.url}`), ''].join('\n'));
-        const providers = { planner: `${llm.id}:${llm.model}`, voice: voiceSource, image: 'none', stock: 'none', video: 'none', music: 'reused' };
+        if (credits.length) fs.writeFileSync(path.join(paths.dir, 'credits.md'), ['# Crédits des médias', '', ...credits.map((cr) => `- ${cr.sceneId} : ${cr.author} — ${cr.provider} — ${cr.url}`), ''].join('\n'));
+        const providers = { planner: c.planner, voice: c.voiceSource, image: 'none', stock: 'none', video: 'none', music: 'reused' };
         writeJson(paths.jobFile, {
           id: paths.id,
-          correctionOf: source.id,
-          instruction: request.instruction,
+          ...c.info,
           status: 'completed',
           createdAt: new Date().toISOString(),
           videoFile: path.basename(render.file),
@@ -608,6 +714,11 @@ export class VideoAgent {
     return valid;
   }
 
+  /**
+   * Record the narration of every scene. When the voice fails (no credit, a voice the account cannot
+   * use, a network error), the whole video is recorded again with the fallback voice: a video always
+   * keeps a voice-over, and always a single one.
+   */
   private async generateVoiceover(
     storyboard: Storyboard,
     brief: VideoBrief,
@@ -616,21 +727,22 @@ export class VideoAgent {
     warnings: string[],
     progress: (p: number, msg?: string) => void,
     signal?: AbortSignal,
-    /** Only record these scenes (targeted correction); the others keep their voice-over. */
-    only?: Set<string>,
+    opts: VoiceoverOptions = {},
   ): Promise<Storyboard> {
     const fps = storyboard.format.fps;
-    const scenes = [...storyboard.scenes];
+    let scenes = [...storyboard.scenes];
+    let only = opts.only;
+    let voice = provider;
     let attempted = 0;
     for (let i = 0; i < scenes.length; i++) {
       const scene = scenes[i]!;
-      const text = scene.narration.replace(/\*/g, '').trim();
+      const text = applyPronunciations(scene.narration.replace(/\*/g, ''), opts.pronunciations).trim();
       if (!text || (only && !only.has(scene.id))) continue;
       attempted++;
       progress(i / scenes.length, `Voix-off ${i + 1}/${scenes.length}`);
       const outFile = path.join(paths.publicDir, 'voice', `${scene.id}.wav`);
       try {
-        let { durationSec } = await provider.synthesize({ text, language: brief.locale, outFile, signal });
+        let { durationSec } = await voice.synthesize({ text, language: brief.locale, outFile, signal, gender: opts.gender, voiceId: voice === provider ? opts.voiceId : undefined });
         // TTS engines pad sentences with silence: trim it so the voice starts right on cue.
         if (fs.existsSync(outFile)) {
           const trimmed = trimWavSilence(fs.readFileSync(outFile));
@@ -640,7 +752,17 @@ export class VideoAgent {
         scenes[i] = { ...scene, voiceover: { src: `voice/${scene.id}.wav`, durationInFrames: Math.max(1, Math.ceil(durationSec * fps)), volume: 1 } };
       } catch (err) {
         if (signal?.aborted) throw err;
-        warnings.push(`voice-over failed for ${scene.id}: ${errorMessage(err)}`);
+        warnings.push(`voice-over failed for ${scene.id} (${voice.id}): ${errorMessage(err)}`);
+        if (opts.fallback && voice !== opts.fallback) {
+          warnings.push(`voice-over recorded again with ${opts.fallback.id}`);
+          voice = opts.fallback;
+          opts.onSwitch?.(voice);
+          scenes = [...storyboard.scenes];
+          only = undefined;
+          attempted = 0;
+          i = -1;
+          continue;
+        }
         if (attempted === 1) {
           // Most likely a configuration problem: do not retry for every scene.
           warnings.push('voice-over disabled for this video');
@@ -649,6 +771,18 @@ export class VideoAgent {
       }
     }
     return { ...storyboard, scenes };
+  }
+
+  /** Free voice used when the chosen one fails: Piper when installed, else the MMS voices. */
+  private voiceFallback(primary: VoiceProvider | null, locale: string, warnings: string[]): VoiceProvider | null {
+    if (this.deps.voiceFallback !== undefined) return this.meteredVoice(this.deps.voiceFallback);
+    if (!primary || this.deps.voice !== undefined) return null;
+    for (const id of ['piper', 'mms']) {
+      if (id === primary.id || (id === 'piper' && !isPiperInstalled(this.config))) continue;
+      const candidate = safeResolve(() => resolveVoiceProvider(this.config, id), warnings);
+      if (candidate && candidate.supports?.(locale) !== false) return this.meteredVoice(candidate);
+    }
+    return null;
   }
 
   private async prepareMusic(

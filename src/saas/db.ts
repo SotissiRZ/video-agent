@@ -279,6 +279,25 @@ export const MIGRATIONS: string[] = [
   UPDATE commerce_settings SET settings = jsonb_set(settings, '{proMaxDurationSec}', '300') WHERE id = 1 AND settings->>'proMaxDurationSec' = '600';
   UPDATE commerce_settings SET settings = jsonb_set(settings, '{songPreviewSec}', '30') WHERE id = 1 AND settings->>'songPreviewSec' = '45';
   `,
+  // 11 — customer voices (cloned voice, pronunciation dictionary) and pronunciation fixes of a video
+  `
+  CREATE TABLE voice_clones (
+    user_id text PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    provider text NOT NULL,
+    voice_id text NOT NULL,
+    name text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  );
+  CREATE TABLE pronunciations (
+    user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    word text NOT NULL,
+    spoken text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, word)
+  );
+  ALTER TABLE jobs ADD COLUMN pronunciation_fix jsonb;
+  ALTER TABLE jobs ADD COLUMN pronunciation_fixes_used integer NOT NULL DEFAULT 0;
+  `,
 ];
 
 /** Apply pending migrations (serialized with an advisory lock: several containers may start together). */

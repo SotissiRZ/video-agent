@@ -56,6 +56,8 @@ import { makeAudioPreview } from '../audio/ffmpeg';
 import { UsageMeter } from '../core/usage';
 import { planConfig, planLLM } from './plan-providers';
 import { costReport } from './costs';
+import { mentionsAny } from '../core/pronunciation';
+import { audioExtension, deleteVoiceClone, elevenLabsCloner, getVoiceClone, listPronunciations, MAX_PRONUNCIATIONS, PronunciationSchema, replacePronunciations, saveVoiceClone, upsertPronunciation, type VoiceClone, type VoiceCloner } from './voices';
 
 export const CreateJobSchema = z.object({
   prompt: z.string().trim().min(3).max(4000),
@@ -77,6 +79,9 @@ export const CreateJobSchema = z.object({
   /** Apply the customer's brand kit (default: yes when one exists). */
   brandKit: z.boolean().optional(),
   productImageIds: z.array(z.string().uuid()).max(20).optional(),
+  /** Narrator: female or male voice, or the customer's cloned voice (paid plans). */
+  voiceGender: z.enum(['female', 'male']).optional(),
+  voiceClone: z.boolean().optional(),
 });
 
 const CaptionSchema = z.object({ title: z.string().max(300), caption: z.string().max(6000), hashtags: z.array(z.string().max(100)).max(30) });
@@ -103,6 +108,7 @@ const SongLyricsSchema = z.object({
 });
 const SongUpdateSchema = SongLyricsSchema;
 const VideoCorrectionSchema = z.object({ instruction: z.string().trim().min(5).max(1000) });
+const PronunciationFixSchema = PronunciationSchema.extend({ save: z.boolean().optional() });
 
 const parse = <T>(schema: z.ZodType<T>, data: unknown): T => {
   const r = schema.safeParse(data);
@@ -133,6 +139,8 @@ export interface SaasOptions {
   /** Test seam for the standalone song provider. */
   songGenerator?: (request: { lyrics: string; style: string; mood: string; durationSec: number }) => Promise<Buffer>;
   /** Test seam for song lyric drafting. */
+  /** Test seam: ElevenLabs voice cloning. */
+  voiceCloner?: VoiceCloner;
   /** Test seam: builds the free-listening excerpt of a song (ffmpeg by default). */
   songPreviewer?: (input: string, output: string, seconds: number) => Promise<void>;
   songLyricsGenerator?: (request: { prompt: string; style: string; mood: string }) => Promise<{ title: string; lyrics: string }>;
@@ -162,6 +170,9 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
   const signupLimiter = new RateLimiter(20, 60 * 60_000);
   const mailLimiter = new RateLimiter(5, 60 * 60_000);
   const songDraftLimiter = new RateLimiter(5, 60 * 60_000);
+  const voiceCloneLimiter = new RateLimiter(3, 24 * 60 * 60_000);
+  const cloner = (): VoiceCloner | null => options.voiceCloner ?? (config.env.ELEVENLABS_API_KEY ? elevenLabsCloner(config.env.ELEVENLABS_API_KEY) : null);
+  const publicClone = (clone: VoiceClone | undefined) => (clone ? { name: clone.name, createdAt: new Date(clone.created_at).toISOString() } : null);
   const mailer = options.mailer ?? createMailer(config, logger);
   /** E-mails are sent in the background: a slow SMTP server must not delay the response. */
   const sendMail = (kind: 'verify' | 'reset', user: Pick<User, 'id' | 'email' | 'locale'>, link: string) =>
@@ -472,8 +483,10 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         if (user.role === 'admin' && Number((await db.one<{ n: string | number }>("SELECT count(*) AS n FROM users WHERE role = 'admin'"))?.n ?? 0) <= 1) {
           throw new HttpError(409, 'Le dernier administrateur ne peut pas supprimer son compte', 'last_admin');
         }
+        const clone = await getVoiceClone(db, user.id);
         await db.query('DELETE FROM users WHERE id = $1', [user.id]);
         fs.rmSync(userJobsDir(config, user.id), { recursive: true, force: true });
+        if (clone) void cloner()?.remove(clone.voice_id).catch((err) => logger.warn(`voice ${clone.voice_id} not deleted on ElevenLabs: ${errorMessage(err)}`));
         return json(res, 200, { ok: true }, { 'set-cookie': sessionCookie('', 0, baseUrl(req).startsWith('https://')) });
       }
     }
@@ -592,6 +605,43 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       throw new HttpError(404, 'not found', 'not_found');
     }
 
+    if (resource === 'voice') {
+      if (!id && method === 'GET') {
+        return json(res, 200, {
+          clone: publicClone(await getVoiceClone(db, user.id)),
+          cloneAvailable: planOfUser(config, user).id !== 'free' && Boolean(cloner()),
+          pronunciations: await listPronunciations(db, user.id),
+        });
+      }
+      if (id === 'clone' && method === 'POST') {
+        if (planOfUser(config, user).id === 'free') throw new HttpError(402, 'Le clonage de voix est inclus dans les offres Créateur et Pro.', 'voice_clone_plan');
+        const voices = cloner();
+        if (!voices) throw new HttpError(503, 'Le clonage de voix n’est pas configuré.', 'voice_clone_unavailable');
+        // The owner must state it is their own voice (or that they have the speaker's permission).
+        if (url.searchParams.get('consent') !== '1') throw new HttpError(400, 'Confirmez qu’il s’agit de votre voix.', 'voice_clone_consent');
+        const mimeType = String(req.headers['content-type'] ?? '');
+        if (!audioExtension(mimeType)) throw new HttpError(400, 'Format accepté : MP3, WAV, M4A, WebM ou OGG.', 'voice_clone_format');
+        const audio = await readBuffer(req, 10 * 1024 * 1024);
+        if (audio.length < 30_000) throw new HttpError(400, 'Enregistrement trop court : parlez au moins une minute.', 'voice_clone_sample');
+        if (!voiceCloneLimiter.take(user.id)) throw new HttpError(429, 'Trop d’essais de clonage aujourd’hui, réessayez demain.', 'too_many_voice_clones');
+        const name = (url.searchParams.get('name') ?? '').trim().slice(0, 60) || user.name || 'Ma voix';
+        const previous = await getVoiceClone(db, user.id);
+        const voiceId = await voices.create({ name: `${name} · ${user.id.slice(0, 8)}`, audio, mimeType });
+        const clone = await saveVoiceClone(db, user.id, voiceId, name);
+        if (previous) void voices.remove(previous.voice_id).catch((err) => logger.warn(`voice ${previous.voice_id} not deleted on ElevenLabs: ${errorMessage(err)}`));
+        return json(res, 201, publicClone(clone));
+      }
+      if (id === 'clone' && method === 'DELETE') {
+        const removed = await deleteVoiceClone(db, user.id);
+        if (removed) await cloner()?.remove(removed.voice_id).catch((err) => logger.warn(`voice ${removed.voice_id} not deleted on ElevenLabs: ${errorMessage(err)}`));
+        return json(res, 200, { removed: Boolean(removed) });
+      }
+      if (id === 'pronunciations' && method === 'PUT') {
+        const body = parse(z.object({ entries: z.array(PronunciationSchema).max(MAX_PRONUNCIATIONS) }), await readJson(req, 64 * 1024));
+        return json(res, 200, await replacePronunciations(db, user.id, body.entries));
+      }
+    }
+
     if (resource === 'product-images') {
       if (!id && method === 'GET') {
         const images = await listProductImages(db, user.id);
@@ -631,6 +681,10 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         // Beyond the monthly quota, an extra-video credit is used (never for a video longer than the plan allows).
         const withCredit = Boolean(quota && quota.code !== 'duration' && (await useCredit(db, user.id)));
         if (quota && !withCredit) throw new HttpError(402, 'Quota atteint', `quota_${quota.code}`, { limit: quota.limit, plan: plan.id, credits: user.credits });
+        if (body.voiceClone) {
+          if (plan.id === 'free') throw new HttpError(402, 'Le clonage de voix est inclus dans les offres Créateur et Pro.', 'voice_clone_plan');
+          if (!(await getVoiceClone(db, user.id))) throw new HttpError(400, 'Enregistrez d’abord votre voix dans Marque › Ma voix.', 'voice_clone_missing');
+        }
         const { prompt, productImageIds: _productImageIds, ...rest } = body;
         const job = await createJob(db, config, user.id, prompt, { ...rest, style: rest.style === 'auto' ? undefined : rest.style, template: rest.template === 'auto' ? undefined : rest.template }, withCredit, productImageIds);
         worker?.poke();
@@ -653,9 +707,38 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
           style: job.options.style === 'auto' ? undefined : job.options.style,
           template: job.options.template === 'auto' ? undefined : job.options.template,
         };
-        const retried = await createJob(db, config, user.id, job.prompt, options, withCredit, job.product_image_ids ?? [], job.revision_of, job.export_paid, job.corrections_used, job.correction ? { instruction: job.correction, sourceId: job.correction_of } : null);
+        const retried = await createJob(db, config, user.id, job.prompt, options, withCredit, job.product_image_ids ?? [], job.revision_of, job.export_paid, job.corrections_used, job.correction ? { instruction: job.correction, sourceId: job.correction_of, pronunciationFix: job.pronunciation_fix ?? undefined } : null);
         worker?.poke();
         return json(res, 201, publicJob(retried));
+      }
+      if (sub === 'pronunciation' && method === 'POST') {
+        if (job.status !== 'completed') throw new HttpError(409, 'Seule une vidéo terminée peut être corrigée.', 'job_not_correctable');
+        if (!job.providers?.voice || job.providers.voice === 'none') throw new HttpError(409, 'Cette vidéo n’a pas de voix-off.', 'job_without_voice');
+        const settings = await getCommerceSettings(db);
+        const fix = parse(PronunciationFixSchema, await readJson(req));
+        const storyboard = JSON.parse(fs.readFileSync(path.join(job.dir, 'storyboard.json'), 'utf8')) as { scenes: Array<{ narration?: string }> };
+        if (!storyboard.scenes.some((scene) => mentionsAny((scene.narration ?? '').replace(/\*/g, ''), [fix]))) {
+          throw new HttpError(400, `« ${fix.word} » n’est pas prononcé dans cette vidéo. Écrivez le mot comme dans le script.`, 'pronunciation_word_missing');
+        }
+        const corrected = await db.tx(async (tx) => {
+          await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [user.id]);
+          const rootId = job.revision_of ?? job.id;
+          const root = await tx.one<JobRow>(
+            `UPDATE jobs SET pronunciation_fixes_used = pronunciation_fixes_used + 1
+             WHERE id = $1 AND user_id = $2 AND status = 'completed' AND pronunciation_fixes_used < $3 RETURNING *`,
+            [rootId, user.id, settings.pronunciationFixesPerVideo],
+          );
+          if (!root) throw new HttpError(409, 'Les corrections de prononciation de cette vidéo sont épuisées.', 'pronunciation_limit');
+          const entitled = root.export_paid || planOfUser(config, user).id !== 'free';
+          return createJob(tx, config, user.id, job.prompt, job.options, false, job.product_image_ids ?? [], root.id, entitled, root.corrections_used, {
+            instruction: `Prononciation : « ${fix.word} » → « ${fix.spoken} »`,
+            sourceId: job.id,
+            pronunciationFix: [{ word: fix.word, spoken: fix.spoken }],
+          });
+        });
+        if (fix.save) await upsertPronunciation(db, user.id, { word: fix.word, spoken: fix.spoken });
+        worker?.poke();
+        return json(res, 201, publicJob(corrected));
       }
       if (sub === 'correct' && method === 'POST') {
         if (job.status !== 'completed') throw new HttpError(409, 'Seule une vidéo terminée peut être corrigée.', 'job_not_correctable');

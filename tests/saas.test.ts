@@ -28,6 +28,8 @@ class Client {
   }
 }
 
+const clonedVoices: string[] = [];
+const removedVoices: string[] = [];
 const published: Array<{ platform: PlatformId; userId: string; videoFile: string }> = [];
 
 let base: string;
@@ -91,6 +93,15 @@ beforeAll(async () => {
     songLyricsGenerator: async () => {
       if (failSongLyricsGeneration) throw new Error('provider unavailable');
       return { title: 'Joyeux anniversaire', lyrics: '[Verse 1]\nLe soleil se lève pour toi\n[Chorus]\nJoyeux anniversaire Aïcha\n' };
+    },
+    voiceCloner: {
+      create: async ({ name }) => {
+        clonedVoices.push(name);
+        return `voice_${clonedVoices.length}`;
+      },
+      remove: async (voiceId) => {
+        removedVoices.push(voiceId);
+      },
     },
     songPreviewer: async (input, output) => {
       fs.writeFileSync(output, `preview of ${fs.readFileSync(input, 'utf8')}`);
@@ -292,6 +303,58 @@ describe('videos', () => {
     await stranger.json('POST', '/api/auth/signup', { email: 'photos-stranger@example.com', password: 'motdepasse9' });
     expect((await stranger.req('GET', `/api/product-images/${image.id}/file`)).status).toBe(404);
   });
+
+  it('clones the voice of paid customers, keeps their pronunciations and uses both in videos', async () => {
+    const owner = new Client(base);
+    await owner.json('POST', '/api/auth/signup', { email: 'voice@example.com', password: 'motdepasse9' });
+    const audio = Buffer.alloc(40_000, 1);
+    const upload = (query: string, type = 'audio/webm') => fetch(`${base}/api/voice/clone?${query}`, { method: 'POST', body: audio, headers: { cookie: owner.cookie, 'content-type': type } });
+
+    expect((await owner.json('GET', '/api/voice')).body).toEqual({ clone: null, cloneAvailable: false, pronunciations: [] });
+    expect((await (await upload('consent=1')).json()).code).toBe('voice_clone_plan');
+    expect((await owner.json('POST', '/api/jobs', { prompt: 'Une vidéo de 10 secondes pour un pressing', durationSec: 10, voiceClone: true })).body.code).toBe('voice_clone_plan');
+
+    const userId = (await owner.json('GET', '/api/me')).body.user.id;
+    await db.query("UPDATE users SET plan = 'creator' WHERE id = $1", [userId]);
+    expect((await (await upload('name=Moi')).json()).code).toBe('voice_clone_consent');
+    expect((await (await upload('consent=1', 'text/plain')).json()).code).toBe('voice_clone_format');
+    expect((await owner.json('POST', '/api/jobs', { prompt: 'Une vidéo de 10 secondes pour un pressing', durationSec: 10, voiceClone: true })).body.code).toBe('voice_clone_missing');
+    const created = await upload('consent=1&name=Moi');
+    expect(created.status).toBe(201);
+    expect(await created.json()).toMatchObject({ name: 'Moi' });
+    // A new recording replaces the previous voice, which is freed on ElevenLabs.
+    expect((await upload('consent=1&name=Moi%202')).status).toBe(201);
+    expect(removedVoices).toContain('voice_1');
+
+    const saved = await owner.json('PUT', '/api/voice/pronunciations', { entries: [{ word: 'Pressing', spoken: 'Prè-sing' }, { word: 'pressing', spoken: 'doublon' }] });
+    expect(saved.body).toEqual([{ word: 'pressing', spoken: 'doublon' }]);
+    expect((await owner.json('GET', '/api/voice')).body).toMatchObject({ clone: { name: 'Moi 2' }, cloneAvailable: true });
+
+    const job = await owner.json('POST', '/api/jobs', { prompt: 'Une vidéo de 10 secondes pour un pressing', durationSec: 10, voiceClone: true });
+    expect(job.status).toBe(201);
+    expect(job.body.options).toMatchObject({ voiceClone: true });
+    const done = await waitFor(async () => {
+      const result = await owner.json('GET', `/api/jobs/${job.body.id}`);
+      return ['completed', 'failed'].includes(result.body.status) ? result.body : undefined;
+    });
+    expect(done.status).toBe('completed');
+    // No voice service in this environment: there is no voice-over to fix.
+    expect((await owner.json('POST', `/api/jobs/${job.body.id}/pronunciation`, { word: 'pressing', spoken: 'x' })).body.code).toBe('job_without_voice');
+    // With a voice-over: the word must be spoken in the video, and fixes are counted per video.
+    await db.query(`UPDATE jobs SET providers = '{"voice":"piper"}' WHERE id = $1`, [job.body.id]);
+    expect((await owner.json('POST', `/api/jobs/${job.body.id}/pronunciation`, { word: 'Zanzibar', spoken: 'x' })).body.code).toBe('pronunciation_word_missing');
+    const narration = (await (await owner.req('GET', `/api/jobs/${job.body.id}/files/storyboard.json`)).json()).scenes.map((s: { narration: string }) => s.narration).join(' ');
+    const word = narration.replace(/\*/g, '').match(/\p{L}{5,}/u)![0];
+    const fix = await owner.json('POST', `/api/jobs/${job.body.id}/pronunciation`, { word, spoken: 'tchou', save: true });
+    expect(fix.status).toBe(201);
+    expect(fix.body).toMatchObject({ correction: `Prononciation : « ${word} » → « tchou »`, status: 'queued' });
+    expect((await owner.json('GET', `/api/jobs/${job.body.id}`)).body.pronunciationFixesUsed).toBe(1);
+    expect((await owner.json('GET', '/api/voice')).body.pronunciations).toContainEqual({ word, spoken: 'tchou' });
+    await waitFor(async () => (['completed', 'failed'].includes((await owner.json('GET', `/api/jobs/${fix.body.id}`)).body.status) ? true : undefined));
+
+    expect((await owner.json('DELETE', '/api/voice/clone')).body.removed).toBe(true);
+    expect(removedVoices).toContain('voice_2');
+  }, 30_000);
 
   it('applies the included correction once, as a new version of the video', async () => {
     const owner = new Client(base);

@@ -54,9 +54,9 @@ COPY .env.example ./
 # Navigateur de rendu.
 RUN if [ "$BROWSER" = "remotion" ]; then npx remotion browser ensure; fi
 
-# Piper : voix-off neuronale gratuite et locale (binaire + voix FR/EN préinstallés).
+# Piper : voix-off neuronale gratuite et locale (binaire + voix FR/EN, femme et homme, préinstallées).
 ARG TARGETARCH
-ARG PIPER_VOICES="fr_FR-siwis-medium en_US-lessac-medium"
+ARG PIPER_VOICES="fr_FR-siwis-medium fr_FR-tom-medium en_US-lessac-medium en_US-ryan-medium"
 ENV PIPER_DATA_DIR=/opt/piper
 RUN set -e; mkdir -p /opt/piper/voices; \
     case "${TARGETARCH:-amd64}" in arm64) PA=aarch64 ;; arm) PA=armv7l ;; *) PA=x86_64 ;; esac; \

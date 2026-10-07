@@ -510,3 +510,17 @@ dialog.viewer::backdrop { background: rgba(10, 14, 24, 0.55); }
 .product-add.is-alone { grid-column: 1 / -1; aspect-ratio: auto; min-height: 128px; font-size: 13px; }
 .product-add:hover, .product-add:focus-visible, .product-grid.is-dragover .product-add { border-color: var(--primary); color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, transparent); outline: none; }
 .product-add.is-busy { pointer-events: none; opacity: .6; }
+
+/* Voices */
+.segmented { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.segmented label { position: relative; cursor: pointer; }
+.segmented input { position: absolute; opacity: 0; pointer-events: none; }
+.segmented span { display: block; padding: 7px 14px; border-radius: 9px; font-size: 13px; font-weight: 600; color: var(--muted); transition: background .15s, color .15s; }
+.segmented input:checked + span { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
+.segmented input:focus-visible + span { outline: 2px solid var(--primary); outline-offset: 1px; }
+.segmented input:disabled + span { opacity: .45; cursor: not-allowed; }
+.pron-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+#jobPronunciation .pron-row { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+.pron-arrow { color: var(--muted); }
+.voice-script { margin: 0; padding: 12px 14px; border-radius: 10px; background: var(--surface-2); line-height: 1.6; }
+@media (max-width: 560px) { .pron-row, #jobPronunciation .pron-row { grid-template-columns: 1fr auto; } .pron-arrow { display: none; } }

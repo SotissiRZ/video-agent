@@ -14,7 +14,7 @@ const PROVIDER_INFO = {
 };
 const PAGES = ['create', 'songs', 'library', 'schedule', 'connections', 'brand', 'billing', 'account', 'admin'];
 
-const state = { me: null, publicConfig: null, options: null, connections: null, job: null, source: null, publishJobId: null, brand: null, song: null, songPoll: null, productImages: [] };
+const state = { voice: null, me: null, publicConfig: null, options: null, connections: null, job: null, source: null, publishJobId: null, brand: null, song: null, songPoll: null, productImages: [] };
 
 const addPasswordVisibilityControls = () => {
   document.querySelectorAll('input[type="password"]').forEach((input) => {
@@ -149,6 +149,7 @@ const startApp = async () => {
   loadConnectionsData().catch(() => undefined);
   loadBrandData().catch(() => undefined);
   loadProductImages().catch(() => undefined);
+  loadVoice().catch(() => undefined);
   refreshPendingCount();
   onRoute();
 };
@@ -571,6 +572,10 @@ $('createForm').addEventListener('submit', async (e) => {
     subtitles: $('subtitles').checked,
     music: $('music').checked,
     voice: $('voice').checked,
+    ...(() => {
+      const choice = document.querySelector('input[name=voiceChoice]:checked')?.value ?? 'female';
+      return choice === 'clone' ? { voiceClone: true } : { voiceGender: choice };
+    })(),
     stock: $('stock').checked,
     offline: $('offline').checked,
   };
@@ -655,6 +660,9 @@ const showJob = (job) => {
   $('shareWhatsapp').hidden = state.me.plan.id === 'free' && !job.exportPaid;
   renderExportActions($('videoExportPay'), 'video', job.id, job.exportPaid);
   $('jobCorrection').hidden = (job.correctionsUsed ?? 0) >= (state.me.commerce?.correctionsPerVideo ?? 1);
+  const pronLeft = (state.me.commerce?.pronunciationFixesPerVideo ?? 3) - (job.pronunciationFixesUsed ?? 0);
+  $('jobPronunciation').hidden = !job.providers?.voice || job.providers.voice === 'none' || pronLeft <= 0;
+  $('jobPronHint').textContent = t('job.pron.left', { n: pronLeft });
   $('fileStoryboard').href = `/api/jobs/${job.id}/files/storyboard.json`;
   $('fileScript').href = `/api/jobs/${job.id}/files/script.md`;
   $('fileSrt').href = `/api/jobs/${job.id}/files/subtitles.srt`;
@@ -713,6 +721,165 @@ $('correctJob').addEventListener('click', async () => {
     follow(job.id);
     loadLibrary().catch((err) => toast(errorText(err), 'error'));
     refreshMe().catch(() => undefined);
+  } catch (err) {
+    toast(errorText(err), 'error');
+  } finally {
+    button.disabled = false;
+  }
+});
+
+// ---- Voices: narrator choice, cloned voice, pronunciation dictionary ----------------------
+const loadVoice = async () => {
+  state.voice = await api('/api/voice');
+  renderVoiceChoice();
+  return state.voice;
+};
+
+const renderVoiceChoice = () => {
+  const clone = $('voiceChoice').querySelector('input[value="clone"]');
+  const available = Boolean(state.voice?.clone);
+  clone.disabled = !available;
+  if (!available && clone.checked) $('voiceChoice').querySelector('input[value="female"]').checked = true;
+  $('voiceChoiceHint').textContent = available ? t('create.voice.cloneReady', { name: state.voice.clone.name }) : state.voice?.cloneAvailable ? t('create.voice.cloneSetup') : '';
+  $('voiceChoiceField').hidden = !$('voice').checked;
+};
+$('voice').addEventListener('change', renderVoiceChoice);
+
+const renderVoiceCard = () => {
+  const v = state.voice;
+  if (!v) return;
+  $('voiceStatus').innerHTML = v.clone
+    ? `<div class="alert success">${icon('check', 16)}<span>${escapeHtml(t('voice.ready', { name: v.clone.name }))}</span><button type="button" class="btn btn-danger-ghost btn-sm" id="voiceDelete" style="margin-left: auto">${icon('trash', 14)}<span>${escapeHtml(t('common.delete'))}</span></button></div>`
+    : '';
+  $('voiceLocked').hidden = v.cloneAvailable || Boolean(v.clone);
+  $('voiceCloneForm').hidden = !v.cloneAvailable;
+  renderPronunciations(v.pronunciations);
+};
+
+const renderPronunciations = (entries) => {
+  const rows = entries.length ? entries : [{ word: '', spoken: '' }];
+  $('pronunciationRows').innerHTML = rows.map((entry) => `<div class="pron-row">
+    <input class="input" name="word" maxlength="60" value="${escapeHtml(entry.word)}" placeholder="${escapeHtml(t('job.pron.word'))}" />
+    <span class="pron-arrow">→</span>
+    <input class="input" name="spoken" maxlength="120" value="${escapeHtml(entry.spoken)}" placeholder="${escapeHtml(t('job.pron.spoken'))}" />
+    <button type="button" class="btn btn-ghost btn-icon btn-sm" data-pron-remove title="${escapeHtml(t('common.delete'))}" aria-label="${escapeHtml(t('common.delete'))}">${icon('trash', 14)}</button>
+  </div>`).join('');
+};
+
+const pronunciationEntries = () => [...$('pronunciationRows').querySelectorAll('.pron-row')]
+  .map((row) => ({ word: row.querySelector('[name=word]').value.trim(), spoken: row.querySelector('[name=spoken]').value.trim() }))
+  .filter((entry) => entry.word && entry.spoken);
+
+$('pronunciationAdd').addEventListener('click', () => {
+  renderPronunciations([...pronunciationEntries(), { word: '', spoken: '' }]);
+  [...$('pronunciationRows').querySelectorAll('[name=word]')].at(-1)?.focus();
+});
+$('pronunciationRows').addEventListener('click', (e) => {
+  const button = e.target.closest('[data-pron-remove]');
+  if (!button) return;
+  button.closest('.pron-row').remove();
+  if (!$('pronunciationRows').children.length) renderPronunciations([]);
+});
+$('pronunciationForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    state.voice.pronunciations = await api('/api/voice/pronunciations', { method: 'PUT', body: JSON.stringify({ entries: pronunciationEntries() }) });
+    renderPronunciations(state.voice.pronunciations);
+    toast(t('common.saved'), 'success');
+  } catch (err) {
+    toast(errorText(err), 'error');
+  }
+});
+
+// Voice sample: recorded in the browser or imported, then sent to the cloning service.
+const voiceSample = { blob: null, recorder: null, stream: null, timer: null, started: 0 };
+const setVoiceSample = (blob) => {
+  voiceSample.blob = blob;
+  $('voicePreview').hidden = !blob;
+  if (blob) $('voicePreview').src = URL.createObjectURL(blob);
+  $('voiceSubmit').disabled = !blob || !$('voiceConsent').checked;
+};
+$('voiceConsent').addEventListener('change', () => setVoiceSample(voiceSample.blob));
+$('voiceFile').addEventListener('change', (e) => {
+  const file = e.currentTarget.files[0];
+  if (file) setVoiceSample(file);
+  e.currentTarget.value = '';
+});
+$('voiceRecord').addEventListener('click', async () => {
+  if (voiceSample.recorder) {
+    voiceSample.recorder.stop();
+    return;
+  }
+  try {
+    voiceSample.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+  } catch {
+    return toast(t('voice.micDenied'), 'error');
+  }
+  const chunks = [];
+  const recorder = new MediaRecorder(voiceSample.stream);
+  voiceSample.recorder = recorder;
+  recorder.ondataavailable = (ev) => ev.data.size && chunks.push(ev.data);
+  recorder.onstop = () => {
+    clearInterval(voiceSample.timer);
+    voiceSample.stream.getTracks().forEach((track) => track.stop());
+    voiceSample.recorder = null;
+    $('voiceRecordLabel').textContent = t('voice.recordAgain');
+    setVoiceSample(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }));
+  };
+  recorder.start();
+  voiceSample.started = Date.now();
+  const tick = () => ($('voiceRecordLabel').textContent = t('voice.stop', { s: Math.round((Date.now() - voiceSample.started) / 1000) }));
+  tick();
+  voiceSample.timer = setInterval(tick, 1000);
+});
+$('voiceSubmit').addEventListener('click', async () => {
+  if (!voiceSample.blob) return;
+  const button = $('voiceSubmit');
+  button.disabled = true;
+  button.querySelector('span').textContent = t('voice.creating');
+  try {
+    const params = new URLSearchParams({ consent: '1', name: $('voiceName').value.trim() });
+    await api(`/api/voice/clone?${params}`, { method: 'POST', body: voiceSample.blob, headers: { 'content-type': voiceSample.blob.type || 'audio/webm' } });
+    setVoiceSample(null);
+    $('voiceConsent').checked = false;
+    await loadVoice();
+    renderVoiceCard();
+    toast(t('voice.created'), 'success');
+  } catch (err) {
+    toast(errorText(err), 'error');
+  } finally {
+    button.querySelector('span').textContent = t('voice.create');
+    button.disabled = !voiceSample.blob || !$('voiceConsent').checked;
+  }
+});
+$('voiceStatus').addEventListener('click', async (e) => {
+  if (!e.target.closest('#voiceDelete') || !confirm(t('voice.deleteConfirm'))) return;
+  try {
+    await api('/api/voice/clone', { method: 'DELETE' });
+    await loadVoice();
+    renderVoiceCard();
+  } catch (err) {
+    toast(errorText(err), 'error');
+  }
+});
+
+// Pronunciation fix of a finished video: only the sentences with the word are recorded again.
+$('fixPronunciation').addEventListener('click', async () => {
+  if (!state.job) return;
+  const word = $('jobPronWord').value.trim();
+  const spoken = $('jobPronSpoken').value.trim();
+  if (!word || !spoken) return toast(t('job.pron.missing'), 'error');
+  const button = $('fixPronunciation');
+  button.disabled = true;
+  try {
+    const job = await post(`/api/jobs/${encodeURIComponent(state.job.id)}/pronunciation`, { word, spoken, save: $('jobPronSave').checked });
+    $('jobPronWord').value = '';
+    $('jobPronSpoken').value = '';
+    if ($('jobPronSave').checked) loadVoice().catch(() => undefined);
+    history.replaceState(null, '', `#create?job=${job.id}`);
+    showJob(job);
+    follow(job.id);
+    loadLibrary().catch((err) => toast(errorText(err), 'error'));
   } catch (err) {
     toast(errorText(err), 'error');
   } finally {
@@ -1025,6 +1192,7 @@ const renderBrandColors = (colors) => {
 const brandColorValues = () => [...$('brandColors').querySelectorAll('[data-color-text]')].map((i) => i.value.trim().toUpperCase()).filter(Boolean);
 
 const loadBrand = async () => {
+  loadVoice().then(renderVoiceCard).catch((err) => toast(errorText(err), 'error'));
   const kit = await loadBrandData().catch(() => ({ name: '', colors: [] }));
   $('brandForm').name.value = kit.name ?? '';
   renderBrandColors(kit.colors ?? []);
@@ -1352,6 +1520,7 @@ const COMMERCE_FIELDS = [
   ['proMaxDurationSec', 'admin.commerce.proDuration'],
   ['correctionsPerVideo', 'admin.commerce.videoCorrections'],
   ['correctionsPerSong', 'admin.commerce.songCorrections'],
+  ['pronunciationFixesPerVideo', 'admin.commerce.pronunciationFixes'],
   ['songPreviewSec', 'admin.commerce.songPreview'],
   ['maxProductImages', 'admin.commerce.maxImages'],
   ['maxProductImageMb', 'admin.commerce.maxImageSize'],

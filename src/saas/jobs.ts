@@ -23,6 +23,9 @@ export interface JobRow {
   /** Targeted correction: the customer's instruction and the rendered job it edits. */
   correction: string | null;
   correction_of: string | null;
+  /** Pronunciation fix: the words to record again (the job copies `correction_of`). */
+  pronunciation_fix: Array<{ word: string; spoken: string }> | null;
+  pronunciation_fixes_used: number;
   created_at: Date | string;
   started_at: Date | string | null;
   finished_at: Date | string | null;
@@ -74,15 +77,16 @@ export const publicJob = (job: JobRow) => ({
   exportPaid: job.export_paid,
   correctionsUsed: job.corrections_used,
   correction: job.correction ?? undefined,
+  pronunciationFixesUsed: job.pronunciation_fixes_used,
 });
 export type PublicJob = ReturnType<typeof publicJob>;
 
 export const userJobsDir = (config: AppConfig, userId: string): string => path.join(config.paths.output, 'users', userId);
 
-export const createJob = async (db: Db, config: AppConfig, userId: string, prompt: string, options: VideoOptions, paidWithCredit = false, productImageIds: string[] = [], revisionOf: string | null = null, exportPaid = false, correctionsUsed = 0, correction: { instruction: string; sourceId: string | null } | null = null): Promise<JobRow> => {
+export const createJob = async (db: Db, config: AppConfig, userId: string, prompt: string, options: VideoOptions, paidWithCredit = false, productImageIds: string[] = [], revisionOf: string | null = null, exportPaid = false, correctionsUsed = 0, correction: { instruction: string; sourceId: string | null; pronunciationFix?: Array<{ word: string; spoken: string }> } | null = null): Promise<JobRow> => {
   // Timestamp + slug for readability, random suffix: several users may submit the same prompt.
   const id = `${newJobId(prompt.split(/\s+/).slice(0, 6).join(' '))}-${crypto.randomBytes(3).toString('hex')}`.slice(0, 100);
-  const rows = await db.query<JobRow>('INSERT INTO jobs (id, user_id, prompt, options, dir, paid_with_credit, product_image_ids, revision_of, export_paid, corrections_used, correction, correction_of) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *', [
+  const rows = await db.query<JobRow>('INSERT INTO jobs (id, user_id, prompt, options, dir, paid_with_credit, product_image_ids, revision_of, export_paid, corrections_used, correction, correction_of, pronunciation_fix) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *', [
     id,
     userId,
     prompt,
@@ -95,6 +99,7 @@ export const createJob = async (db: Db, config: AppConfig, userId: string, promp
     correctionsUsed,
     correction?.instruction ?? null,
     correction?.sourceId ?? null,
+    correction?.pronunciationFix ? JSON.stringify(correction.pronunciationFix) : null,
   ]);
   return rows[0]!;
 };

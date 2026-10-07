@@ -3,8 +3,14 @@ export interface VoiceRequest {
   language: string;
   /** Absolute path of the .wav file to write. */
   outFile: string;
+  /** Preferred voice; providers with a single voice for the language ignore it. */
+  gender?: VoiceGender;
+  /** Provider-specific voice (a customer's cloned voice on ElevenLabs). */
+  voiceId?: string;
   signal?: AbortSignal;
 }
+
+export type VoiceGender = 'female' | 'male';
 
 export interface VoiceResult {
   file: string;
