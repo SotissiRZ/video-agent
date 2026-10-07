@@ -1481,8 +1481,8 @@ export const TEMPLATE_NAMES = {
   en: { advertisement: 'Advertisement', 'product-presentation': 'Product presentation', tutorial: 'Tutorial', announcement: 'Announcement', 'social-media': 'Social media', 'app-demo': 'App demo', storytelling: 'Storytelling' },
 };
 export const STYLE_NAMES = {
-  fr: { modern: 'Moderne', vibrant: 'Vibrant', minimal: 'Minimal', corporate: 'Corporate', elegant: 'Élégant', playful: 'Ludique', tech: 'Tech', warm: 'Chaleureux' },
-  en: { modern: 'Modern', vibrant: 'Vibrant', minimal: 'Minimal', corporate: 'Corporate', elegant: 'Elegant', playful: 'Playful', tech: 'Tech', warm: 'Warm' },
+  fr: { modern: 'Moderne', vibrant: 'Vibrant', minimal: 'Minimal', corporate: 'Corporate', elegant: 'Élégant', playful: 'Ludique', tech: 'Tech', futuristic: 'Futuriste', warm: 'Chaleureux' },
+  en: { modern: 'Modern', vibrant: 'Vibrant', minimal: 'Minimal', corporate: 'Corporate', elegant: 'Elegant', playful: 'Playful', tech: 'Tech', futuristic: 'Futuristic', warm: 'Warm' },
 };
 
 export const getLang = () => (document.documentElement.lang === 'en' ? 'en' : 'fr');

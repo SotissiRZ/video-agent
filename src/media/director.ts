@@ -42,6 +42,8 @@ export interface MediaDirectorOptions {
   keywordLanguage: string;
   /** Up to this many visuals in a long scene (stock and local assets only). */
   shotsPerScene?: number;
+  /** Art direction of the style, appended to AI image prompts (e.g. futuristic sci-fi look). */
+  imageDirection?: string;
 }
 
 /** Shots for a scene of this length: one every ~2.5 s, at most `max`. */
@@ -276,9 +278,9 @@ export class MediaDirector {
   }
 
   private async fromAI(scene: Scene, plan: PlannedScene | undefined, brief: VideoBrief, paths: JobPaths, warnings: string[], signal?: AbortSignal): Promise<Media | undefined> {
-    const prompt =
-      plan?.visualPrompt ||
-      [scene.headline.replace(/\*/g, ''), brief.audience, brief.location, 'photorealistic, natural light, no text'].filter(Boolean).join(', ');
+    const direction = this.options.imageDirection;
+    const subject = plan?.visualPrompt || [scene.headline.replace(/\*/g, ''), brief.audience, brief.location, direction ? '' : 'photorealistic, natural light, no text'].filter(Boolean).join(', ');
+    const prompt = direction ? `${subject}. Style: ${direction}` : subject;
     const base = path.join(paths.publicDir, 'media', `${scene.id}-generated`);
     const { video, image } = this.deps;
     if (video && scene.kind === 'image' && this.generatedClips < this.options.maxGeneratedClips) {

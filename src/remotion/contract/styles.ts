@@ -23,10 +23,17 @@ export interface StyleDefinition {
   /** Default transition length in seconds. */
   transitionSeconds: number;
   subtitleStyle: 'boxed' | 'outline' | 'karaoke';
+  /** Art direction appended to AI image prompts so pictures match the style. */
+  imageDirection?: string;
+  /** Background of the closing call-to-action scene (default: gradient). */
+  ctaBackground?: Background['variant'];
+  /** Media sources for this style (default: VIDEO_AGENT_MEDIA_SOURCES). */
+  mediaSources?: Array<'assets' | 'stock' | 'ai'>;
 }
 
-const theme = (id: string, partial: Omit<Theme, 'id' | 'headingFont' | 'bodyFont'> & Partial<Theme>): Theme => ({
+const theme = (id: string, partial: Omit<Theme, 'id' | 'headingFont' | 'bodyFont' | 'glow'> & Partial<Theme>): Theme => ({
   id,
+  glow: false,
   headingFont: `'${HEADING_FONT}', '${HEADING_FONT_EXT}', '${ARABIC_FONT}', ${FALLBACK}`,
   bodyFont: `'${BODY_FONT}', '${BODY_FONT_EXT}', '${ARABIC_FONT}', ${FALLBACK}`,
   ...partial,
@@ -221,6 +228,39 @@ export const STYLES: Record<string, StyleDefinition> = {
     transitions: ['wipe', 'slide', 'fade'],
     transitionSeconds: 0.45,
     subtitleStyle: 'boxed',
+  },
+  futuristic: {
+    id: 'futuristic',
+    label: 'Futuristic',
+    description: 'Deep space blue with neon cyan and magenta, holographic grids, circuits and HUD interfaces, AI-generated sci-fi imagery.',
+    theme: theme('futuristic', {
+      palette: {
+        background: '#030712',
+        backgroundAlt: '#0B1240',
+        surface: 'rgba(56,189,248,0.10)',
+        primary: '#38BDF8',
+        secondary: '#E879F9',
+        accent: '#A78BFA',
+        text: '#F0F9FF',
+        mutedText: 'rgba(240,249,255,0.74)',
+        onPrimary: '#020617',
+      },
+      headingWeight: 800,
+      radius: 6,
+      motion: 'normal',
+      uppercaseHeadlines: true,
+      glow: true,
+    }),
+    backgrounds: ['hologram', 'circuit', 'particles', 'hud'],
+    ctaBackground: 'hud',
+    entrances: ['typewriter', 'blur', 'slide'],
+    transitions: ['wipe', 'fade', 'slide'],
+    transitionSeconds: 0.4,
+    subtitleStyle: 'outline',
+    imageDirection:
+      'futuristic high-tech scene, holographic interface, glowing neon cyan and magenta light, sleek reflective surfaces, volumetric lighting, cinematic sci-fi concept art, ultra detailed, no text, no watermark',
+    // Stock photos would break the look: generated images, then the animated sci-fi backgrounds.
+    mediaSources: ['assets', 'ai'],
   },
   warm: {
     id: 'warm',

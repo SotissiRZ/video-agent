@@ -316,7 +316,8 @@ export class VideoAgent {
     const director = new MediaDirector(
       { library, stock: stockProviders, image: imageProvider, video: videoProvider, logger: this.logger },
       {
-        sources: this.config.env.VIDEO_AGENT_MEDIA_SOURCES,
+        sources: style.mediaSources ?? this.config.env.VIDEO_AGENT_MEDIA_SOURCES,
+        imageDirection: style.imageDirection,
         coverage: options.mediaCoverage ?? this.config.env.VIDEO_AGENT_MEDIA_COVERAGE,
         stockVideos: this.config.env.VIDEO_AGENT_STOCK_VIDEOS,
         maxGeneratedImages: this.config.env.VIDEO_AGENT_MAX_GENERATED_IMAGES,

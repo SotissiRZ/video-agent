@@ -110,3 +110,30 @@ describe('pronunciation fix of a rendered video', () => {
     })).rejects.toThrow(/n’est pas prononcé/);
   });
 });
+
+describe('futuristic style', () => {
+  it('draws sci-fi backgrounds, glows and asks the image service for a matching look', async () => {
+    const prompts: string[] = [];
+    const image = {
+      id: 'fake-image',
+      async generate({ prompt, outFileBase }: { prompt: string; outFileBase: string }) {
+        prompts.push(prompt);
+        fs.writeFileSync(`${outFileBase}.png`, 'png');
+        return { file: `${outFileBase}.png` };
+      },
+    };
+    const result = await new VideoAgent(testConfig({ VIDEO_AGENT_MUSIC: 'none' }), { renderer: fakeRenderer, logger, llm: null, voice: null, image, stock: [] }).run({
+      prompt: 'Une vidéo futuriste de 15 secondes pour une application de paiement',
+      options: { outDir: path.join(tmpDir(), 'futur'), mediaCoverage: 'all' },
+    });
+    const storyboard = readStoryboard(result.jobDir);
+    expect(storyboard.meta.style).toBe('futuristic');
+    expect(storyboard.theme.glow).toBe(true);
+    const variants = storyboard.scenes.map((s) => s.background.variant);
+    expect(variants.every((v) => ['hologram', 'circuit', 'particles', 'hud', 'media'].includes(v))).toBe(true);
+    expect(prompts.length).toBeGreaterThan(0);
+    expect(prompts.every((p) => p.includes('holographic interface') && !p.includes('photorealistic, natural light'))).toBe(true);
+    // No stock photos in this style: generated images or animated backgrounds only.
+    expect(storyboard.scenes.every((s) => !s.media || s.media.origin.startsWith('ai:') || s.media.origin.startsWith('user'))).toBe(true);
+  });
+});

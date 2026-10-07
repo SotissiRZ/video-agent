@@ -75,7 +75,8 @@ export const AnimatedText: React.FC<Props> = ({
             </span>
           );
         })}
-        <span style={{ opacity: cursorVisible ? 1 : 0, color: emphasisColor }}>▍</span>
+        {/* Drawn, not a glyph: "▍" is missing from the fonts and rendered as an empty box. */}
+        <span style={{ display: 'inline-block', width: '0.08em', height: '0.9em', marginLeft: '0.08em', verticalAlign: '-0.08em', background: emphasisColor, opacity: cursorVisible ? 1 : 0 }} />
       </p>
     );
   }

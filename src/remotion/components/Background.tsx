@@ -2,6 +2,7 @@ import React from 'react';
 import { AbsoluteFill, interpolate, useCurrentFrame, useVideoConfig } from 'remotion';
 import type { Background as BackgroundSpec, Theme } from '../contract/storyboard';
 import { seeded, withAlpha } from '../utils';
+import { FuturisticBackground } from './FuturisticBackground';
 
 interface Props {
   spec: BackgroundSpec;
@@ -23,6 +24,11 @@ export const Background: React.FC<Props> = ({ spec, theme, seed }) => {
   );
 
   switch (spec.variant) {
+    case 'circuit':
+    case 'hologram':
+    case 'particles':
+    case 'hud':
+      return <FuturisticBackground variant={spec.variant} theme={theme} seed={seed} />;
     case 'shapes':
       return (
         <AbsoluteFill>

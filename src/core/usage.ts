@@ -88,10 +88,13 @@ export class UsageMeter {
   image(provider: ImageProvider, model?: string): ImageProvider {
     const meter = this;
     return {
-      id: provider.id,
+      // A fallback chain changes provider after a failure: read it at each call.
+      get id() {
+        return provider.id;
+      },
       async generate(request) {
         const result = await provider.generate(request);
-        meter.record({ kind: 'image', provider: provider.id, model, images: 1 });
+        meter.record({ kind: 'image', provider: provider.id, model: provider.id === 'huggingface' || provider.id === 'cloudflare' ? undefined : model, images: 1 });
         return result;
       },
     };

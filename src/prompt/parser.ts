@@ -181,7 +181,9 @@ const STYLE_HINTS: Record<string, string[]> = {
   corporate: ['corporate', 'professionnel', 'professionnelle', 'professional', 'institutionnel', 'institutionnelle', 'b2b', 'serieux', 'serieuse'],
   elegant: ['elegant', 'elegante', 'luxe', 'luxury', 'premium', 'chic', 'haut de gamme', 'sombre', 'dark', 'cinematique', 'cinematic'],
   playful: ['ludique', 'playful', 'fun', 'amusant', 'amusante', 'enfants', 'kids', 'cartoon', 'joyeux', 'joyeuse'],
-  tech: ['tech', 'technologie', 'technology', 'technologique', 'futuriste', 'futuristic', 'saas', 'logiciel', 'software', 'digital', 'numerique', 'neon'],
+  // Opt-in only: unambiguous words ("notre futur magasin" must stay natural).
+  futuristic: ['futuriste', 'futuristic', 'sci-fi', 'science-fiction', 'science fiction', 'cyberpunk', 'hologramme', 'holographique', 'holographic', 'high-tech', 'neon'],
+  tech: ['tech', 'technologie', 'technology', 'technologique', 'saas', 'logiciel', 'software', 'digital', 'numerique'],
   warm: ['chaleureux', 'chaleureuse', 'warm', 'humain', 'humaine', 'convivial', 'conviviale', 'familial', 'authentique', 'authentic'],
 };
 

@@ -42,7 +42,7 @@ export const MediaSchema = z.object({
 export type Media = z.infer<typeof MediaSchema>;
 
 export const BackgroundSchema = z.object({
-  variant: z.enum(['gradient', 'shapes', 'grid', 'waves', 'spotlight', 'media']).default('gradient'),
+  variant: z.enum(['gradient', 'shapes', 'grid', 'waves', 'spotlight', 'media', 'circuit', 'hologram', 'particles', 'hud']).default('gradient'),
   /** Optional palette override for this scene. */
   from: z.string().optional(),
   to: z.string().optional(),
@@ -113,6 +113,8 @@ export const ThemeSchema = z.object({
   radius: z.number().min(0).default(24),
   motion: z.enum(['calm', 'normal', 'energetic']).default('normal'),
   uppercaseHeadlines: z.boolean().default(false),
+  /** Neon halo around the text (futuristic style). */
+  glow: z.boolean().default(false),
 });
 export type Theme = z.infer<typeof ThemeSchema>;
 

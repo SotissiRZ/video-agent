@@ -77,6 +77,14 @@ describe('prompt parser', () => {
     expect(extractKeywords('Vidéo pour une marque de café')).toEqual(['marque', 'cafe']);
   });
 
+  it('uses the futuristic style only when the request asks for it', () => {
+    expect(parsePrompt('Une vidéo futuriste pour notre application de paiement').styleHints[0]).toBe('futuristic');
+    expect(parsePrompt('Pub sci-fi avec hologrammes pour un casque VR').styleHints).toContain('futuristic');
+    // Natural requests stay natural, even when they talk about the future.
+    expect(parsePrompt('Présente notre futur magasin de fruits bio à Dakar').styleHints).not.toContain('futuristic');
+    expect(parsePrompt('Vidéo chaleureuse pour une boulangerie familiale').styleHints).toEqual(['warm']);
+  });
+
   it('detects language', () => {
     expect(detectLanguage('Create a video for our new product')).toBe('en');
     expect(detectLanguage('Fais une vidéo pour notre nouveau produit')).toBe('fr');

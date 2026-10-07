@@ -48,6 +48,8 @@ export const SceneShell: React.FC<SceneProps & { children: React.ReactNode; just
           justifyContent: justify,
           alignItems: align,
           gap: layout.unit * 0.035,
+          // Inherited by every text of the scene.
+          textShadow: theme.glow ? `0 0 ${layout.unit * 0.012}px ${withAlpha(theme.palette.primary, 0.75)}, 0 0 ${layout.unit * 0.035}px ${withAlpha(theme.palette.primary, 0.35)}` : undefined,
         }}
       >
         {children}
