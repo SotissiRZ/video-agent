@@ -7,6 +7,7 @@ interface PexelsPhoto {
   height: number;
   url: string;
   photographer: string;
+  alt?: string | null;
   src: { original: string; large2x: string; large: string; portrait: string; landscape: string };
 }
 interface PexelsVideo {
@@ -18,6 +19,9 @@ interface PexelsVideo {
   user: { name: string };
   video_files: Array<{ link: string; width: number | null; height: number | null; file_type: string; quality: string | null }>;
 }
+
+/** "https://www.pexels.com/video/woman-typing-on-laptop-856973/" → "woman typing on laptop". */
+const slugOf = (url: string): string => (/\/(?:photo|video)\/([^/]+?)(?:-\d+)?\/?$/.exec(url)?.[1] ?? '').replace(/-/g, ' ');
 
 const LOCALES: Record<string, string> = { fr: 'fr-FR', en: 'en-US', es: 'es-ES', pt: 'pt-BR', de: 'de-DE' };
 
@@ -43,6 +47,7 @@ export class PexelsProvider implements StockProvider {
         author: p.photographer,
         pageUrl: p.url,
         extension: 'jpg',
+        description: p.alt || slugOf(p.url),
       }));
     }
     const res = await httpJson<{ videos?: PexelsVideo[] }>(`https://api.pexels.com/videos/search?${params}`, { provider: this.id, headers, signal: q.signal, timeoutMs: 30_000 });
@@ -52,7 +57,7 @@ export class PexelsProvider implements StockProvider {
         .map((f) => ({ ...f, width: f.width!, height: f.height! }));
       const file = pickRendition(files, q.minShortSide);
       if (!file) return [];
-      return [{ provider: this.id, id: `pexels-video-${v.id}`, kind: 'video' as const, downloadUrl: file.link, width: file.width, height: file.height, durationSec: v.duration, author: v.user.name, pageUrl: v.url, extension: 'mp4' }];
+      return [{ provider: this.id, id: `pexels-video-${v.id}`, kind: 'video' as const, downloadUrl: file.link, width: file.width, height: file.height, durationSec: v.duration, author: v.user.name, pageUrl: v.url, extension: 'mp4', description: slugOf(v.url) }];
     });
   }
 }

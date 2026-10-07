@@ -42,6 +42,10 @@ export interface MediaDirectorOptions {
   keywordLanguage: string;
   /** Up to this many visuals in a long scene (stock and local assets only). */
   shotsPerScene?: number;
+  /** Visual keywords are complete searches (user scripts): one query each, never merged. */
+  phraseKeywords?: boolean;
+  /** English words a stock result's description must not contain ("Éviter les robots…"). */
+  avoidTerms?: string[];
 }
 
 /** Shots for a scene of this length: one every ~2.5 s, at most `max`. */
@@ -94,6 +98,8 @@ export const buildStockQueries = (
   keywordLanguage: string,
   /** Industry searches for this scene (see detectDomain), in English. */
   domainQueries: string[] = [],
+  /** Keywords are complete searches ("analytics dashboard laptop"): one query each. */
+  phrases = false,
 ): Array<{ query: string; language: string }> => {
   const brandWords = new Set(normalize(brief.brand).split(/\s+/).filter(Boolean));
   const clean = (words: string[]) => {
@@ -111,7 +117,11 @@ export const buildStockQueries = (
     const query = words.join(' ').trim();
     if (query && !queries.some((q) => q.query === query)) queries.push({ query, language });
   };
-  if (keywordLanguage === 'en') {
+  if (phrases) {
+    // Script keywords are ready-made searches: mixing two of them ("network connection logo") finds nothing relevant.
+    (plan?.visualKeywords ?? []).slice(0, 4).forEach((k) => push(clean([k]), keywordLanguage));
+    domainQueries.forEach((q) => push(q.split(' '), 'en'));
+  } else if (keywordLanguage === 'en') {
     // LLM keywords are specific to the scene: they come first, the industry searches back them up.
     push(planned.slice(0, 3), 'en');
     push(planned.slice(0, 2), 'en');
@@ -125,6 +135,23 @@ export const buildStockQueries = (
   const hint = ROLE_VISUAL_HINTS[scene.role];
   if (hint) push(hint.split(' '), 'en');
   return queries.slice(0, 6);
+};
+
+const stem = (w: string) => w.slice(0, 4);
+const words = (text: string) => normalize(text).split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
+
+/**
+ * Whether a stock result fits its search, judged on the provider's description (alt text, tags,
+ * page slug): it must share a word with the query and contain no avoided term. Search engines
+ * return loosely related pictures (a car dashboard for "analytics dashboard laptop").
+ * Results without any description are accepted.
+ */
+export const isRelevant = (result: Pick<StockResult, 'description'>, query: string, avoid: string[] = []): boolean => {
+  const described = words(result.description ?? '');
+  if (!described.length) return true;
+  const stems = new Set(described.map(stem));
+  if (avoid.some((term) => described.some((w) => w.startsWith(normalize(term))))) return false;
+  return words(query).some((w) => stems.has(stem(w)));
 };
 
 export const wantsMedia = (scene: Scene, coverage: MediaCoverage): boolean =>
@@ -230,7 +257,7 @@ export class MediaDirector {
     // Two industry searches per scene, rotating so that scenes get different pictures.
     const n = this.domain.queries.length;
     const domainQueries = [this.domain.queries[(this.sceneIndex * 2) % n]!, this.domain.queries[(this.sceneIndex * 2 + 1) % n]!];
-    const queries = buildStockQueries(scene, plan, brief, this.options.keywordLanguage, domainQueries);
+    const queries = buildStockQueries(scene, plan, brief, this.options.keywordLanguage, domainQueries, this.options.phraseKeywords);
 
     for (const { query, language } of queries) {
       for (const kind of kinds) {
@@ -248,7 +275,7 @@ export class MediaDirector {
             this.handleProviderError(provider.id, err, warnings);
             continue;
           }
-          const result = results.find((r) => !this.used.has(r.id));
+          const result = results.find((r) => !this.used.has(r.id) && (language !== 'en' || isRelevant(r, query, this.options.avoidTerms)));
           if (!result) continue;
           try {
             const file = path.join(paths.publicDir, 'media', `${scene.id}-${provider.id}-${++this.downloads}.${result.extension}`);

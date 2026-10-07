@@ -31,7 +31,7 @@ import type { LLMProvider } from '../llm/types';
 import { Planner } from '../planning/planner';
 import { buildBrief } from '../planning/brief';
 import { selectSlots } from '../planning/slots';
-import { parsePrompt } from '../prompt/parser';
+import { parseAvoidTerms, parsePrompt } from '../prompt/parser';
 import { resolveImageProvider } from '../providers/image/registry';
 import type { ImageProvider } from '../providers/image/types';
 import { resolveVideoProvider } from '../providers/video/registry';
@@ -269,6 +269,8 @@ export class VideoAgent {
         // LLM scripts produce English visual keywords; procedural ones are in the brief's language.
         keywordLanguage: scriptSource === 'procedural' ? brief.language : 'en',
         shotsPerScene: this.config.env.VIDEO_AGENT_SHOTS_PER_SCENE,
+        phraseKeywords: scriptSource === 'script',
+        avoidTerms: parseAvoidTerms(request.prompt),
       },
     );
     storyboard = await step(

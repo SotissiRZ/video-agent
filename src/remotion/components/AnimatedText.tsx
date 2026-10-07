@@ -69,9 +69,10 @@ export const AnimatedText: React.FC<Props> = ({
         {parseEmphasis(text).map((seg, i) => {
           const visible = seg.text.slice(0, Math.max(0, remaining));
           remaining -= seg.text.length;
+          // Words stay whole while typing: no line break at a hyphen ("ZSR-TechNum").
           return (
             <span key={i} style={{ color: seg.emphasis ? emphasisColor : color }}>
-              {visible}
+              {visible.split(/(\s+)/).map((word, wi) => (/\S/.test(word) ? <span key={wi} style={{ whiteSpace: 'nowrap' }}>{word}</span> : word))}
             </span>
           );
         })}

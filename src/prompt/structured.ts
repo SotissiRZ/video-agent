@@ -102,52 +102,60 @@ export const parseStructuredPrompt = (text: string): StructuredScript | undefine
 
 // ---- From the script to planned scenes ------------------------------------------------------
 
-/** French (and English) visual words → English stock-photo terms. Longest phrases first. */
+/**
+ * French (and English) visual words → English stock-photo searches. Longest phrases first.
+ * Each search is a complete, unambiguous query: "dashboard" alone brings car dashboards,
+ * "logo design" brings famous brand logos and "artificial intelligence" brings robots.
+ */
 const VISUAL_LEXICON: Array<[RegExp, string]> = [
-  [/intelligence artificielle|\bia\b|artificial intelligence|\bai\b/, 'artificial intelligence'],
-  [/machine learning|apprentissage automatique/, 'machine learning'],
-  [/computer vision|vision par ordinateur/, 'computer vision camera'],
-  [/data science|analyse de donnees|data analys/, 'data analytics'],
-  [/tableau de bord|dashboard/, 'dashboard'],
-  [/bases? de donnees|database/, 'database server'],
-  [/site web|site internet|website/, 'website design'],
-  [/application|appli\b|\bapp\b/, 'mobile app'],
-  [/responsive/, 'responsive design'],
-  [/ordinateur portable|laptop/, 'laptop'],
-  [/ordinateur|computer/, 'computer'],
-  [/smartphone|telephone|mobile/, 'smartphone'],
-  [/interface/, 'user interface'],
-  [/donnees|data\b/, 'data'],
-  [/connexion|reseau|network/, 'network connection'],
-  [/automatis|workflow/, 'workflow automation'],
-  [/formulaire|form\b/, 'online form'],
-  [/notification/, 'notification'],
-  [/synchronis/, 'cloud sync'],
-  [/logo/, 'logo design'],
-  [/affiche|poster/, 'poster design'],
-  [/banniere|banner/, 'banner design'],
-  [/flyer|prospectus/, 'flyer print'],
-  [/powerpoint|presentation|pptx/, 'presentation slides'],
-  [/pdf|document/, 'document'],
-  [/reseaux sociaux|social media|contenus/, 'social media content'],
-  [/billetterie|ticket/, 'ticketing app'],
-  [/saas|plateforme|platform/, 'saas platform'],
-  [/analytique|analytics/, 'analytics charts'],
-  [/code|developpe|developer/, 'developer coding'],
+  [/intelligence artificielle|\bia\b|artificial intelligence|\bai\b/, 'ai data visualization screen'],
+  [/machine learning|apprentissage automatique/, 'machine learning code screen'],
+  [/computer vision|vision par ordinateur/, 'object detection camera screen'],
+  [/data science|analyse de donnees|data analys/, 'data analytics charts screen'],
+  [/tableau de bord|dashboard/, 'analytics dashboard laptop'],
+  [/bases? de donnees|database/, 'server room data center'],
+  [/site web|site internet|website/, 'web designer laptop'],
+  [/application|appli\b|\bapp\b/, 'smartphone app interface'],
+  [/responsive/, 'responsive website laptop smartphone'],
+  [/ordinateur portable|laptop/, 'laptop desk'],
+  [/ordinateur|computer/, 'computer screen office'],
+  [/smartphone|telephone|mobile/, 'hand holding smartphone'],
+  [/interface/, 'user interface screen'],
+  [/donnees|data\b/, 'data charts screen'],
+  [/connexion|reseau|network/, 'digital network technology'],
+  [/automatis|workflow/, 'workflow automation software'],
+  [/formulaire|form\b/, 'online form laptop'],
+  [/notification/, 'smartphone notification'],
+  [/synchronis/, 'cloud computing'],
+  [/logo/, 'graphic designer laptop'],
+  [/affiche|poster/, 'poster design mockup'],
+  [/banniere|banner/, 'graphic design studio'],
+  [/flyer|prospectus/, 'printed flyers'],
+  [/powerpoint|presentation|pptx/, 'presentation slides laptop'],
+  [/pdf|document/, 'business documents desk'],
+  [/reseaux sociaux|social media|contenus/, 'social media content smartphone'],
+  [/billetterie|ticket/, 'event ticket smartphone'],
+  [/saas|plateforme|platform/, 'saas dashboard laptop'],
+  [/analytique|analytics/, 'analytics charts laptop'],
+  [/code|developpe|developer/, 'developer coding screen'],
   [/equipe|team/, 'team office'],
   [/client|customer/, 'client meeting'],
   [/bureau|office/, 'modern office'],
   [/graphi|design/, 'graphic designer'],
 ];
 
+/** Stock searches for the visual words of a text, in the order the text mentions them. */
 export const visualKeywordsFor = (text: string, max = 6): string[] => {
   const t = normalize(text);
-  const out: string[] = [];
+  const found: Array<{ at: number; term: string }> = [];
   for (const [re, term] of VISUAL_LEXICON) {
-    if (re.test(t) && !out.includes(term)) out.push(term);
-    if (out.length >= max) break;
+    const at = t.search(re);
+    if (at >= 0 && !found.some((f) => f.term === term)) found.push({ at, term });
   }
-  return out;
+  return found
+    .sort((a, b) => a.at - b.at)
+    .slice(0, max)
+    .map((f) => f.term);
 };
 
 /** Split the voice-over into sentences; enumerations ("web, IA, automatisation et contenus") into items. */
@@ -239,6 +247,17 @@ export const plannedFromStructured = (script: StructuredScript, opts: { brand: s
     narration[n - 1] = script.finalTexts.map((t) => t.replace(/[.!?]*$/, '.')).join(' ');
   }
 
+  // "Apparition du logo ZSR-TechNum" is the brand's own logo, not a picture to search for.
+  const brand = normalize(opts.brand).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const brandLogo = brand ? new RegExp(`\\blogos?\\b(?:\\s+\\S+){0,3}?\\s+${brand}`, 'g') : undefined;
+  const keywords = script.scenes.map((scene, i) => {
+    const texts = i === n - 1 ? [...scene.texts, ...script.finalTexts] : scene.texts;
+    const text = normalize(`${scene.title} ${scene.description} ${texts.join(' ')}`);
+    return visualKeywordsFor(brandLogo ? text.replace(brandLogo, opts.brand) : text);
+  });
+  // A closing "montage of the solutions" without visuals of its own reuses one per scene.
+  if (n > 1 && !keywords[n - 1]!.length) keywords[n - 1] = keywords.slice(1, -1).map((k) => k[0]).filter((k): k is string => Boolean(k));
+
   return script.scenes.map((scene, i) => {
     const last = i === n - 1;
     const texts = last && script.finalTexts.length ? [...scene.texts, ...script.finalTexts] : scene.texts;
@@ -279,7 +298,7 @@ export const plannedFromStructured = (script: StructuredScript, opts: { brand: s
       statValue: '',
       statLabel: '',
       narration: narration[i] ?? '',
-      visualKeywords: visualKeywordsFor(`${scene.title} ${scene.description} ${texts.join(' ')}`),
+      visualKeywords: keywords[i]!,
       visualPrompt: `${scene.description || scene.title}, realistic, professional lighting, cinematic`,
       weight: durations[i]!,
     };

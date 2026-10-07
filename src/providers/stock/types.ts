@@ -30,6 +30,8 @@ export interface StockResult {
   pageUrl: string;
   /** File extension of the rendition, without dot. */
   extension: string;
+  /** What the media shows (alt text, tags or page slug), used to reject off-topic results. */
+  description?: string;
 }
 
 export interface StockProvider {
