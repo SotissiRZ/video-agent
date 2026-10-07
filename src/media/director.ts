@@ -129,11 +129,27 @@ export const buildStockQueries = (
   return queries.slice(0, 6);
 };
 
+/**
+ * Stock pictures that must not appear in an ad unless the customer asked for them: alcohol in a juice
+ * ad, cigarettes, weapons, gambling or revealing clothes would hurt the brand (and break local rules).
+ */
+const SENSITIVE_MEDIA = /\b(alcohol\w*|alcool\w*|wine|vins?|beer|bi[eè]res?|whisk(e)?y|vodka|rum|gin|liquor|liqueurs?|cocktails?|champagne|spirits|brewery|cigar(ette)?s?|smok(e|ing)|fum(er|eur)|tobacco|tabac|vap(e|ing)|guns?|weapons?|armes?|rifles?|pistols?|pistolets?|casino|gambling|poker|lingerie|bikini|nude|sexy)\b/i;
+const ASKED_SENSITIVE = /\b(alcool\w*|vins?|bi[eè]res?|whisky|vodka|cocktails?|champagne|bars?|alcohol\w*|wine|beer|tabac|cigar\w*|chicha|armes?|fusils?|casino|paris sportifs?|lingerie|maillots? de bain|bikini)\b/i;
+
+export const isSensitiveMedia = (description: string | undefined, prompt: string): boolean =>
+  Boolean(description && SENSITIVE_MEDIA.test(description) && !ASKED_SENSITIVE.test(prompt));
+
+/** Readable words of a stock page URL ("…/photos/bottles-alcohol-wine-drinks-bar-8346642/" → "bottles alcohol wine drinks bar"). */
+export const describeFromUrl = (url: string | undefined): string =>
+  (url ?? '').split('?')[0]!.split('/').filter(Boolean).pop()?.replace(/-?\d+$/, '').replace(/[-_]+/g, ' ').trim() ?? '';
+
 export const wantsMedia = (scene: Scene, coverage: MediaCoverage): boolean =>
   coverage === 'all' ? true : coverage === 'visual' ? scene.kind === 'image' : false;
 
 export class MediaDirector {
   private readonly used = new Set<string>();
+  /** Stock pages already shown in the video (a correction must not bring them back). */
+  private readonly usedPages = new Set<string>();
   private readonly disabledProviders = new Set<string>();
   private generatedImages = 0;
   private domain: Domain = BUSINESS;
@@ -197,6 +213,16 @@ export class MediaDirector {
     return sb;
   }
 
+  /**
+   * New picture for one scene from keywords (correction "replace this image"): stock first, then AI,
+   * never a picture already used in the video.
+   */
+  async findReplacement(scene: Scene, keywords: string[], brief: VideoBrief, paths: JobPaths, usedPages: string[], warnings: string[], signal?: AbortSignal): Promise<Media | undefined> {
+    for (const page of usedPages) this.usedPages.add(page);
+    const plan = { visualKeywords: keywords, visualPrompt: keywords.join(', ') } as PlannedScene;
+    return this.findMedia(scene, plan, brief, paths, false, warnings, signal);
+  }
+
   private async findMedia(scene: Scene, plan: PlannedScene | undefined, brief: VideoBrief, paths: JobPaths, preferVideo: boolean, warnings: string[], signal?: AbortSignal): Promise<Media | undefined> {
     for (const source of this.options.sources) {
       if (source === 'assets') {
@@ -234,6 +260,8 @@ export class MediaDirector {
     const domainQueries = [this.domain.queries[(this.sceneIndex * 2) % n]!, this.domain.queries[(this.sceneIndex * 2 + 1) % n]!];
     const queries = buildStockQueries(scene, plan, brief, this.options.keywordLanguage, domainQueries);
 
+    // Sharp first: a picture scaled up more than 15 % looks soft on a phone; larger upscales only as a last resort.
+    for (const maxUpscale of [1.15, 1.5])
     for (const { query, language } of queries) {
       for (const kind of kinds) {
         if (kind === 'video' && !this.options.stockVideos) continue;
@@ -250,7 +278,12 @@ export class MediaDirector {
             this.handleProviderError(provider.id, err, warnings);
             continue;
           }
-          const result = pickStockResult(results.filter((r) => !this.used.has(r.id)), brief.width, brief.height);
+          const result = pickStockResult(
+            results.filter((r) => !this.used.has(r.id) && !this.usedPages.has(r.pageUrl) && !isSensitiveMedia(r.description, brief.prompt ?? '')),
+            brief.width,
+            brief.height,
+            maxUpscale,
+          );
           if (!result) continue;
           try {
             const file = path.join(paths.publicDir, 'media', `${scene.id}-${provider.id}-${++this.downloads}.${result.extension}`);
@@ -264,6 +297,7 @@ export class MediaDirector {
               src: path.relative(paths.publicDir, file).split(path.sep).join('/'),
               fit: 'cover',
               origin: `stock:${provider.id}`,
+              alt: (result.description || query).slice(0, 500),
               durationInFrames: result.durationSec ? Math.max(1, Math.floor(result.durationSec * brief.fps) - 1) : undefined,
               credit: { author: result.author, source: provider.id, url: result.pageUrl },
             };
@@ -297,7 +331,7 @@ export class MediaDirector {
       try {
         const { file } = await image.generate({ prompt, width: brief.width, height: brief.height, outFileBase: base, signal });
         this.generatedImages++;
-        return { type: 'image', src: path.relative(paths.publicDir, file).split(path.sep).join('/'), fit: 'cover', origin: `ai:${image.id}` };
+        return { type: 'image', src: path.relative(paths.publicDir, file).split(path.sep).join('/'), fit: 'cover', origin: `ai:${image.id}`, alt: subject.slice(0, 500) };
       } catch (err) {
         if (signal?.aborted) throw err;
         this.handleProviderError(`ai:${image.id}`, err, warnings);

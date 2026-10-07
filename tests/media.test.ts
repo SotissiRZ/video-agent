@@ -152,6 +152,43 @@ describe('media director', () => {
     expect(n).toBeGreaterThan(0);
   });
 
+  it('prefers sharp pictures, leaves out alcohol nobody asked for, and finds replacements', async () => {
+    const photo = (provider: string, id: string, width: number, height: number, description: string): StockResult => ({
+      provider, id, kind: 'photo', downloadUrl: `https://cdn.test/${id}`, width, height, author: id, pageUrl: `https://p/${id}`, extension: 'jpg', description,
+    });
+    const small: StockProvider = {
+      id: 'small',
+      supports: ['photo'],
+      search: async () => [photo('small', 'alcohol', 1080, 1920, 'bottles, alcohol, wine, drinks, bar'), photo('small', 'small-juice', 820, 1280, 'juice, glass, fruit')],
+    };
+    const sharp: StockProvider = { id: 'sharp', supports: ['photo'], search: async () => [photo('sharp', 'sharp-juice', 1944, 3456, 'fresh hibiscus juice')] };
+    const m = mockFetch([['GET', /cdn\.test/, () => new Response('bytes')]]);
+    restore = m.restore;
+    const paths = jobPaths(path.join(tmpDir(), 'job'));
+    ensureJobDirs(paths);
+    const director = new MediaDirector(
+      { stock: [small, sharp], image: null, video: null, logger: createLogger('silent') },
+      { sources: ['stock'], coverage: 'all', stockVideos: false, maxGeneratedImages: 0, maxGeneratedClips: 0, keywordLanguage: 'en' },
+    );
+    const juiceBrief = { ...brief, prompt: 'Une pub pour mon jus de bissap' } as VideoBrief;
+    const sb = await director.run(makeStoryboard(), [], juiceBrief, paths, [], () => undefined);
+    // The sharp picture beats the smaller one listed first; the alcohol picture is never used.
+    expect(sb.scenes[0]!.media).toMatchObject({ alt: 'fresh hibiscus juice', origin: 'stock:sharp' });
+    expect(sb.scenes.every((s) => !s.media?.alt?.includes('alcohol'))).toBe(true);
+
+    const fresh = new MediaDirector(
+      { stock: [small, sharp], image: null, video: null, logger: createLogger('silent') },
+      { sources: ['stock'], coverage: 'all', stockVideos: false, maxGeneratedImages: 0, maxGeneratedClips: 0, keywordLanguage: 'en' },
+    );
+    // A correction never brings back a picture already in the video.
+    const replacement = await fresh.findReplacement(sb.scenes[1]!, ['fresh', 'juice'], juiceBrief, paths, ['https://p/sharp-juice'], []);
+    expect(replacement).toMatchObject({ alt: 'juice, glass, fruit' });
+    // Asked for: the same picture is allowed.
+    const bar = { ...brief, prompt: 'Pub pour mon bar à cocktails' } as VideoBrief;
+    const barDirector = new MediaDirector({ stock: [small], image: null, video: null, logger: createLogger('silent') }, { sources: ['stock'], coverage: 'all', stockVideos: false, maxGeneratedImages: 0, maxGeneratedClips: 0, keywordLanguage: 'en' });
+    expect(await barDirector.findReplacement(sb.scenes[1]!, ['drinks'], bar, paths, [], [])).toMatchObject({ alt: 'bottles, alcohol, wine, drinks, bar' });
+  });
+
   it('shows several shots in long scenes, reusing the same searches', async () => {
     let searches = 0;
     const fake: StockProvider = {

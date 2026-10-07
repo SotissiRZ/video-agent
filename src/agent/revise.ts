@@ -9,6 +9,7 @@ import type { VideoBrief } from '../core/types';
 import { generateJson } from '../llm/json';
 import type { LLMProvider } from '../llm/types';
 import type { Scene, Storyboard } from '../remotion/contract/storyboard';
+import { describeFromUrl } from '../media/director';
 
 /** The correction cannot be made by editing the storyboard: the caller regenerates the video instead. */
 export class RevisionNotApplicable extends Error {
@@ -24,7 +25,7 @@ const RevisedSceneSchema = z.object({
   statValue: z.string(),
   statLabel: z.string(),
   narration: z.string(),
-  /** "keep", "none" or "photo-N" (customer product photo N). */
+  /** "keep", "none", "photo-N" (customer product photo N) or "search: <English keywords>" (find a new picture). */
   visual: z.string(),
 });
 
@@ -69,15 +70,23 @@ Rules:
 - Keep the language of the existing texts. Headlines max 8 words, list items max 5 words, *asterisks* around 1-3 highlighted words.
 - Never invent statistics, prices, dates, phone numbers or URLs the customer did not give.
 - When narration changes, keep about the same number of words unless asked otherwise.
-- Set feasible=false (with a short reason) only if the request cannot be done by editing texts, order, photos or colours:
+- Each scene says what its picture currently shows. To replace a picture, set its visual to "search: <3 to 6 English
+  stock-photo keywords describing the new picture>" (e.g. "search: fresh hibiscus juice bottle natural"). Replace every
+  picture concerned by the request, and only those.
+- Set feasible=false (with a short reason) only if the request cannot be done by editing texts, order, pictures or colours:
   e.g. a different duration or format, another voice or music, a completely new concept, new scenes.
 - Reply with a single JSON object and nothing else.`;
 
+/** What the scene shows, in words the model can act on ("image showing: bottles alcohol wine"). */
 const visualOf = (scene: Scene, photoSrcs: string[]): string => {
-  if (!scene.media) return 'none';
-  const photo = photoSrcs.indexOf(scene.media.src);
-  if (photo >= 0) return `photo-${photo + 1}`;
-  return `${scene.media.type} (${scene.media.origin})`;
+  if (!scene.media) return 'none (animated background)';
+  const describe = (media: NonNullable<Scene['media']>) => {
+    const photo = photoSrcs.indexOf(media.src);
+    if (photo >= 0) return `photo-${photo + 1}`;
+    const what = media.alt || describeFromUrl(media.credit?.url) || (media.origin.startsWith('ai:') ? 'AI-generated picture' : media.origin);
+    return `${media.type} showing: ${what}`;
+  };
+  return [scene.media, ...(scene.shots ?? [])].map(describe).join(' / then ');
 };
 
 /** Ask the model for the edited storyboard. */
@@ -124,7 +133,7 @@ ${JSON.stringify(scenes, null, 2)}
 Customer correction: """${instruction}"""
 
 Return {"feasible", "reason", "scenes": [...the scenes in their new order...], "primaryColor", "accentColor"}.
-For each scene, "visual" is "keep" (unchanged), "none" (animated background only) or "photo-N" (show customer photo N).
+For each scene, "visual" is "keep" (unchanged), "none" (animated background only), "photo-N" (show customer photo N) or "search: <English keywords>" (replace the picture with a new one).
 primaryColor / accentColor: a #rrggbb value only if the customer asks for other colours, otherwise "".`,
         },
       ],
@@ -140,12 +149,18 @@ const HEX = /^#[0-9a-f]{6}$/i;
  * Apply the edit to the storyboard. Returns the ids of the scenes whose narration changed
  * (their voice-over must be recorded again). Throws when the model broke the scene list.
  */
-export const applyRevision = (storyboard: Storyboard, revision: Revision, photoSrcs: string[]): { storyboard: Storyboard; narrationChanged: Set<string> } => {
+export const applyRevision = (
+  storyboard: Storyboard,
+  revision: Revision,
+  photoSrcs: string[],
+): { storyboard: Storyboard; narrationChanged: Set<string>; searches: Map<string, string[]> } => {
   const byId = new Map(storyboard.scenes.map((scene) => [scene.id, scene]));
   const ids = revision.scenes.map((scene) => scene.id);
   if (!ids.length) throw new Error('the revision removed every scene');
   if (new Set(ids).size !== ids.length || ids.some((id) => !byId.has(id))) throw new Error('the revision changed the scene ids');
   const narrationChanged = new Set<string>();
+  /** Scenes whose picture must be searched again, with the keywords to search. */
+  const searches = new Map<string, string[]>();
   const scenes = revision.scenes.map((edit): Scene => {
     const scene = byId.get(edit.id)!;
     if (clean(edit.narration) !== clean(scene.narration)) narrationChanged.add(scene.id);
@@ -159,7 +174,11 @@ export const applyRevision = (storyboard: Storyboard, revision: Revision, photoS
       narration: edit.narration,
     };
     const photo = /^photo-(\d+)$/.exec(edit.visual.trim());
-    if (photo && photoSrcs[Number(photo[1]) - 1]) {
+    const search = /^search\s*:\s*(.+)$/i.exec(edit.visual.trim());
+    if (search) {
+      const keywords = search[1]!.split(/[,\s]+/).map((w) => w.trim()).filter((w) => w.length > 1).slice(0, 8);
+      if (keywords.length) searches.set(scene.id, keywords);
+    } else if (photo && photoSrcs[Number(photo[1]) - 1]) {
       next.media = { type: 'image', src: photoSrcs[Number(photo[1]) - 1]!, fit: 'cover', origin: 'user:product' };
       next.shots = undefined;
     } else if (edit.visual.trim() === 'none') {
@@ -174,5 +193,5 @@ export const applyRevision = (storyboard: Storyboard, revision: Revision, photoS
     ...(HEX.test(revision.primaryColor) ? { primary: revision.primaryColor } : {}),
     ...(HEX.test(revision.accentColor) ? { accent: revision.accentColor } : {}),
   };
-  return { storyboard: { ...storyboard, theme: { ...storyboard.theme, palette }, scenes }, narrationChanged };
+  return { storyboard: { ...storyboard, theme: { ...storyboard.theme, palette }, scenes }, narrationChanged, searches };
 };

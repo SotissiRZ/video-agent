@@ -512,7 +512,7 @@ export class VideoAgent {
       },
       ({ original }) => `${original.scenes.length} scènes reprises`,
     );
-    for (const id of ['concept', 'storyboard', 'scenes', 'assets', 'animations'] as const) skip(id, 'conservé de la vidéo d’origine');
+    for (const id of ['concept', 'storyboard', 'scenes', 'animations'] as const) skip(id, 'conservé de la vidéo d’origine');
 
     const edited = await step(
       'script',
@@ -528,7 +528,10 @@ export class VideoAgent {
       },
       ({ narrationChanged }) => `${narrationChanged.size} narration(s) modifiée(s)`,
     );
-    const storyboard: Storyboard = { ...edited.storyboard, brand: { ...edited.storyboard.brand, badge: request.badge } };
+    let storyboard: Storyboard = { ...edited.storyboard, brand: { ...edited.storyboard.brand, badge: request.badge } };
+    if (edited.searches.size) {
+      storyboard = await step('assets', 'Nouvelles images', (progress) => this.replacePictures(storyboard, edited.searches, brief, paths, warnings, progress, signal), (sb) => `${edited.searches.size} image(s) remplacée(s)`);
+    } else skip('assets', 'conservé de la vidéo d’origine');
     const voiced = await this.revoiceScenes(storyboard, original, brief, paths, edited.narrationChanged, sourceVoice, request, warnings, step, signal);
     return this.finishCorrection({ ...voiced, original, brief, concept, paths, steps, warnings, signal, planner: `${llm.id}:${llm.model}`, info: { correctionOf: path.basename(path.resolve(request.sourceDir)), instruction: request.instruction } });
   }
@@ -551,6 +554,52 @@ export class VideoAgent {
     const storyboard: Storyboard = { ...original, brand: { ...original.brand, badge: request.badge } };
     const voiced = await this.revoiceScenes(storyboard, original, brief, paths, affected, sourceVoice, request, warnings, step, signal);
     return this.finishCorrection({ ...voiced, original, brief, concept, paths, steps, warnings, signal, planner: 'none', info: { correctionOf: path.basename(path.resolve(request.sourceDir)), pronunciations: request.changed } });
+  }
+
+  /** Find new pictures for the scenes a correction asked to change (stock, then AI). */
+  private async replacePictures(
+    storyboard: Storyboard,
+    searches: Map<string, string[]>,
+    brief: VideoBrief,
+    paths: JobPaths,
+    warnings: string[],
+    progress: (p: number, msg?: string) => void,
+    signal?: AbortSignal,
+  ): Promise<Storyboard> {
+    const style = getStyle(storyboard.meta.style);
+    const stock = this.deps.stock ?? safeResolve(() => resolveStockProviders(this.config), warnings) ?? [];
+    const image = this.meteredImage(this.deps.image !== undefined ? this.deps.image : safeResolve(() => resolveImageProvider(this.config), warnings));
+    const director = new MediaDirector(
+      { stock, image, video: null, logger: this.logger },
+      {
+        sources: (style.mediaSources ?? this.config.env.VIDEO_AGENT_MEDIA_SOURCES).filter((source) => source !== 'assets'),
+        imageDirection: style.imageDirection,
+        coverage: 'all',
+        stockVideos: false,
+        maxGeneratedImages: this.config.env.VIDEO_AGENT_MAX_GENERATED_IMAGES,
+        maxGeneratedClips: 0,
+        keywordLanguage: 'en',
+      },
+    );
+    // Never bring back a picture the video already shows (or the one being replaced).
+    const used = storyboard.scenes.flatMap((scene) => [scene.media, ...(scene.shots ?? [])]).flatMap((media) => (media?.credit?.url ? [media.credit.url] : []));
+    const scenes = [...storyboard.scenes];
+    let done = 0;
+    for (const [sceneId, keywords] of searches) {
+      const index = scenes.findIndex((scene) => scene.id === sceneId);
+      if (index < 0) continue;
+      progress(done / searches.size, `Recherche : ${keywords.join(' ')}`);
+      const media = await director.findReplacement(scenes[index]!, keywords, brief, paths, used, warnings, signal);
+      const scene = scenes[index]!;
+      if (media) scenes[index] = { ...scene, media, shots: undefined, background: { ...scene.background, variant: scene.kind === 'image' ? scene.background.variant : 'media' } };
+      else {
+        // Nothing suitable found: better an animated background than the picture the customer rejected.
+        warnings.push(`no new picture found for ${sceneId} (${keywords.join(' ')})`);
+        scenes[index] = { ...scene, media: undefined, shots: undefined, background: { ...scene.background, variant: scene.background.variant === 'media' ? 'gradient' : scene.background.variant } };
+      }
+      done++;
+    }
+    return { ...storyboard, scenes };
   }
 
   /** Copy a rendered job (not its outputs) to a new directory and read what a correction needs. */

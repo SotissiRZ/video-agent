@@ -6,6 +6,8 @@ interface UnsplashPhoto {
   width: number;
   height: number;
   urls: { raw: string; full: string; regular: string };
+  alt_description?: string | null;
+  description?: string | null;
   links: { html: string; download_location: string };
   user: { name: string };
 }
@@ -52,6 +54,7 @@ export class UnsplashProvider implements StockProvider {
         author: p.user.name,
         pageUrl: `${p.links.html}?utm_source=video-agent&utm_medium=referral`,
         extension: 'jpg',
+        description: [p.alt_description, p.description].filter(Boolean).join('. '),
       };
     });
   }

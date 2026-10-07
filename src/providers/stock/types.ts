@@ -30,6 +30,8 @@ export interface StockResult {
   pageUrl: string;
   /** File extension of the rendition, without dot. */
   extension: string;
+  /** What the media shows (tags or alt text), used to filter and to describe it later. */
+  description?: string;
 }
 
 export interface StockProvider {
@@ -53,7 +55,7 @@ export const pickRendition = <T extends { width: number; height: number }>(items
 };
 
 /** Pick stock media that can fill the output without an extreme crop or upscale. */
-export const pickStockResult = <T extends { width: number; height: number }>(items: T[], width: number, height: number): T | undefined => {
+export const pickStockResult = <T extends { width: number; height: number }>(items: T[], width: number, height: number, maxUpscale = 1.5): T | undefined => {
   if (width <= 0 || height <= 0) return undefined;
   const targetRatio = width / height;
   const suitable = items
@@ -63,7 +65,7 @@ export const pickStockResult = <T extends { width: number; height: number }>(ite
       const upscale = Math.max(width / item.width, height / item.height, 1);
       return { item, ratioDifference, upscale };
     })
-    .filter(({ ratioDifference, upscale }) => ratioDifference <= Math.log(1.5) && upscale <= 1.5)
+    .filter(({ ratioDifference, upscale }) => ratioDifference <= Math.log(1.5) && upscale <= maxUpscale)
     .sort((a, b) => a.upscale - b.upscale || a.ratioDifference - b.ratioDifference);
   return suitable[0]?.item;
 };

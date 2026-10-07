@@ -10,6 +10,8 @@ import type { VoiceProvider } from '../src/providers/voice/types';
 import { SAMPLE_STORYBOARD } from '../src/remotion/sample';
 import { StoryboardSchema, type Storyboard } from '../src/remotion/contract/storyboard';
 import { fakeRenderer, FakeLLM, testConfig, tmpDir } from './helpers';
+import { mockFetch } from './fetch-mock';
+import type { StockProvider } from '../src/providers/stock/types';
 
 const logger = createLogger('silent');
 const PROMPT = 'Crée une vidéo verticale de 30 secondes pour promouvoir le jus Bissap Doux à Dakar.';
@@ -101,6 +103,35 @@ describe('targeted correction', () => {
     expect(fs.existsSync(path.join(outDir, 'export.mp4'))).toBe(false);
     expect(fs.readFileSync(path.join(outDir, 'subtitles.srt'), 'utf8')).toContain('Une nouvelle phrase');
     expect(JSON.parse(fs.readFileSync(path.join(outDir, 'job.json'), 'utf8'))).toMatchObject({ correctionOf: path.basename(original.jobDir) });
+  });
+
+  it('replaces a picture by searching a new one, describing the current pictures to the model', async () => {
+    const { config, original, sb } = await setup();
+    const stock: StockProvider = {
+      id: 'fake',
+      supports: ['photo'],
+      search: async (q) => [{ provider: 'fake', id: `juice-${q.query}`, kind: 'photo', downloadUrl: 'https://cdn.test/juice.jpg', width: 1080, height: 1920, author: 'A', pageUrl: `https://fake/${q.query}`, extension: 'jpg', description: 'fresh hibiscus juice bottle' }],
+    };
+    const m = mockFetch([['GET', /cdn\.test/, () => new Response('bytes')]]);
+    try {
+      const edit = editOf(sb);
+      edit[1]!.visual = 'search: fresh hibiscus juice bottle';
+      const llm = new FakeLLM([JSON.stringify({ feasible: true, reason: '', scenes: edit, primaryColor: '', accentColor: '' })]);
+      const outDir = path.join(tmpDir(), 'pictures');
+      await new VideoAgent(config, { renderer: fakeRenderer, logger, llm, voice: null, stock: [stock], image: null }).revise({
+        sourceDir: original.jobDir,
+        outDir,
+        instruction: 'Remplace l’image de la 2e scène par des jus naturels',
+        productImages: [],
+      });
+      // The model is told what each picture shows, and how to ask for a new one.
+      expect(llm.requests[0]!.messages[0]!.content).toContain('search: <English keywords>');
+      const revised = readStoryboard(outDir);
+      expect(revised.scenes[1]!.media).toMatchObject({ origin: 'stock:fake', alt: 'fresh hibiscus juice bottle' });
+      expect(fs.existsSync(path.join(outDir, 'public', revised.scenes[1]!.media!.src))).toBe(true);
+    } finally {
+      m.restore();
+    }
   });
 
   it('hands back to the full pipeline when the request needs a new video', async () => {

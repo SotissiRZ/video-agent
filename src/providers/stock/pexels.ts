@@ -7,6 +7,7 @@ interface PexelsPhoto {
   height: number;
   url: string;
   photographer: string;
+  alt?: string;
   src: { original: string; large2x: string; large: string; portrait: string; landscape: string };
 }
 interface PexelsVideo {
@@ -43,6 +44,7 @@ export class PexelsProvider implements StockProvider {
         author: p.photographer,
         pageUrl: p.url,
         extension: 'jpg',
+        description: p.alt,
       }));
     }
     const res = await httpJson<{ videos?: PexelsVideo[] }>(`https://api.pexels.com/videos/search?${params}`, { provider: this.id, headers, signal: q.signal, timeoutMs: 30_000 });

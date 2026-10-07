@@ -512,10 +512,11 @@ dialog.viewer::backdrop { background: rgba(10, 14, 24, 0.55); }
 .product-add.is-busy { pointer-events: none; opacity: .6; }
 
 /* Voices */
-.choice-group { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+/* Full width, one equal part per option. */
+.choice-group { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; gap: 4px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
 .choice-group label { position: relative; cursor: pointer; }
 .choice-group input { position: absolute; opacity: 0; pointer-events: none; }
-.choice-group span { display: block; padding: 7px 14px; border-radius: 9px; font-size: 13px; font-weight: 600; color: var(--muted); transition: background .15s, color .15s; }
+.choice-group span { display: block; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 8px 10px; border-radius: 9px; font-size: 13px; font-weight: 600; color: var(--muted); transition: background .15s, color .15s; }
 .choice-group input:checked + span { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
 .choice-group input:focus-visible + span { outline: 2px solid var(--primary); outline-offset: 1px; }
 .choice-group input:disabled + span { opacity: .45; cursor: not-allowed; }

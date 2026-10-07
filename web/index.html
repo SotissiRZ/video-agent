@@ -3,146 +3,169 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>SOVID AI — Vos vidéos publicitaires et chansons créées par IA</title>
-  <meta name="description" content="Décrivez votre vidéo en une phrase et ajoutez vos photos produit : script, voix-off, sous-titres et montage animé, prêts pour WhatsApp, TikTok, Instagram et Facebook. Essai gratuit, paiement en FCFA." />
-  <meta property="og:title" content="SOVID AI — Vidéos publicitaires et chansons créées par IA" />
-  <meta property="og:description" content="Une phrase, vos photos produit, et votre vidéo publicitaire est prête. Essai gratuit, paiement seulement si vous la gardez." />
+  <title>SOVID AI — Vos pubs vidéo et chansons, en une phrase</title>
+  <meta name="description" content="Décrivez votre pub en une phrase et ajoutez vos photos produit : script, voix-off, sous-titres et montage, prêts pour WhatsApp, TikTok, Instagram et Facebook. Essai gratuit, paiement en FCFA." />
+  <meta property="og:title" content="SOVID AI — Vos pubs vidéo en une phrase" />
+  <meta property="og:description" content="Une phrase, vos photos produit, et votre pub vidéo est prête. Essai gratuit, vous payez seulement celles que vous gardez." />
   <meta property="og:type" content="website" />
+  <meta name="theme-color" content="#f3ebdd" />
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+  <link rel="preload" href="/assets/fonts/bricolage.woff" as="font" type="font/woff" crossorigin />
   <script src="/assets/boot.js"></script>
   <link rel="stylesheet" href="/assets/style.css" />
+  <link rel="stylesheet" href="/assets/landing.css" />
 </head>
-<body>
-  <header class="site-header">
+<body class="lp">
+  <header class="lp-header">
     <div class="container">
-      <a class="brand" href="/"><i data-icon="logo" data-size="26"></i>SOVID AI</a>
-      <nav class="site-nav">
+      <a class="lp-wordmark" href="/">SOVID<small>AI</small></a>
+      <nav class="lp-nav">
+        <a href="#examples" data-i18n="landing.nav.examples"></a>
         <a href="#how" data-i18n="landing.nav.how"></a>
-        <a href="#features" data-i18n="landing.nav.features"></a>
         <a href="#pricing" data-i18n="landing.nav.pricing"></a>
         <a href="#faq" data-i18n="landing.nav.faq"></a>
       </nav>
       <div class="actions">
         <div class="segmented" data-lang-switch></div>
         <button type="button" class="btn btn-ghost btn-icon" data-theme-toggle></button>
-        <a class="btn btn-ghost" id="loginLink" href="/app#login" data-i18n="landing.login"></a>
-        <a class="btn btn-primary hide-sm" id="startLink" href="/app#signup" data-i18n="landing.start"></a>
+        <a class="login" id="loginLink" href="/app#login" data-i18n="landing.login"></a>
+        <a class="btn-ink btn-sm" id="startLink" href="/app#signup" data-i18n="landing.start"></a>
       </div>
     </div>
   </header>
 
   <main>
-    <section class="hero">
-      <div class="container hero-grid">
-        <div>
-          <span class="eyebrow"><i data-icon="sparkles" data-size="15"></i><span data-i18n="landing.hero.eyebrow"></span></span>
-          <h1 data-i18n-html="landing.hero.title"></h1>
-          <p class="lead" data-i18n="landing.hero.subtitle"></p>
-          <div class="cta">
-            <a class="btn btn-primary btn-lg" href="/app#signup" data-start><span data-i18n="landing.start"></span><i data-icon="arrow"></i></a>
-            <a class="btn btn-secondary btn-lg" href="#how" data-i18n="landing.hero.cta2"></a>
-          </div>
-          <p class="note"><i data-icon="check" data-size="15"></i><span id="heroNote"></span></p>
-        </div>
-        <div class="mock" aria-hidden="true">
-          <div class="mock-prompt"><i data-icon="sparkles"></i><span data-i18n="landing.mock.prompt"></span></div>
-          <div class="phone">
-            <div class="screen">
-              <span class="tag">SOVID AI</span>
-              <div class="big" data-i18n="landing.mock.title"></div>
-              <span class="pill" data-i18n="landing.mock.sub"></span>
-              <span class="caption" data-i18n="landing.mock.caption"></span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="section alt" id="how">
+    <section class="lp-hero">
       <div class="container">
-        <div class="section-head"><h2 data-i18n="landing.how.title"></h2><p data-i18n="landing.how.subtitle"></p></div>
-        <div class="steps-3">
-          <div class="card step-card"><div class="num">1</div><h3 data-i18n="landing.how.1.title"></h3><p data-i18n="landing.how.1.text"></p></div>
-          <div class="card step-card"><div class="num">2</div><h3 data-i18n="landing.how.2.title"></h3><p data-i18n="landing.how.2.text"></p></div>
-          <div class="card step-card"><div class="num">3</div><h3 data-i18n="landing.how.3.title"></h3><p id="howStep3"></p></div>
-        </div>
-      </div>
-    </section>
-
-    <section class="section" id="features">
-      <div class="container">
-        <div class="section-head"><h2 data-i18n="landing.features.title"></h2><p data-i18n="landing.features.subtitle"></p></div>
-        <div class="features">
-          <div class="card feature"><div class="icon-wrap"><i data-icon="image"></i></div><h3 data-i18n="landing.f.photos.title"></h3><p data-i18n="landing.f.photos.text"></p></div>
-          <div class="card feature"><div class="icon-wrap"><i data-icon="type"></i></div><h3 data-i18n="landing.f.script.title"></h3><p data-i18n="landing.f.script.text"></p></div>
-          <div class="card feature"><div class="icon-wrap"><i data-icon="mic"></i></div><h3 data-i18n="landing.f.voice.title"></h3><p id="featureVoice"></p></div>
-          <div class="card feature"><div class="icon-wrap"><i data-icon="edit"></i></div><h3 data-i18n="landing.f.fix.title"></h3><p data-i18n="landing.f.fix.text"></p></div>
-          <div class="card feature"><div class="icon-wrap"><i data-icon="sparkles"></i></div><h3 data-i18n="landing.f.styles.title"></h3><p data-i18n="landing.f.styles.text"></p></div>
-          <div class="card feature"><div class="icon-wrap"><i data-icon="layout"></i></div><h3 data-i18n="landing.f.formats.title"></h3><p id="featureFormats"></p></div>
-          <div class="card feature"><div class="icon-wrap"><i data-icon="file"></i></div><h3 data-i18n="landing.f.subs.title"></h3><p data-i18n="landing.f.subs.text"></p></div>
-          <div class="card feature" data-feature="publish" hidden><div class="icon-wrap"><i data-icon="send"></i></div><h3 data-i18n="landing.f.publish.title"></h3><p id="featurePublish"></p></div>
-          <div class="card feature" data-feature-off="publish"><div class="icon-wrap"><i data-icon="download"></i></div><h3 data-i18n="landing.f.download.title"></h3><p data-i18n="landing.f.download.text"></p></div>
-        </div>
-      </div>
-    </section>
-
-    <section class="section alt" id="songs" data-feature="songs" hidden>
-      <div class="container split">
         <div>
-          <span class="eyebrow"><i data-icon="music" data-size="15"></i><span data-i18n="landing.songs.eyebrow"></span></span>
+          <p class="lp-kicker" data-i18n="landing.hero.kicker"></p>
+          <h1 class="lp-title">
+            <span data-i18n="landing.hero.l1"></span>
+            <span data-i18n="landing.hero.l2"></span>
+            <span class="mark" data-i18n="landing.hero.l3"></span>
+          </h1>
+          <p class="lp-lead" data-i18n="landing.hero.subtitle"></p>
+          <div class="lp-cta">
+            <a class="btn-ink" href="/app#signup" data-start><span data-i18n="landing.start"></span><i data-icon="arrow"></i></a>
+            <a class="btn-line" href="#examples" data-i18n="landing.hero.cta2"></a>
+          </div>
+          <p class="lp-note"><i data-icon="check" data-size="16"></i><span id="heroNote"></span></p>
+        </div>
+        <div class="lp-stage">
+          <div class="lp-chat">
+            <span data-i18n="landing.hero.prompt"></span>
+            <div class="meta">09:41 <b>✓✓</b></div>
+          </div>
+          <div class="lp-reel">
+            <video src="/assets/media/hero.mp4" poster="/assets/media/hero-poster.jpg" autoplay muted loop playsinline preload="metadata" aria-label="Vidéo publicitaire créée par SOVID AI"></video>
+          </div>
+          <div class="lp-stamp" data-i18n="landing.hero.stamp"></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="lp-marquee" aria-hidden="true">
+      <div class="track"><span data-i18n="landing.marquee"></span><span data-i18n="landing.marquee"></span></div>
+    </div>
+
+    <section class="lp-section" id="examples">
+      <div class="container">
+        <div class="lp-head"><h2 data-i18n="landing.examples.title"></h2><p data-i18n="landing.examples.subtitle"></p></div>
+        <div class="lp-gallery">
+          <figure><img src="/assets/media/ex-1.jpg" alt="" loading="lazy" width="270" height="480" /><figcaption data-i18n-html="landing.ex.1"></figcaption></figure>
+          <figure><img src="/assets/media/ex-2.jpg" alt="" loading="lazy" width="270" height="480" /><figcaption data-i18n-html="landing.ex.2"></figcaption></figure>
+          <figure><img src="/assets/media/ex-3.jpg" alt="" loading="lazy" width="270" height="480" /><figcaption data-i18n-html="landing.ex.3"></figcaption></figure>
+          <figure><img src="/assets/media/ex-4.jpg" alt="" loading="lazy" width="270" height="480" /><figcaption data-i18n-html="landing.ex.4"></figcaption></figure>
+          <figure><img src="/assets/media/ex-5.jpg" alt="" loading="lazy" width="270" height="480" /><figcaption data-i18n-html="landing.ex.5"></figcaption></figure>
+          <figure><img src="/assets/media/ex-6.jpg" alt="" loading="lazy" width="270" height="480" /><figcaption data-i18n-html="landing.ex.6"></figcaption></figure>
+        </div>
+        <p class="lp-proof" data-i18n="landing.examples.proof"></p>
+      </div>
+    </section>
+
+    <section class="lp-section" id="how">
+      <div class="container">
+        <div class="lp-head"><h2 data-i18n="landing.how.title"></h2><p data-i18n="landing.how.subtitle"></p></div>
+        <div class="lp-steps">
+          <div><span class="n">01</span><h3 data-i18n="landing.how.1.title"></h3><p data-i18n="landing.how.1.text"></p></div>
+          <div><span class="n">02</span><h3 data-i18n="landing.how.2.title"></h3><p data-i18n="landing.how.2.text"></p></div>
+          <div><span class="n">03</span><h3 data-i18n="landing.how.3.title"></h3><p id="howStep3"></p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="lp-section" id="features">
+      <div class="container">
+        <div class="lp-head"><h2 data-i18n="landing.features.title"></h2><p data-i18n="landing.features.subtitle"></p></div>
+        <div class="lp-board">
+          <div class="hot"><div class="icon-wrap"><i data-icon="image"></i></div><h3 data-i18n="landing.f.photos.title"></h3><p data-i18n="landing.f.photos.text"></p></div>
+          <div><div class="icon-wrap"><i data-icon="type"></i></div><h3 data-i18n="landing.f.script.title"></h3><p data-i18n="landing.f.script.text"></p></div>
+          <div class="warm"><div class="icon-wrap"><i data-icon="mic"></i></div><h3 data-i18n="landing.f.voice.title"></h3><p id="featureVoice"></p></div>
+          <div><div class="icon-wrap"><i data-icon="edit"></i></div><h3 data-i18n="landing.f.fix.title"></h3><p data-i18n="landing.f.fix.text"></p></div>
+          <div><div class="icon-wrap"><i data-icon="sparkles"></i></div><h3 data-i18n="landing.f.styles.title"></h3><p data-i18n="landing.f.styles.text"></p></div>
+          <div><div class="icon-wrap"><i data-icon="layout"></i></div><h3 data-i18n="landing.f.formats.title"></h3><p id="featureFormats"></p></div>
+          <div><div class="icon-wrap"><i data-icon="file"></i></div><h3 data-i18n="landing.f.subs.title"></h3><p data-i18n="landing.f.subs.text"></p></div>
+          <div data-feature="publish" hidden><div class="icon-wrap"><i data-icon="send"></i></div><h3 data-i18n="landing.f.publish.title"></h3><p id="featurePublish"></p></div>
+          <div data-feature-off="publish"><div class="icon-wrap"><i data-icon="download"></i></div><h3 data-i18n="landing.f.download.title"></h3><p data-i18n="landing.f.download.text"></p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="lp-section lp-songs" id="songs" data-feature="songs" hidden>
+      <div class="container">
+        <div>
+          <span class="tag" data-i18n="landing.songs.eyebrow"></span>
           <h2 data-i18n="landing.songs.title"></h2>
           <p class="lead" data-i18n="landing.songs.text"></p>
-          <ul class="checklist">
+          <ul>
             <li><i data-icon="check" data-size="16"></i><span data-i18n="landing.songs.1"></span></li>
             <li><i data-icon="check" data-size="16"></i><span data-i18n="landing.songs.2"></span></li>
             <li><i data-icon="check" data-size="16"></i><span data-i18n="landing.songs.3"></span></li>
           </ul>
         </div>
-        <div class="card quote-card"><p class="muted small" data-i18n="landing.songs.example.label"></p><p class="lyrics" data-i18n="landing.songs.example"></p></div>
+        <div class="lp-lyrics"><small data-i18n="landing.songs.example.label"></small><p data-i18n="landing.songs.example"></p></div>
       </div>
     </section>
 
-    <section class="section" id="africa">
+    <section class="lp-section lp-local" id="africa">
       <div class="container">
-        <div class="section-head"><h2 data-i18n="landing.africa.title"></h2><p data-i18n="landing.africa.subtitle"></p></div>
-        <div class="africa">
-          <div class="card feature"><div class="icon-wrap"><i data-icon="phone"></i></div><h3 data-i18n="landing.africa.pay.title"></h3><p id="africaPay"></p></div>
-          <div class="card feature"><div class="icon-wrap"><i data-icon="globe"></i></div><h3 data-i18n="landing.africa.lang.title"></h3><p data-i18n="landing.africa.lang.text"></p></div>
-          <div class="card feature"><div class="icon-wrap"><i data-icon="whatsapp"></i></div><h3 data-i18n="landing.africa.wa.title"></h3><p data-i18n="landing.africa.wa.text"></p></div>
-          <div class="card feature"><div class="icon-wrap"><i data-icon="zap"></i></div><h3 data-i18n="landing.africa.biz.title"></h3><p data-i18n="landing.africa.biz.text"></p></div>
+        <div class="lp-head"><h2 data-i18n="landing.africa.title"></h2><p data-i18n="landing.africa.subtitle"></p></div>
+        <div class="lp-stamps">
+          <div><div class="icon-wrap"><i data-icon="phone"></i></div><h3 data-i18n="landing.africa.pay.title"></h3><p id="africaPay"></p></div>
+          <div><div class="icon-wrap"><i data-icon="globe"></i></div><h3 data-i18n="landing.africa.lang.title"></h3><p data-i18n="landing.africa.lang.text"></p></div>
+          <div><div class="icon-wrap"><i data-icon="whatsapp"></i></div><h3 data-i18n="landing.africa.wa.title"></h3><p data-i18n="landing.africa.wa.text"></p></div>
+          <div><div class="icon-wrap"><i data-icon="zap"></i></div><h3 data-i18n="landing.africa.biz.title"></h3><p data-i18n="landing.africa.biz.text"></p></div>
         </div>
       </div>
     </section>
 
-    <section class="section alt" id="pricing">
+    <section class="lp-section" id="pricing">
       <div class="container">
-        <div class="section-head"><h2 data-i18n="landing.pricing.title"></h2><p id="pricingSubtitle"></p></div>
+        <div class="lp-head"><h2 data-i18n="landing.pricing.title"></h2><p id="pricingSubtitle"></p></div>
         <div class="plans" id="plans"></div>
-        <p class="muted small center" data-i18n="landing.pricing.note"></p>
+        <p class="lp-fine" data-i18n="landing.pricing.note"></p>
       </div>
     </section>
 
-    <section class="section" id="faq">
+    <section class="lp-section" id="faq">
       <div class="container">
-        <div class="section-head"><h2 data-i18n="landing.faq.title"></h2></div>
-        <div class="faq" id="faqList"></div>
+        <div class="lp-head"><h2 data-i18n="landing.faq.title"></h2><p></p></div>
+        <div class="lp-faq" id="faqList"></div>
       </div>
     </section>
 
-    <section class="section" style="padding-top: 0">
+    <section class="lp-final">
       <div class="container">
-        <div class="cta-band">
-          <h2 data-i18n="landing.cta.title"></h2>
-          <a class="btn btn-lg" href="/app#signup" data-start data-i18n="landing.start"></a>
-        </div>
+        <h2 data-i18n="landing.cta.title"></h2>
+        <a class="btn-ink" href="/app#signup" data-start><span data-i18n="landing.start"></span><i data-icon="arrow"></i></a>
       </div>
     </section>
   </main>
 
-  <footer class="site-footer">
+  <footer class="lp-footer">
     <div class="container">
-      <a class="brand" href="/"><i data-icon="logo" data-size="22"></i>SOVID AI</a>
-      <nav class="footer-links">
+      <a class="lp-wordmark" href="/">SOVID<small>AI</small></a>
+      <nav>
         <a href="/legal#notice" data-i18n="legal.notice"></a>
         <a href="/legal#terms" data-i18n="legal.terms"></a>
         <a href="/legal#sales" data-i18n="legal.sales"></a>
@@ -150,7 +173,7 @@
         <a href="/legal#ai" data-i18n="legal.ai"></a>
         <a id="footerContact" hidden></a>
       </nav>
-      <span>© <span id="year"></span> <span id="footerCompany">SOVID AI</span>. <span data-i18n="landing.footer.rights"></span></span>
+      <span class="copy">© <span id="year"></span> <span id="footerCompany">SOVID AI</span>. <span data-i18n="landing.footer.rights"></span></span>
     </div>
   </footer>
 

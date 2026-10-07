@@ -36,6 +36,8 @@ export const MediaSchema = z.object({
   origin: z.string().default('asset'),
   /** Known clip length (videos only). When set, the clip loops to fill the scene. */
   durationInFrames: z.number().int().positive().optional(),
+  /** What the picture shows (stock tags, alt text or AI prompt): lets a correction know what to replace. */
+  alt: z.string().max(500).optional(),
   /** Attribution for stock media (photographer / videographer and source page). */
   credit: z.object({ author: z.string(), source: z.string(), url: z.string().optional() }).optional(),
 });

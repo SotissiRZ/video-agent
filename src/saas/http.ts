@@ -13,6 +13,7 @@ export const MIME: Record<string, string> = {
   '.ico': 'image/x-icon',
   '.webp': 'image/webp',
   '.woff2': 'font/woff2',
+  '.woff': 'font/woff',
   '.json': 'application/json',
   '.mp4': 'video/mp4',
   '.mp3': 'audio/mpeg',
