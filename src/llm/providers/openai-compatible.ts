@@ -13,6 +13,7 @@ export interface OpenAICompatibleOptions {
 
 interface ChatCompletion {
   model?: string;
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
   choices?: Array<{ message?: { content?: string | null; refusal?: string | null }; finish_reason?: string }>;
 }
 
@@ -63,7 +64,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
     if (choice?.message?.refusal) throw new ProviderError(this.id, `refusal: ${choice.message.refusal}`);
     const text = choice?.message?.content?.trim();
     if (!text) throw new ProviderError(this.id, `empty response (finish_reason: ${choice?.finish_reason ?? 'unknown'})`);
-    return { text, provider: this.id, model: completion.model ?? this.model };
+    const usage = completion.usage ? { inputTokens: completion.usage.prompt_tokens ?? 0, outputTokens: completion.usage.completion_tokens ?? 0 } : undefined;
+    return { text, provider: this.id, model: completion.model ?? this.model, usage };
   }
 
   private call(body: Record<string, unknown>, signal?: AbortSignal): Promise<ChatCompletion> {

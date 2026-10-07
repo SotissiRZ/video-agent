@@ -46,13 +46,16 @@ import { deleteLogo, getBrandKit, MAX_LOGO_BYTES, publicBrandKit, saveBrandKit, 
 import { sendPassReminders } from './reminders';
 import { createJob, deleteJob, getJob, JOB_ID, listJobs, publicJob, queuePosition, refundCredits, requestCancel, useCredit, userJobsDir, type JobRow } from './jobs';
 import { applyCommerceLimits, checkQuota, checkSongQuota, getPlan, getUsage, listPlans, PLAN_IDS, planOfUser } from './plans';
-import { exportPrice, getCommerceSettings, saveCommerceSettings } from './commerce';
+import { exportPrice, getCommerceSettings, publicCommerce, saveCommerceSettings } from './commerce';
 import { deleteProductImage, describeProductImage, listProductImages, productImageFiles, publicProductImage, saveProductImage } from './product-images';
 import { ensureCleanVideoExport } from './export';
 import { cancelPublication, createPublication, listPublications, publicPublication } from './publications';
 import { Worker } from './worker';
-import { createSongDraft, deleteSong, getSong, listSongs, publicSong, removeSongPreviews, SONG_ID, songDirectory, songPreviewFile, updateSongLyrics, type SongRow } from './songs';
+import { addSongUsage, createSongDraft, deleteSong, getSong, listSongs, publicSong, removeSongPreviews, SONG_ID, songDirectory, songPreviewFile, updateSongLyrics, type SongRow } from './songs';
 import { makeAudioPreview } from '../audio/ffmpeg';
+import { UsageMeter } from '../core/usage';
+import { planConfig, planLLM } from './plan-providers';
+import { costReport } from './costs';
 
 export const CreateJobSchema = z.object({
   prompt: z.string().trim().min(3).max(4000),
@@ -228,7 +231,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     const commerce = await getCommerceSettings(db);
     const plan = applyCommerceLimits(planOfUser(config, user), commerce);
     const usage = await getUsage(db, user.id);
-    return { user: userView(user), plan, usage, commerce, billing: billingEnabled(config), paymentProviders: enabledProviders(config).map((p) => ({ id: p, currency: CURRENCY[p] })), requireVerification: config.env.REQUIRE_EMAIL_VERIFICATION, mail: mailer.kind };
+    return { user: userView(user), plan, usage, commerce: publicCommerce(commerce), billing: billingEnabled(config), paymentProviders: enabledProviders(config).map((p) => ({ id: p, currency: CURRENCY[p] })), requireVerification: config.env.REQUIRE_EMAIL_VERIFICATION, mail: mailer.kind };
   };
 
   const capabilities = () => {
@@ -281,7 +284,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     return song;
   };
 
-  const generateSong = async (song: SongRow): Promise<void> => {
+  const generateSong = async (song: SongRow, plan: string): Promise<void> => {
     const currentConfig = config;
     const generate = options.songGenerator ?? (currentConfig.env.ELEVENLABS_API_KEY
       ? (input: { lyrics: string; style: string; mood: string; durationSec: number }) =>
@@ -300,6 +303,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     try {
       const audio = await generate({ lyrics: song.lyrics, style: song.style, mood: song.mood, durationSec: song.duration_sec });
       if (!audio.length) throw new Error('ElevenLabs a renvoyé un fichier audio vide.');
+      await addSongUsage(db, song.id, [{ kind: 'music', provider: 'elevenlabs', model: 'music', calls: 1, seconds: song.duration_sec }], plan);
       fs.mkdirSync(dir, { recursive: true });
       removeSongPreviews(dir);
       fs.rmSync(temporaryFile, { force: true });
@@ -360,7 +364,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         company: { name: config.env.COMPANY_NAME, address: config.env.COMPANY_ADDRESS, email: config.env.CONTACT_EMAIL, url: config.env.PUBLIC_URL ?? '' },
         retentionDays: config.env.VIDEO_AGENT_RETENTION_DAYS,
         plans: plans.map(({ stripePriceId: _stripePriceId, ...p }) => p),
-        commerce,
+        commerce: publicCommerce(commerce),
         paymentProviders: enabledProviders(config).map((p) => ({ id: p, currency: CURRENCY[p] })),
         creditPack: enabledProviders(config).length ? creditPack(config) : null,
       });
@@ -492,7 +496,13 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       if (!id && method === 'POST') {
         if (config.env.REQUIRE_EMAIL_VERIFICATION && !user.email_verified_at) throw new HttpError(403, 'Confirmez votre adresse e-mail pour créer des chansons', 'email_unverified');
         const body = parse(SongDraftSchema, await readJson(req));
-        const lyricProvider = llm();
+        // Lyrics are written with the plan's LLM; the tokens are added to the song's cost.
+        const songPlan = planOfUser(config, user).id;
+        const planProviders = (await getCommerceSettings(db)).providers[songPlan];
+        const warnProvider = (message: string) => logger.warn(`song (${songPlan}): ${message}`);
+        const writer = options.deps?.llm !== undefined ? options.deps.llm : planLLM(planConfig(config, planProviders, warnProvider), planProviders, warnProvider);
+        const lyricsMeter = new UsageMeter();
+        const lyricProvider = writer && lyricsMeter.llm(writer);
         if (!options.songLyricsGenerator && !lyricProvider) throw new HttpError(503, 'Configurez un fournisseur de rédaction IA pour créer les paroles.', 'song_lyrics_unavailable');
         if (!songDraftLimiter.take(user.id)) throw new HttpError(429, 'Trop de brouillons de chanson, réessayez plus tard', 'too_many_song_drafts');
         let lyrics: z.infer<typeof SongLyricsSchema>;
@@ -524,6 +534,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
           }
         }
         const song = await createSongDraft(db, config, user.id, { ...body, ...lyrics, durationSec: body.durationSec ?? 90 });
+        await addSongUsage(db, song.id, lyricsMeter.lines, songPlan);
         return json(res, 201, publicSong(song));
       }
       if (!id) throw new HttpError(405, 'method not allowed');
@@ -556,14 +567,16 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
           const plan = applyCommerceLimits(planOfUser(config, user), commerce);
           const quota = checkSongQuota(plan, await getUsage(tx, user.id));
           if (quota) throw new HttpError(402, 'Quota mensuel de chansons atteint', 'quota_songs', { limit: quota.limit, plan: plan.id });
+          // The free plan's songs are shorter: ElevenLabs Music is billed per minute.
+          const maxSec = plan.id === 'free' ? commerce.freeSongMaxSec : 120;
           return tx.one<SongRow>(
-            `UPDATE songs SET status = 'running', error = NULL, finished_at = NULL, heartbeat_at = now(), updated_at = now()
+            `UPDATE songs SET status = 'running', error = NULL, finished_at = NULL, heartbeat_at = now(), updated_at = now(), duration_sec = LEAST(duration_sec, $3)
              WHERE id = $1 AND user_id = $2 AND status IN ('draft', 'failed') RETURNING *`,
-            [song.id, user.id],
+            [song.id, user.id, maxSec],
           );
         });
         if (!updated) throw new HttpError(409, 'Cette chanson est déjà en cours ou a déjà été générée.', 'song_not_ready');
-        const task = generateSong(updated).catch((err) => logger.error(`song ${updated.id} background task failed: ${errorMessage(err)}`)).finally(() => songTasks.delete(task));
+        const task = generateSong(updated, planOfUser(config, user).id).catch((err) => logger.error(`song ${updated.id} background task failed: ${errorMessage(err)}`)).finally(() => songTasks.delete(task));
         songTasks.add(task);
         return json(res, 202, publicSong(updated));
       }
@@ -591,6 +604,11 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         // Shown back to the customer so they can check what the AI understood of their product.
         const described = await describeProductImage(db, llm(), image, (message) => logger.warn(`product image ${image.id} not described: ${summarizeError(message)}`));
         return json(res, 201, publicProductImage(described));
+      }
+      if (id && sub === 'file' && method === 'GET') {
+        const image = await db.one<{ file: string }>('SELECT file FROM product_images WHERE id = $1 AND user_id = $2', [id, user.id]);
+        if (!image) throw new HttpError(404, 'Image produit introuvable.', 'not_found');
+        return sendFile(req, res, image.file, { cache: 'private, max-age=86400' });
       }
       if (id && method === 'DELETE') {
         const image = await deleteProductImage(db, user.id, id);
@@ -841,6 +859,11 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         return json(res, 200, { ok: true });
       }
       if (id === 'payments' && method === 'GET') return json(res, 200, (await listPayments(db, undefined, 200)).map(publicPayment));
+      if (id === 'costs' && method === 'GET') {
+        const days = Math.min(365, Math.max(1, Number(url.searchParams.get('days')) || 30));
+        const commerce = await getCommerceSettings(db);
+        return json(res, 200, await costReport(db, days, { XOF: commerce.usdRateXof, MAD: commerce.usdRateMad }));
+      }
       if (id === 'stats' && method === 'GET') {
         const row = await db.one<Record<string, string | number>>(
           `SELECT (SELECT count(*) FROM users) AS users,

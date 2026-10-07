@@ -28,8 +28,8 @@ export interface Plan {
 
 export const listPlans = (config: AppConfig): Plan[] => [
   { id: 'free', name: 'Free', videosPerMonth: 3, minutesPerMonth: 3, songsPerMonth: 1, maxDurationSec: 60, publish: false, badge: true, price: '0' },
-  { id: 'creator', name: 'Creator', videosPerMonth: 30, minutesPerMonth: 60, songsPerMonth: 10, maxDurationSec: 180, publish: true, badge: false, price: config.env.PLAN_CREATOR_PRICE, stripePriceId: config.env.STRIPE_PRICE_CREATOR },
-  { id: 'pro', name: 'Pro', videosPerMonth: 120, minutesPerMonth: 300, songsPerMonth: 40, maxDurationSec: 600, publish: true, badge: false, price: config.env.PLAN_PRO_PRICE, stripePriceId: config.env.STRIPE_PRICE_PRO },
+  { id: 'creator', name: 'Creator', videosPerMonth: 30, minutesPerMonth: 30, songsPerMonth: 8, maxDurationSec: 120, publish: true, badge: false, price: config.env.PLAN_CREATOR_PRICE, stripePriceId: config.env.STRIPE_PRICE_CREATOR },
+  { id: 'pro', name: 'Pro', videosPerMonth: 80, minutesPerMonth: 60, songsPerMonth: 20, maxDurationSec: 300, publish: true, badge: false, price: config.env.PLAN_PRO_PRICE, stripePriceId: config.env.STRIPE_PRICE_PRO },
 ];
 
 export const getPlan = (config: AppConfig, id: string | null | undefined): Plan => listPlans(config).find((p) => p.id === id) ?? listPlans(config)[0]!;

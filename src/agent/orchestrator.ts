@@ -28,6 +28,7 @@ import {
   type VideoRequest,
 } from '../core/types';
 import { resolveLLM } from '../llm/registry';
+import type { UsageMeter } from '../core/usage';
 import type { LLMProvider } from '../llm/types';
 import { Planner } from '../planning/planner';
 import { buildBrief } from '../planning/brief';
@@ -70,6 +71,8 @@ export interface AgentDependencies {
   stock?: StockProvider[];
   renderer?: (options: RenderOptions) => Promise<RenderResult>;
   logger?: Logger;
+  /** Records the paid services used (tokens, voice characters, music seconds, images) for cost tracking. */
+  meter?: UsageMeter;
 }
 
 export interface RevisionRequest {
@@ -203,7 +206,7 @@ export class VideoAgent {
     // The script is written knowing what the customer's photos show.
     if (productPhotos.length) brief.productPhotos = productPhotos.map((photo) => photo.description || photo.name || path.basename(photo.file));
 
-    const llm = options.offline ? null : this.deps.llm !== undefined ? this.deps.llm : resolveLLM(this.config, options.llmProvider);
+    const llm = this.metered(options.offline ? null : this.deps.llm !== undefined ? this.deps.llm : resolveLLM(this.config, options.llmProvider));
     const planner = new Planner(llm, this.logger);
     const paths = jobPaths(options.outDir ?? path.join(this.config.paths.output, newJobId(brief.brand || brief.topic || template.id)));
     ensureJobDirs(paths);
@@ -272,7 +275,7 @@ export class VideoAgent {
     storyboard = await step('scenes', 'Choix des scènes', () => refineScenes(storyboard), (sb) => sb.scenes.map((s) => s.kind).join(' → '));
 
     // ---- 6. Assets (local library → stock photos/videos → AI generation) -------------
-    const imageProvider = options.generateImages === false ? null : this.deps.image !== undefined ? this.deps.image : safeResolve(() => resolveImageProvider(this.config), warnings);
+    const imageProvider = this.meteredImage(options.generateImages === false ? null : this.deps.image !== undefined ? this.deps.image : safeResolve(() => resolveImageProvider(this.config), warnings));
     const videoProvider = options.generateVideo ? (this.deps.video !== undefined ? this.deps.video : safeResolve(() => resolveVideoProvider(this.config), warnings)) : null;
     const stockProviders = options.stock === false ? [] : this.deps.stock ?? safeResolve(() => resolveStockProviders(this.config), warnings) ?? [];
     let library: AssetLibrary | undefined;
@@ -348,6 +351,7 @@ export class VideoAgent {
         voiceProvider = other;
       }
     }
+    voiceProvider = this.meteredVoice(voiceProvider);
     let musicSource = 'none';
     storyboard = await step(
       'audio',
@@ -452,7 +456,7 @@ export class VideoAgent {
   async revise(request: RevisionRequest, runOptions: RunOptions = {}): Promise<VideoResult> {
     const { signal } = runOptions;
     const warnings: string[] = [];
-    const llm = this.deps.llm !== undefined ? this.deps.llm : safeResolve(() => resolveLLM(this.config), warnings);
+    const llm = this.metered(this.deps.llm !== undefined ? this.deps.llm : safeResolve(() => resolveLLM(this.config), warnings));
     if (!llm) throw new RevisionNotApplicable('no LLM available to edit the storyboard');
     const source = jobPaths(request.sourceDir);
     const paths = jobPaths(request.outDir);
@@ -506,7 +510,7 @@ export class VideoAgent {
         if (!voiced) return recomputeDuration(storyboard);
         let sb: Storyboard = { ...storyboard, scenes: storyboard.scenes.map((scene) => (narrationChanged.has(scene.id) ? { ...scene, voiceover: undefined } : scene)) };
         if (narrationChanged.size) {
-          const voice = this.deps.voice !== undefined ? this.deps.voice : safeResolve(() => resolveVoiceProvider(this.config, undefined, brief.locale), warnings);
+          const voice = this.meteredVoice(this.deps.voice !== undefined ? this.deps.voice : safeResolve(() => resolveVoiceProvider(this.config, undefined, brief.locale), warnings));
           if (voice) {
             voiceSource = voice.id;
             sb = await this.generateVoiceover(sb, brief, paths, voice, warnings, progress, signal, narrationChanged);
@@ -545,6 +549,23 @@ export class VideoAgent {
       },
       (r) => r.videoFile ?? r.storyboardFile,
     );
+  }
+
+  private metered(llm: LLMProvider | null): LLMProvider | null {
+    return llm && this.deps.meter ? this.deps.meter.llm(llm) : llm;
+  }
+
+  private meteredVoice(voice: VoiceProvider | null): VoiceProvider | null {
+    if (!voice || !this.deps.meter) return voice;
+    const env = this.config.env;
+    return this.deps.meter.voice(voice, voice.id === 'elevenlabs' ? env.ELEVENLABS_MODEL : voice.id === 'openai' ? env.OPENAI_TTS_MODEL : undefined);
+  }
+
+  private meteredImage(image: ImageProvider | null): ImageProvider | null {
+    if (!image || !this.deps.meter) return image;
+    const env = this.config.env;
+    const models: Record<string, string | undefined> = { cloudflare: env.CLOUDFLARE_IMAGE_MODEL, huggingface: env.HF_IMAGE_MODEL, openai: env.OPENAI_IMAGE_MODEL, replicate: env.REPLICATE_IMAGE_MODEL, stability: env.STABILITY_MODEL };
+    return this.deps.meter.image(image, models[image.id]);
   }
 
   private render(storyboard: Storyboard, paths: JobPaths, outputFormat: VideoBrief['outputFormat'], progress: (p: number, msg?: string) => void, signal?: AbortSignal): Promise<RenderResult> {
@@ -653,7 +674,8 @@ export class VideoAgent {
     }
     const durationSec = storyboard.format.durationInFrames / storyboard.format.fps;
     // An original track composed for this video; procedural synthesis when unavailable.
-    const ai = this.deps.music !== undefined ? this.deps.music : safeResolve(() => resolveMusicProvider(this.config), warnings);
+    const resolved = this.deps.music !== undefined ? this.deps.music : safeResolve(() => resolveMusicProvider(this.config), warnings);
+    const ai = resolved && this.deps.meter ? this.deps.meter.music(resolved) : resolved;
     if (ai) {
       try {
         progress(0.9, `composition de la musique (${ai.id})`);

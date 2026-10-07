@@ -261,6 +261,24 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE jobs ADD COLUMN correction text;
   ALTER TABLE jobs ADD COLUMN correction_of text REFERENCES jobs(id) ON DELETE SET NULL;
   `,
+  // 9 — paid services used by each generation (cost tracking) and the plan it ran under
+  `
+  ALTER TABLE jobs ADD COLUMN usage jsonb NOT NULL DEFAULT '[]';
+  ALTER TABLE jobs ADD COLUMN plan text;
+  ALTER TABLE songs ADD COLUMN usage jsonb NOT NULL DEFAULT '[]';
+  ALTER TABLE songs ADD COLUMN plan text;
+  `,
+  // 10 — profitable quotas with the per-plan services; values an admin already changed are kept
+  `
+  UPDATE commerce_settings SET settings = jsonb_set(settings, '{creatorMinutesPerMonth}', '30') WHERE id = 1 AND settings->>'creatorMinutesPerMonth' = '60';
+  UPDATE commerce_settings SET settings = jsonb_set(settings, '{creatorSongsPerMonth}', '8') WHERE id = 1 AND settings->>'creatorSongsPerMonth' = '10';
+  UPDATE commerce_settings SET settings = jsonb_set(settings, '{creatorMaxDurationSec}', '120') WHERE id = 1 AND settings->>'creatorMaxDurationSec' = '180';
+  UPDATE commerce_settings SET settings = jsonb_set(settings, '{proVideosPerMonth}', '80') WHERE id = 1 AND settings->>'proVideosPerMonth' = '120';
+  UPDATE commerce_settings SET settings = jsonb_set(settings, '{proMinutesPerMonth}', '60') WHERE id = 1 AND settings->>'proMinutesPerMonth' = '300';
+  UPDATE commerce_settings SET settings = jsonb_set(settings, '{proSongsPerMonth}', '20') WHERE id = 1 AND settings->>'proSongsPerMonth' = '40';
+  UPDATE commerce_settings SET settings = jsonb_set(settings, '{proMaxDurationSec}', '300') WHERE id = 1 AND settings->>'proMaxDurationSec' = '600';
+  UPDATE commerce_settings SET settings = jsonb_set(settings, '{songPreviewSec}', '30') WHERE id = 1 AND settings->>'songPreviewSec' = '45';
+  `,
 ];
 
 /** Apply pending migrations (serialized with an advisory lock: several containers may start together). */

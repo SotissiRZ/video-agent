@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { AppConfig } from '../config/config';
 import type { Db } from './db';
+import { mergeUsage, type UsageLine } from '../core/usage';
 
 export type SongStatus = 'draft' | 'queued' | 'running' | 'completed' | 'failed';
 
@@ -97,6 +98,15 @@ export const updateSongLyrics = async (db: Db, userId: string, id: string, title
      WHERE id = $1 AND user_id = $2 AND (status IN ('draft', 'failed') OR (status = 'completed' AND corrections_used < $5)) RETURNING *`,
     [id, userId, title, lyrics, correctionLimit],
   );
+
+/** Add the paid services a song step used (lyrics, audio) to its running total. */
+export const addSongUsage = async (db: Db, songId: string, lines: UsageLine[], plan: string): Promise<void> => {
+  if (!lines.length) return;
+  const row = await db.one<{ usage: UsageLine[] | string | null }>('SELECT usage FROM songs WHERE id = $1', [songId]);
+  if (!row) return;
+  const current: UsageLine[] = typeof row.usage === 'string' ? JSON.parse(row.usage) : row.usage ?? [];
+  await db.query('UPDATE songs SET usage = $2, plan = $3 WHERE id = $1', [songId, JSON.stringify(mergeUsage(current, lines)), plan]);
+};
 
 export const deleteSong = (db: Db, userId: string, id: string): Promise<{ id: string }[]> =>
   db.query<{ id: string }>(

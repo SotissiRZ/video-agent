@@ -24,6 +24,8 @@ import { applyCommerceLimits, planOfUser } from './plans';
 import { getCommerceSettings } from './commerce';
 import { claimDuePublication, finishPublication, type PublicationRow } from './publications';
 import { productPhotos } from './product-images';
+import { planConfig, planLLM } from './plan-providers';
+import { UsageMeter } from '../core/usage';
 import { ensureCleanVideoExport } from './export';
 
 export interface WorkerOptions {
@@ -121,7 +123,13 @@ export class Worker {
     const { db, logger } = this.o;
     const config = this.o.config();
     const user = await db.one<{ plan: string; subscription_status: string | null; current_period_end: Date | string | null }>('SELECT plan, subscription_status, current_period_end FROM users WHERE id = $1', [job.user_id]);
-    const plan = applyCommerceLimits(planOfUser(config, user), await getCommerceSettings(db));
+    const commerce = await getCommerceSettings(db);
+    const plan = applyCommerceLimits(planOfUser(config, user), commerce);
+    // The plan decides which services (and so what cost) this generation runs with.
+    const warnProvider = (message: string) => logger.warn(`job ${job.id} (${plan.id}): ${message}`);
+    const runConfig = planConfig(config, commerce.providers[plan.id], warnProvider);
+    const meter = new UsageMeter();
+    const saveUsage = () => db.query('UPDATE jobs SET usage = $2, plan = $3 WHERE id = $1', [job.id, JSON.stringify(meter.lines), plan.id]);
     const controller = new AbortController();
     const steps = { ...job.steps };
     let progress = { overall: 0, step: '', message: '' };
@@ -156,8 +164,10 @@ export class Worker {
       skipRender: false,
     };
     try {
-      const agent = new VideoAgent(config, { logger, ...this.o.deps });
-      const photos = await productPhotos(db, this.llm(config), job.user_id, job.product_image_ids ?? [], (message) => logger.warn(`job ${job.id}: product photo not described: ${message}`));
+      const llm = this.o.deps?.llm !== undefined ? this.o.deps.llm : planLLM(runConfig, commerce.providers[plan.id], warnProvider);
+      const agent = new VideoAgent(runConfig, { logger, ...this.o.deps, llm, meter });
+      const describer = this.llm(config);
+      const photos = await productPhotos(db, describer && meter.llm(describer), job.user_id, job.product_image_ids ?? [], (message) => logger.warn(`job ${job.id}: product photo not described: ${message}`));
       const runOptions = {
         signal: controller.signal,
         onProgress: (e: ProgressEvent) => {
@@ -184,6 +194,7 @@ export class Worker {
       clearInterval(ticker);
       dirty = true;
       await flush();
+      await saveUsage();
       const fps = result.storyboard.format.fps;
       await db.query(
         `UPDATE jobs SET status = 'completed', overall = 1, finished_at = now(), video_file = $2, poster_file = $3, title = $4, warnings = $5, providers = $6, credits = $7, duration_sec = $8 WHERE id = $1`,
@@ -193,6 +204,8 @@ export class Worker {
       clearInterval(ticker);
       dirty = true;
       await flush().catch(() => undefined);
+      // A failed or cancelled generation still consumed what it called.
+      await saveUsage().catch(() => undefined);
       const cancelled = controller.signal.aborted;
       await db.query("UPDATE jobs SET status = $2, error = $3, finished_at = now() WHERE id = $1", [job.id, cancelled ? 'cancelled' : 'failed', cancelled ? null : errorMessage(err)]);
       if (!cancelled) logger.warn(`job ${job.id} failed: ${errorMessage(err)}`);

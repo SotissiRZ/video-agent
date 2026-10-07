@@ -244,7 +244,16 @@ const showSong = (song) => {
   }
 };
 
+/** Free plan: only the song lengths it allows (the server caps them anyway). */
+const applySongDurationLimit = () => {
+  const max = state.me?.plan?.id === 'free' ? state.me?.commerce?.freeSongMaxSec ?? 60 : 120;
+  const select = $('songDuration');
+  for (const option of select.options) option.disabled = Number(option.value) > max;
+  if (Number(select.value) > max) select.value = [...select.options].filter((o) => !o.disabled).at(-1)?.value ?? select.value;
+};
+
 const loadSongs = async () => {
+  applySongDurationLimit();
   const songs = await api('/api/songs');
   $('songsEmpty').hidden = songs.length > 0;
   $('songHistory').innerHTML = songs.map((song) => `<div class="video-card" role="button" tabindex="0" data-song-id="${escapeHtml(song.id)}">
@@ -405,8 +414,24 @@ const updateCapHints = () => {
   $('capHints').innerHTML = hints.map((h) => `<div class="alert warning">${icon('alert', 16)}<span>${escapeHtml(h)}</span></div>`).join('');
 };
 
+// Product photos: a tile per photo (click to include it or not) and a "+" frame to add more.
 const renderProductImages = () => {
-  $('productImagesList').innerHTML = state.productImages.map((image) => `<div class="input-group"><label class="switch"><input type="checkbox" value="${escapeHtml(image.id)}" checked /><span class="track"></span><span>${escapeHtml(image.name)}</span></label><button type="button" class="btn btn-ghost btn-icon btn-sm" data-product-image-delete="${escapeHtml(image.id)}" title="${escapeHtml(t('common.delete'))}">${icon('trash', 14)}</button></div>${image.description ? `<p class="hint">${escapeHtml(t('create.productImageSeen'))} ${escapeHtml(image.description)}</p>` : ''}`).join('');
+  const images = state.productImages;
+  const limit = state.me?.commerce?.maxProductImages ?? 4;
+  const tiles = images.map((image) => `<label class="product-tile" title="${escapeHtml(image.description || image.name)}">
+    <input type="checkbox" value="${escapeHtml(image.id)}" checked hidden />
+    <img src="/api/product-images/${encodeURIComponent(image.id)}/file" alt="${escapeHtml(image.name)}" loading="lazy" />
+    <span class="product-tile-check">${icon('check', 12)}</span>
+    <button type="button" class="product-tile-delete" data-product-image-delete="${escapeHtml(image.id)}" title="${escapeHtml(t('common.delete'))}" aria-label="${escapeHtml(t('common.delete'))}">${icon('trash', 14)}</button>
+  </label>`);
+  const add = images.length < limit
+    ? `<label class="product-tile product-add${images.length ? '' : ' is-alone'}" for="productImageInput" tabindex="0" role="button">${icon('plus', 28)}<span>${escapeHtml(t(images.length ? 'create.productImagesAdd' : 'create.productImagesDrop'))}</span></label>`
+    : '';
+  $('productImagesList').innerHTML = tiles.join('') + add;
+  $('productImageNotes').innerHTML = images
+    .filter((image) => image.description)
+    .map((image) => `<p class="hint"><b>${escapeHtml(image.name)}</b> — ${escapeHtml(t('create.productImageSeen'))} ${escapeHtml(image.description)}</p>`)
+    .join('');
 };
 
 const loadProductImages = async () => {
@@ -414,26 +439,52 @@ const loadProductImages = async () => {
   renderProductImages();
 };
 
-$('productImageInput').addEventListener('change', async (event) => {
-  const input = event.currentTarget;
-  input.disabled = true;
+const uploadProductImages = async (files) => {
+  const images = [...files].filter((file) => /^image\/(png|jpeg|webp)$/.test(file.type));
+  if (!images.length) return;
+  const add = $('productImagesList').querySelector('.product-add');
+  add?.classList.add('is-busy');
+  if (add) add.querySelector('span').textContent = t('create.productImagesUploading');
   try {
-    for (const file of input.files) {
+    for (const file of images) {
       await api(`/api/product-images?filename=${encodeURIComponent(file.name)}`, { method: 'POST', body: file });
     }
-    await loadProductImages();
     toast(t('create.productImagesUploaded'), 'success');
   } catch (err) {
     toast(errorText(err), 'error');
   } finally {
-    input.value = '';
-    input.disabled = false;
+    await loadProductImages().catch(() => renderProductImages());
   }
+};
+
+$('productImageInput').addEventListener('change', async (event) => {
+  const input = event.currentTarget;
+  await uploadProductImages(input.files);
+  input.value = '';
+});
+
+$('productImagesList').addEventListener('keydown', (event) => {
+  if (!event.target.matches('.product-add') || !['Enter', ' '].includes(event.key)) return;
+  event.preventDefault();
+  $('productImageInput').click();
+});
+$('productImagesList').addEventListener('dragover', (event) => {
+  event.preventDefault();
+  $('productImagesList').classList.add('is-dragover');
+});
+$('productImagesList').addEventListener('dragleave', (event) => {
+  if (!$('productImagesList').contains(event.relatedTarget)) $('productImagesList').classList.remove('is-dragover');
+});
+$('productImagesList').addEventListener('drop', (event) => {
+  event.preventDefault();
+  $('productImagesList').classList.remove('is-dragover');
+  void uploadProductImages(event.dataTransfer?.files ?? []);
 });
 
 $('productImagesList').addEventListener('click', async (event) => {
   const button = event.target.closest('[data-product-image-delete]');
   if (!button) return;
+  event.preventDefault();
   try {
     await api(`/api/product-images/${encodeURIComponent(button.dataset.productImageDelete)}`, { method: 'DELETE' });
     await loadProductImages();
@@ -1238,6 +1289,8 @@ const loadAdmin = async () => {
     adminResult(api('/api/admin/commerce')),
   ]);
   renderAdminCommerce(commerceResult);
+  renderAdminProviders(commerceResult);
+  void loadAdminCosts();
   if ('error' in statsResult) {
     $('adminStats').innerHTML = `<div class="alert danger">${escapeHtml(friendlyText(statsResult.error))}</div>`;
   } else {
@@ -1288,6 +1341,7 @@ const COMMERCE_FIELDS = [
   ['freeMinutesPerMonth', 'admin.commerce.freeMinutes'],
   ['freeSongsPerMonth', 'admin.commerce.freeSongs'],
   ['freeMaxDurationSec', 'admin.commerce.freeDuration'],
+  ['freeSongMaxSec', 'admin.commerce.freeSongMax'],
   ['creatorVideosPerMonth', 'admin.commerce.creatorVideos'],
   ['creatorMinutesPerMonth', 'admin.commerce.creatorMinutes'],
   ['creatorSongsPerMonth', 'admin.commerce.creatorSongs'],
@@ -1301,6 +1355,8 @@ const COMMERCE_FIELDS = [
   ['songPreviewSec', 'admin.commerce.songPreview'],
   ['maxProductImages', 'admin.commerce.maxImages'],
   ['maxProductImageMb', 'admin.commerce.maxImageSize'],
+  ['usdRateXof', 'admin.commerce.usdRateXof'],
+  ['usdRateMad', 'admin.commerce.usdRateMad'],
 ];
 
 const renderAdminCommerce = (result) => {
@@ -1332,6 +1388,93 @@ $('adminCommerce').addEventListener('submit', async (e) => {
   } finally {
     button.disabled = false;
   }
+});
+
+// ---- Services per plan and cost dashboard --------------------------------------------
+const PROVIDER_FIELDS = [
+  ['llm', ['env', 'auto', 'anthropic', 'groq', 'openai', 'openai-compatible', 'ollama', 'local']],
+  ['claudeModel', ['env', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-4-5']],
+  ['voice', ['env', 'auto', 'elevenlabs', 'openai', 'piper', 'system', 'none']],
+  ['elevenLabsModel', ['env', 'eleven_multilingual_v2', 'eleven_flash_v2_5']],
+  ['music', ['env', 'none', 'auto', 'elevenlabs', 'stability', 'replicate']],
+];
+const PLAN_COLUMNS = ['free', 'creator', 'pro'];
+const optionLabel = (value) => (value === 'env' ? t('admin.providers.env') : value === 'none' ? t('admin.providers.none') : value === 'local' ? t('admin.providers.local') : value);
+
+const renderAdminProviders = (result) => {
+  if ('error' in result) {
+    $('adminProviders').innerHTML = '';
+    return;
+  }
+  const providers = result.value.providers;
+  $('adminProviders').innerHTML = `<form class="card" id="adminProvidersForm">
+    <div class="card-header"><div><h2>${escapeHtml(t('admin.providers.title'))}</h2><p>${escapeHtml(t('admin.providers.subtitle'))}</p></div></div>
+    <div class="card-body" style="padding: 8px 6px 6px"><div class="table-wrap"><table class="table">
+      <thead><tr><th></th>${PLAN_COLUMNS.map((plan) => `<th>${escapeHtml(t(`plan.${plan}`))}</th>`).join('')}</tr></thead>
+      <tbody>${PROVIDER_FIELDS.map(([field, values]) => `<tr><td><b>${escapeHtml(t(`admin.providers.${field}`))}</b></td>${PLAN_COLUMNS.map((plan) => `<td><select class="select" name="${plan}.${field}">${values.map((v) => `<option value="${escapeHtml(v)}" ${providers[plan][field] === v ? 'selected' : ''}>${escapeHtml(optionLabel(v))}</option>`).join('')}</select></td>`).join('')}</tr>`).join('')}</tbody>
+    </table></div></div>
+    <div class="card-footer"><button class="btn btn-primary" type="submit">${escapeHtml(t('common.save'))}</button></div>
+  </form>`;
+};
+
+$('adminProviders').addEventListener('submit', async (e) => {
+  if (e.target.id !== 'adminProvidersForm') return;
+  e.preventDefault();
+  const form = e.target;
+  const providers = Object.fromEntries(PLAN_COLUMNS.map((plan) => [plan, Object.fromEntries(PROVIDER_FIELDS.map(([field]) => [field, form.elements.namedItem(`${plan}.${field}`).value]))]));
+  const button = form.querySelector('[type="submit"]');
+  button.disabled = true;
+  try {
+    renderAdminProviders({ value: await api('/api/admin/commerce', { method: 'PUT', body: JSON.stringify({ providers }) }) });
+    toast(t('common.saved'), 'success');
+  } catch (err) {
+    toast(errorText(err), 'error');
+  } finally {
+    button.disabled = false;
+  }
+});
+
+const usd = (n) => (n === null || n === undefined ? '—' : `${new Intl.NumberFormat(getLang() === 'fr' ? 'fr-FR' : 'en-US', { minimumFractionDigits: 2, maximumFractionDigits: n !== 0 && Math.abs(n) < 0.1 ? 3 : 2 }).format(n)} $`);
+const quantity = (line) => [
+  line.inputTokens || line.outputTokens ? t('admin.costs.tokens', { input: (line.inputTokens ?? 0).toLocaleString(), output: (line.outputTokens ?? 0).toLocaleString() }) : '',
+  line.characters ? t('admin.costs.characters', { n: line.characters.toLocaleString() }) : '',
+  line.seconds && line.kind === 'music' ? t('admin.costs.seconds', { n: Math.round(line.seconds) }) : '',
+  line.images ? t('admin.costs.images', { n: line.images }) : '',
+].filter(Boolean).join(' · ');
+let costDays = 30;
+
+const loadAdminCosts = async () => {
+  const result = await adminResult(api(`/api/admin/costs?days=${costDays}`));
+  if ('error' in result) {
+    $('adminCosts').innerHTML = `<div class="alert danger">${escapeHtml(friendlyText(result.error))}</div>`;
+    return;
+  }
+  const r = result.value;
+  const table = (head, rows) => `<div class="table-wrap"><table class="table"><thead><tr>${head.map((h) => `<th>${escapeHtml(t(h))}</th>`).join('')}</tr></thead><tbody>${rows.join('') || `<tr><td colspan="${head.length}" class="hint">${escapeHtml(t('admin.costs.empty'))}</td></tr>`}</tbody></table></div>`;
+  $('adminCosts').innerHTML = `<div class="card">
+    <div class="card-header"><div><h2>${escapeHtml(t('admin.costs.title'))}</h2><p>${escapeHtml(t('admin.costs.subtitle', { xof: r.rates.XOF, mad: r.rates.MAD }))}</p></div>
+      <select class="select" id="adminCostDays" style="width: auto">${[7, 30, 90].map((d) => `<option value="${d}" ${d === costDays ? 'selected' : ''}>${escapeHtml(t('admin.costs.days', { n: d }))}</option>`).join('')}</select></div>
+    <div class="card-body form-stack">
+      <div class="grid-3" style="grid-template-columns: repeat(auto-fill, minmax(180px, 1fr))">${[
+        ['admin.costs.cost', usd(r.totals.costUsd)],
+        ['admin.costs.revenue', usd(r.totals.revenueUsd)],
+        ['admin.costs.margin', usd(r.totals.marginUsd)],
+      ].map(([k, v]) => `<div class="card stat"><div class="k">${escapeHtml(t(k))}</div><div class="v">${escapeHtml(v)}</div></div>`).join('')}</div>
+      <h3>${escapeHtml(t('admin.costs.byPlan'))}</h3>
+      ${table(['admin.plan', 'admin.costs.activeUsers', 'admin.costs.videos', 'admin.costs.minutes', 'admin.costs.songs', 'admin.costs.cost', 'admin.costs.perVideo', 'admin.costs.perMinute', 'admin.costs.perSong'], r.byPlan.map((p) => `<tr><td>${escapeHtml(PLAN_COLUMNS.includes(p.plan) ? t(`plan.${p.plan}`) : p.plan)}</td><td>${p.activeUsers}</td><td>${p.videos}</td><td>${p.minutes}</td><td>${p.songs}</td><td><b>${usd(p.costUsd)}</b></td><td>${usd(p.costPerVideoUsd)}</td><td>${usd(p.costPerMinuteUsd)}</td><td>${usd(p.costPerSongUsd)}</td></tr>`))}
+      <h3>${escapeHtml(t('admin.costs.byService'))}</h3>
+      ${table(['admin.costs.service', 'admin.costs.calls', 'admin.costs.usage', 'admin.costs.cost'], r.byService.map((s) => `<tr><td>${escapeHtml(t(`admin.costs.kind.${s.kind}`))} · <b>${escapeHtml(s.provider)}</b>${s.model ? `<div class="hint">${escapeHtml(s.model)}</div>` : ''}</td><td>${s.calls}</td><td>${escapeHtml(quantity(s))}</td><td>${usd(s.usd)}${s.unpriced ? ` <span class="hint">${escapeHtml(t('admin.costs.unpriced'))}</span>` : s.estimate ? ` <span class="hint">${escapeHtml(t('admin.costs.estimate'))}</span>` : ''}</td></tr>`))}
+      <h3>${escapeHtml(t('admin.costs.topUsers'))}</h3>
+      ${table(['admin.user', 'admin.plan', 'admin.costs.videos', 'admin.costs.songs', 'admin.costs.cost', 'admin.costs.revenue', 'admin.costs.margin'], r.topUsers.map((u) => `<tr><td>${escapeHtml(u.email)}</td><td>${escapeHtml(PLAN_COLUMNS.includes(u.plan) ? t(`plan.${u.plan}`) : u.plan)}</td><td>${u.videos}</td><td>${u.songs}</td><td>${usd(u.costUsd)}</td><td>${usd(u.revenueUsd)}</td><td><b style="color: ${u.marginUsd < 0 ? 'var(--danger)' : 'inherit'}">${usd(u.marginUsd)}</b></td></tr>`))}
+      <p class="hint">${escapeHtml(t('admin.costs.note'))}</p>
+    </div>
+  </div>`;
+};
+
+$('adminCosts').addEventListener('change', (e) => {
+  if (e.target.id !== 'adminCostDays') return;
+  costDays = Number(e.target.value);
+  void loadAdminCosts();
 });
 
 $('adminUsers').addEventListener('change', async (e) => {

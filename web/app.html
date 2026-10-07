@@ -131,12 +131,13 @@
                   <span class="label" data-i18n="create.prompt"></span>
                   <textarea class="textarea" id="prompt" rows="4" maxlength="4000" required data-i18n-placeholder="create.placeholder"></textarea>
                 </label>
-                <label class="field">
+                <div class="field">
                   <span class="label" data-i18n="create.productImages"></span>
-                  <input class="input" id="productImageInput" type="file" accept="image/png,image/jpeg,image/webp" multiple />
+                  <input id="productImageInput" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden />
+                  <div class="product-grid" id="productImagesList"></div>
                   <span class="hint" data-i18n="create.productImagesHint"></span>
-                </label>
-                <div id="productImagesList" class="form-stack"></div>
+                  <div id="productImageNotes" class="form-stack"></div>
+                </div>
                 <div class="examples">
                   <span class="hint" data-i18n="create.examples"></span>
                   <button type="button" class="chip" data-example="create.ex.ad.text" data-i18n="create.ex.ad"></button>
@@ -477,6 +478,8 @@
           <div class="page-header"><div><h1 data-i18n="admin.title"></h1><p data-i18n="admin.subtitle"></p></div></div>
           <div class="grid-3" id="adminStats" style="grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); margin-bottom: 20px"></div>
           <div id="adminCommerce" style="margin-bottom: 20px"></div>
+          <div id="adminProviders" style="margin-bottom: 20px"></div>
+          <div id="adminCosts" style="margin-bottom: 20px"></div>
           <div class="card" style="margin-bottom: 20px">
             <div class="card-header"><h2 data-i18n="admin.users"></h2></div>
             <div class="card-body" style="padding: 8px 6px 6px">

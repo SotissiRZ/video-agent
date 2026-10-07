@@ -72,6 +72,9 @@ export class AnthropicProvider implements LLMProvider {
       .join('')
       .trim();
     if (!text) throw new ProviderError(this.id, `empty response (stop_reason: ${message.stop_reason})`);
-    return { text, provider: this.id, model: message.model ?? this.model };
+    const usage = message.usage
+      ? { inputTokens: (message.usage.input_tokens ?? 0) + (message.usage.cache_creation_input_tokens ?? 0) + (message.usage.cache_read_input_tokens ?? 0), outputTokens: message.usage.output_tokens ?? 0 }
+      : undefined;
+    return { text, provider: this.id, model: message.model ?? this.model, usage };
   }
 }

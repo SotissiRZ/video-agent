@@ -142,8 +142,8 @@ describe('plans', () => {
     expect(checkQuota(free, { ...usage, videos: 1, seconds: 170 }, 30)).toEqual({ code: 'minutes', limit: 3 });
     expect(checkSongQuota(free, usage)).toBeNull();
     expect(checkSongQuota(free, { ...usage, songs: 1 })).toEqual({ code: 'songs', limit: 1 });
-    expect(getPlan(config, 'creator').songsPerMonth).toBe(10);
-    expect(getPlan(config, 'pro').songsPerMonth).toBe(40);
+    expect(getPlan(config, 'creator').songsPerMonth).toBe(8);
+    expect(getPlan(config, 'pro').songsPerMonth).toBe(20);
     expect(getPlan(config, 'unknown').id).toBe('free');
   });
 });
@@ -154,6 +154,10 @@ describe('accounts', () => {
     expect(pub.body).toMatchObject({ firstUser: true, signupOpen: true, billing: true });
     expect(pub.body.plans.map((p: { id: string }) => p.id)).toEqual(['free', 'creator', 'pro']);
     expect(JSON.stringify(pub.body)).not.toContain('price_creator');
+    // Customers see limits and prices, not the services or exchange rates behind them.
+    expect(pub.body.commerce).toMatchObject({ maxProductImages: 4 });
+    expect(pub.body.commerce.providers).toBeUndefined();
+    expect(pub.body.commerce.usdRateXof).toBeUndefined();
 
     const admin = new Client(base);
     const s = await admin.json('POST', '/api/auth/signup', { email: 'Admin@Example.com', password: 'motdepasse1', name: 'Admin' });
@@ -181,6 +185,11 @@ describe('accounts', () => {
     const updatedCommerce = await admin.json('PUT', '/api/admin/commerce', { ...commerce.body, correctionsPerSong: 2 });
     expect(updatedCommerce.body.correctionsPerSong).toBe(2);
     expect((await admin.json('PUT', '/api/admin/commerce', commerce.body)).status).toBe(200);
+    expect(commerce.body.providers.free).toMatchObject({ llm: 'groq', voice: 'piper', music: 'none' });
+    const costs = await admin.json('GET', '/api/admin/costs?days=7');
+    expect(costs.status).toBe(200);
+    expect(costs.body).toMatchObject({ days: 7, rates: { XOF: 600, MAD: 10 }, totals: { costUsd: expect.any(Number) } });
+    expect((await bob.json('GET', '/api/admin/costs')).status).toBe(403);
   });
 
   it('refuses cross-site requests', async () => {
@@ -268,6 +277,22 @@ describe('videos', () => {
     expect((await owner.json('DELETE', `/api/jobs/${original.id}?remove=1`)).body.removed).toBe(true);
   }, 30_000);
 
+  it('stores product photos and serves their thumbnails to their owner only', async () => {
+    const owner = new Client(base);
+    await owner.json('POST', '/api/auth/signup', { email: 'photos@example.com', password: 'motdepasse9' });
+    const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+    const res = await fetch(`${base}/api/product-images?filename=bissap.png`, { method: 'POST', body: png, headers: { cookie: owner.cookie, 'content-type': 'application/octet-stream' } });
+    expect(res.status).toBe(201);
+    const image = await res.json();
+    expect(image).toMatchObject({ name: 'bissap.png' });
+    const thumbnail = await owner.req('GET', `/api/product-images/${image.id}/file`);
+    expect(thumbnail.status).toBe(200);
+    expect(Buffer.from(await thumbnail.arrayBuffer())).toEqual(png);
+    const stranger = new Client(base);
+    await stranger.json('POST', '/api/auth/signup', { email: 'photos-stranger@example.com', password: 'motdepasse9' });
+    expect((await stranger.req('GET', `/api/product-images/${image.id}/file`)).status).toBe(404);
+  });
+
   it('applies the included correction once, as a new version of the video', async () => {
     const owner = new Client(base);
     await owner.json('POST', '/api/auth/signup', { email: 'correct-video@example.com', password: 'motdepasse9' });
@@ -282,6 +307,8 @@ describe('videos', () => {
       return ['completed', 'failed'].includes(result.body.status) ? result.body : undefined;
     });
     expect(done.status).toBe('completed');
+    // Each generation records the plan it ran under, for the cost dashboard.
+    expect((await db.one<{ plan: string }>('SELECT plan FROM jobs WHERE id = $1', [original.id]))?.plan).toBe('free');
     expect((await owner.json('POST', `/api/jobs/${original.id}/correct`, { instruction: 'Encore une correction' })).body.code).toBe('correction_limit');
     expect((await owner.json('GET', '/api/me')).body.usage.videos).toBe(1);
   }, 30_000);
@@ -369,6 +396,8 @@ describe('songs', () => {
       return ['completed', 'failed'].includes(result.body.status) ? result.body : undefined;
     });
     expect(finished.status).toBe('completed');
+    // Free plan: the 90 s requested are capped to the free song length.
+    expect(finished.durationSec).toBe(60);
     expect(await (await singer.req('GET', finished.audioUrl)).text()).toBe('preview of fake mp3');
     expect((await singer.json('GET', '/api/me')).body.usage.songs).toBe(1);
     expect((await singer.req('GET', `${finished.audioUrl}?download=1`)).status).toBe(402);

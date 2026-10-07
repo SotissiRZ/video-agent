@@ -26,6 +26,8 @@ export interface LLMResponse {
   text: string;
   provider: string;
   model: string;
+  /** Billed tokens, when the provider reports them (cost tracking). */
+  usage?: { inputTokens: number; outputTokens: number };
 }
 
 export interface LLMProvider {
