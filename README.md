@@ -65,7 +65,7 @@ Il produit `output/<job>/video.mp4` (1080×1920, 30 s, 30 fps), avec animations,
 
 **Formats** : 1920×1080 (16:9), 1080×1920 (9:16), 1080×1080 (1:1), 1080×1350 (4:5) ou toute résolution `LxH`. La durée, le nombre de fps et le conteneur de sortie (`mp4`, `webm`, `mov`, `gif`) sont réglables.
 
-**Templates** : publicité, présentation produit, tutoriel, annonce, réseaux sociaux, démonstration d'application, storytelling.
+**Templates** : publicité, commerce local (restaurant, boutique, salon… : spécialités, livraison, numéro de téléphone), présentation produit, tutoriel, annonce, réseaux sociaux, démonstration d'application, storytelling.
 
 **Styles** : modern, vibrant, minimal, corporate, elegant, playful, tech, warm.
 

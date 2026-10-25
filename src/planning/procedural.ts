@@ -2,6 +2,7 @@
 import type { PlannedScene, VideoBrief, VideoConcept } from '../core/types';
 import type { CopyContext, TemplateDefinition } from '../templates/types';
 import type { SceneSlot } from './slots';
+import { parseBusinessDetails } from '../prompt/business';
 
 export const copyContext = (brief: VideoBrief): CopyContext => ({
   lang: brief.language,
@@ -11,6 +12,7 @@ export const copyContext = (brief: VideoBrief): CopyContext => ({
   location: brief.location,
   locationPhrase: brief.locationPhrase,
   topic: brief.topic || brief.brand,
+  business: parseBusinessDetails(brief.prompt, brief.language),
 });
 
 export const proceduralConcept = (brief: VideoBrief, template: TemplateDefinition): VideoConcept => template.concept(copyContext(brief));
