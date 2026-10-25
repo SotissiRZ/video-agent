@@ -1,0 +1,134 @@
+/** Standalone song records and owner-scoped filesystem storage. */
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import type { AppConfig } from '../config/config';
+import type { Db } from './db';
+import { mergeUsage, type UsageLine } from '../core/usage';
+
+export type SongStatus = 'draft' | 'queued' | 'running' | 'completed' | 'failed';
+
+export interface SongRow {
+  id: string;
+  user_id: string;
+  prompt: string;
+  title: string;
+  lyrics: string;
+  style: string;
+  mood: string;
+  duration_sec: number;
+  status: SongStatus;
+  error: string | null;
+  audio_file: string | null;
+  export_paid: boolean;
+  corrections_used: number;
+  heartbeat_at: Date | string | null;
+  created_at: Date | string;
+  updated_at: Date | string;
+  finished_at: Date | string | null;
+}
+
+const iso = (date: Date | string | null) => (date ? new Date(date).toISOString() : undefined);
+
+export const publicSong = (song: SongRow) => ({
+  id: song.id,
+  prompt: song.prompt,
+  title: song.title,
+  lyrics: song.lyrics,
+  style: song.style,
+  mood: song.mood,
+  durationSec: song.duration_sec,
+  status: song.status,
+  exportPaid: song.export_paid,
+  correctionsUsed: song.corrections_used,
+  error: song.error ? songErrorCode(song.error) : undefined,
+  createdAt: iso(song.created_at),
+  finishedAt: iso(song.finished_at),
+  audioUrl: song.audio_file ? `/api/songs/${song.id}/audio` : undefined,
+  downloadUrl: song.audio_file ? `/api/songs/${song.id}/audio?download=1` : undefined,
+});
+
+export const songErrorCode = (message: string): string => {
+  if (/paid_plan_required|paid plan|required.*plan|http 402/i.test(message)) return 'paid_plan_required';
+  if (/401|unauthorized|invalid.*api.?key/i.test(message)) return 'provider_auth';
+  if (/429|rate.?limit|quota/i.test(message)) return 'provider_limit';
+  if (/timeout|timed out|econnreset|network/i.test(message)) return 'provider_unavailable';
+  if (/redémarrage du serveur|server restart|interrupted by a server restart/i.test(message)) return 'interrupted';
+  return 'generation_failed';
+};
+
+export const SONG_ID = /^[a-f0-9-]{36}$/;
+
+export const songDirectory = (config: AppConfig, userId: string, songId: string): string =>
+  path.join(config.paths.output, 'users', userId, 'songs', songId);
+
+export const createSongDraft = async (
+  db: Db,
+  config: AppConfig,
+  userId: string,
+  input: { prompt: string; title: string; lyrics: string; style: string; mood: string; durationSec: number },
+): Promise<SongRow> => {
+  const id = crypto.randomUUID();
+  const dir = songDirectory(config, userId, id);
+  fs.mkdirSync(dir, { recursive: true });
+  try {
+    const row = await db.one<SongRow>(
+      `INSERT INTO songs (id, user_id, prompt, title, lyrics, style, mood, duration_sec)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [id, userId, input.prompt, input.title, input.lyrics, input.style, input.mood, input.durationSec],
+    );
+    if (!row) throw new Error('Song draft insert returned no record');
+    return row;
+  } catch (err) {
+    fs.rmSync(dir, { recursive: true, force: true });
+    throw err;
+  }
+};
+
+export const getSong = (db: Db, userId: string, id: string): Promise<SongRow | undefined> =>
+  db.one<SongRow>('SELECT * FROM songs WHERE id = $1 AND user_id = $2', [id, userId]);
+
+export const listSongs = (db: Db, userId: string): Promise<SongRow[]> =>
+  db.query<SongRow>('SELECT * FROM songs WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100', [userId]);
+
+export const updateSongLyrics = async (db: Db, userId: string, id: string, title: string, lyrics: string, correctionLimit = 0): Promise<SongRow | undefined> =>
+  db.one<SongRow>(
+    `UPDATE songs SET title = $3, lyrics = $4, status = 'draft', error = NULL, audio_file = NULL,
+       corrections_used = corrections_used + CASE WHEN status = 'completed' THEN 1 ELSE 0 END, updated_at = now()
+     WHERE id = $1 AND user_id = $2 AND (status IN ('draft', 'failed') OR (status = 'completed' AND corrections_used < $5)) RETURNING *`,
+    [id, userId, title, lyrics, correctionLimit],
+  );
+
+/** Add the paid services a song step used (lyrics, audio) to its running total. */
+export const addSongUsage = async (db: Db, songId: string, lines: UsageLine[], plan: string): Promise<void> => {
+  if (!lines.length) return;
+  const row = await db.one<{ usage: UsageLine[] | string | null }>('SELECT usage FROM songs WHERE id = $1', [songId]);
+  if (!row) return;
+  const current: UsageLine[] = typeof row.usage === 'string' ? JSON.parse(row.usage) : row.usage ?? [];
+  await db.query('UPDATE songs SET usage = $2, plan = $3 WHERE id = $1', [songId, JSON.stringify(mergeUsage(current, lines)), plan]);
+};
+
+/** Retention: songs older than `days` (not while one of their payments is pending). */
+export const purgeOldSongs = (db: Db, days: number): Promise<Array<{ id: string; user_id: string }>> =>
+  db.query<{ id: string; user_id: string }>(
+    `DELETE FROM songs s WHERE s.status IN ('draft', 'completed', 'failed') AND s.created_at < $1
+       AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.target_id = s.id AND p.status = 'pending')
+     RETURNING id, user_id`,
+    [new Date(Date.now() - days * 86_400_000).toISOString()],
+  );
+
+export const deleteSong = (db: Db, userId: string, id: string): Promise<{ id: string }[]> =>
+  db.query<{ id: string }>(
+    "DELETE FROM songs WHERE id = $1 AND user_id = $2 AND status NOT IN ('queued', 'running') RETURNING id",
+    [id, userId],
+  );
+
+/** Free-listening excerpt of a completed song; the length is part of the name so an admin change rebuilds it. */
+export const songPreviewFile = (song: SongRow, seconds: number): string =>
+  path.join(path.dirname(song.audio_file!), `preview-${seconds}s.mp3`);
+
+/** Drop excerpts of a previous version of the song (after a lyrics correction). */
+export const removeSongPreviews = (dir: string): void => {
+  if (!fs.existsSync(dir)) return;
+  for (const name of fs.readdirSync(dir)) if (/^preview-\d+s\.mp3(\.tmp)?$/.test(name)) fs.rmSync(path.join(dir, name), { force: true });
+};

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installation de Video Agent (Linux / macOS).
+# Installation de SOVID AI (Linux / macOS).
 # Usage : ./scripts/install.sh [--link]
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 green() { printf '\033[32m%s\033[0m\n' "$1"; }
 red() { printf '\033[31m%s\033[0m\n' "$1"; }
 
-echo "🎬 Installation de Video Agent"
+echo "🎬 Installation de SOVID AI"
 
 if ! command -v node >/dev/null 2>&1; then
   red "Node.js est introuvable. Installez Node.js 20 LTS ou plus récent : https://nodejs.org"

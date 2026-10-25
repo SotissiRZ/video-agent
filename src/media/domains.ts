@@ -11,6 +11,8 @@ export interface Domain {
   match: RegExp;
   /** Varied English searches; scenes take them in turn. */
   queries: string[];
+  /** Value of one match (default 1): broad domains count less than specific ones. */
+  weight?: number;
 }
 
 // Most specific first: "application de paiement" is fintech, not generic tech.
@@ -32,7 +34,7 @@ export const DOMAINS: Domain[] = [
   },
   {
     id: 'fashion-beauty',
-    match: /\bmode\b|fashion|couture|couturier|tailleur|tailor|vetement|clothing|wax|pagne|boutique de mode|beaute|beauty|cosmet|coiffure|coiffeur|\bhair|salon de|maquillage|makeup|skincare|parfum|perfume|bijou|jewel/,
+    match: /\bmode\b|fashion|couture|couturier|tailleur|tailor|vetement|clothing|\bwax\b|\bpagnes?\b|boutique de mode|beaute|beauty|cosmet|coiffure|coiffeur|\bhair|salon de|maquillage|makeup|skincare|parfum|perfume|bijou|jewel/,
     queries: ['fashion designer studio', 'clothing boutique rack', 'model fashion portrait', 'tailor sewing machine', 'hair salon styling', 'makeup artist', 'beauty products flat lay', 'fabric textile colorful'],
   },
   {
@@ -42,7 +44,7 @@ export const DOMAINS: Domain[] = [
   },
   {
     id: 'education',
-    match: /formation|education|ecole|school|\bcours\b|\bcourses?\b|universite|university|etudiant|student|apprendre|learn|e-learning|elearning|enseign|teacher|professeur|bootcamp|tutorat/,
+    match: /\bformations?\b|education|ecole|school|\bcours\b|\bcourses?\b|universite|university|etudiant|student|apprendre|learn|e-learning|elearning|enseign|teacher|professeur|bootcamp|tutorat/,
     queries: ['students classroom', 'online learning laptop', 'teacher whiteboard', 'university campus students', 'student studying books', 'workshop training adults', 'graduation', 'library study'],
   },
   {
@@ -82,7 +84,9 @@ export const DOMAINS: Domain[] = [
   },
   {
     id: 'tech',
-    match: /saas|logiciel|software|application|\bapp\b|plateforme|platform|tech|digital|numerique|\bia\b|intelligence artificielle|\bai\b|\bapi\b|cloud|data|donnees|developpeur|developer|\bcode\b|startup|site web|website|automatis|crm|erp|robot/,
+    // Almost every product is "digital" or has an "app": a specific industry wins at equal mentions.
+    weight: 0.5,
+    match: /saas|logiciel|software|application|\bapp\b|plateforme|platform|tech|digital|numerique|\bia\b|intelligence artificielle|\bai\b|\bapi\b|cloud|data|donnees|developpeur|developer|\bcode\b|startup|site web|website|automatis|\bcrm\b|\berp\b|robot/,
     queries: ['laptop software dashboard', 'developer coding screen', 'team working computers office', 'smartphone app interface', 'data center servers', 'startup team meeting', 'hands typing keyboard', 'digital technology network'],
   },
 ];
@@ -93,8 +97,21 @@ export const BUSINESS: Domain = {
   queries: ['business team meeting', 'professional working laptop', 'modern office', 'entrepreneur portrait', 'handshake business', 'customer service smiling', 'small business owner', 'city business district'],
 };
 
-/** Domain of a video from its prompt (and keywords); generic business when nothing matches. */
+/**
+ * Domain of a video from its prompt (and keywords); generic business when nothing matches.
+ * The domain with the most matches wins (ties: the more specific, listed first): one stray
+ * word ("accompagne" → "pagne") must not outweigh a prompt that talks about tech throughout.
+ */
 export const detectDomain = (text: string): Domain => {
   const t = normalize(text);
-  return DOMAINS.find((d) => d.match.test(t)) ?? BUSINESS;
+  let best: Domain = BUSINESS;
+  let bestCount = 0;
+  for (const d of DOMAINS) {
+    const count = (t.match(new RegExp(d.match.source, 'g')) ?? []).length * (d.weight ?? 1);
+    if (count > bestCount) {
+      best = d;
+      bestCount = count;
+    }
+  }
+  return best;
 };

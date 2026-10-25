@@ -41,6 +41,9 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const isAdminEmail = (config: AppConfig, email: string) =>
   config.env.ADMIN_EMAILS.split(',').map((e) => normalizeEmail(e)).filter(Boolean).includes(email);
 
+/** Version of the terms, privacy policy and sales conditions shown on /legal (bump it when they change). */
+export const TERMS_VERSION = '2026-10-07';
+
 export const signup = async (db: Db, config: AppConfig, input: { email: string; password: string; name?: string; locale?: string }): Promise<User> => {
   const email = normalizeEmail(input.email);
   if (!EMAIL.test(email) || email.length > 254) throw new AuthError('invalid_email', 'Adresse e-mail invalide');
@@ -55,8 +58,8 @@ export const signup = async (db: Db, config: AppConfig, input: { email: string; 
     const role = count === 0 || isAdminEmail(config, email) ? 'admin' : 'user';
     const locale = input.locale === 'en' ? 'en' : 'fr';
     const rows = await t.query<User>(
-      `INSERT INTO users (id, email, password_hash, name, role, locale) VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${USER_COLUMNS}`,
-      [newId(), email, passwordHash, (input.name ?? '').trim().slice(0, 100), role, locale],
+      `INSERT INTO users (id, email, password_hash, name, role, locale, terms_version, terms_accepted_at) VALUES ($1, $2, $3, $4, $5, $6, $7, now()) RETURNING ${USER_COLUMNS}`,
+      [newId(), email, passwordHash, (input.name ?? '').trim().slice(0, 100), role, locale, TERMS_VERSION],
     );
     return rows[0]!;
   });

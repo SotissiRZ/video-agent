@@ -5,6 +5,7 @@ import { appDemo } from './builtin/app-demo';
 import { productPresentation } from './builtin/product-presentation';
 import { socialMedia } from './builtin/social-media';
 import { storytelling } from './builtin/storytelling';
+import { localBusiness } from './builtin/local-business';
 import { tutorial } from './builtin/tutorial';
 
 const registry = new Map<string, TemplateDefinition>();
@@ -21,4 +22,5 @@ export const listTemplates = (): TemplateDefinition[] => [...registry.values()];
 
 export const DEFAULT_TEMPLATE_ID = 'advertisement';
 
-[advertisement, productPresentation, tutorial, announcement, socialMedia, appDemo, storytelling].forEach(registerTemplate);
+// Local business first: on a tie with a generic ad, the shop word decides.
+[localBusiness, advertisement, productPresentation, tutorial, announcement, socialMedia, appDemo, storytelling].forEach(registerTemplate);

@@ -98,18 +98,25 @@ describe('settings (web UI)', () => {
   const setup = () => {
     const dir = tmpDir();
     const envFile = path.join(dir, '.env');
-    fs.writeFileSync(envFile, 'PEXELS_API_KEY=secret-pexels\nVIDEO_AGENT_MUSIC=procedural\n');
+    fs.writeFileSync(envFile, 'PEXELS_API_KEY=secret-pexels\nOPENAI_COMPATIBLE_BASE_URL=https://example.test/v1\nVIDEO_AGENT_MUSIC=procedural\n');
     const reload = () => loadConfig({ env: { VIDEO_AGENT_OUTPUT_DIR: path.join(dir, 'out') }, dotenvDir: dir, cwd: dir });
     return { dir, envFile, reload };
   };
 
-  it('never returns secret values, but reports them as configured', () => {
+  it('hides secret fields, preserves non-secret credentials and omits empty settings groups', () => {
     const { reload } = setup();
     const view = settingsView(reload());
     const fields = view.flatMap((g) => g.fields);
-    expect(fields.find((f) => f.key === 'PEXELS_API_KEY')).toMatchObject({ configured: true, value: '' });
+    const stockGroup = view.find((g) => g.id === 'stock');
+    expect(fields.find((f) => f.key === 'PEXELS_API_KEY')).toBeUndefined();
+    expect(fields.find((f) => f.key === 'OPENAI_COMPATIBLE_BASE_URL')).toBeDefined();
+    expect(stockGroup?.configuredFields).toContain('Clé Pexels');
+    expect(view.find((g) => g.id === 'llm')?.configuredFields).toContain('URL compatible OpenAI');
+    expect(view.some((g) => g.id === 'security')).toBe(false);
     expect(fields.find((f) => f.key === 'VIDEO_AGENT_MUSIC')).toMatchObject({ value: 'procedural' });
+    expect(view.every((g) => g.fields.length > 0)).toBe(true);
     expect(JSON.stringify(view)).not.toContain('secret-pexels');
+    expect(JSON.stringify(view)).not.toContain('PEXELS_API_KEY');
   });
 
   it('saves, keeps secrets when left empty, clears with null and rolls back invalid values', () => {
@@ -125,4 +132,3 @@ describe('settings (web UI)', () => {
     expect(() => saveSettings(envFile, { GROQ_API_KEY: 'a\nINJECTED=1' }, reload)).toThrow(/invalide/);
   });
 });
-

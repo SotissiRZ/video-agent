@@ -36,13 +36,15 @@ export const MediaSchema = z.object({
   origin: z.string().default('asset'),
   /** Known clip length (videos only). When set, the clip loops to fill the scene. */
   durationInFrames: z.number().int().positive().optional(),
+  /** What the picture shows (stock tags, alt text or AI prompt): lets a correction know what to replace. */
+  alt: z.string().max(500).optional(),
   /** Attribution for stock media (photographer / videographer and source page). */
   credit: z.object({ author: z.string(), source: z.string(), url: z.string().optional() }).optional(),
 });
 export type Media = z.infer<typeof MediaSchema>;
 
 export const BackgroundSchema = z.object({
-  variant: z.enum(['gradient', 'shapes', 'grid', 'waves', 'spotlight', 'media']).default('gradient'),
+  variant: z.enum(['gradient', 'shapes', 'grid', 'waves', 'spotlight', 'media', 'circuit', 'hologram', 'particles', 'hud']).default('gradient'),
   /** Optional palette override for this scene. */
   from: z.string().optional(),
   to: z.string().optional(),
@@ -54,7 +56,7 @@ export const AnimationSchema = z.object({
   /** Delay between successive elements (words, bullets) in frames. */
   stagger: z.number().int().min(0).default(4),
   /** Slow zoom applied to backgrounds / media (Ken Burns). 0 = none. */
-  kenBurns: z.number().min(0).max(0.5).default(0.06),
+  kenBurns: z.number().min(0).max(0.5).default(0.03),
 });
 export type Animation = z.infer<typeof AnimationSchema>;
 
@@ -113,6 +115,8 @@ export const ThemeSchema = z.object({
   radius: z.number().min(0).default(24),
   motion: z.enum(['calm', 'normal', 'energetic']).default('normal'),
   uppercaseHeadlines: z.boolean().default(false),
+  /** Neon halo around the text (futuristic style). */
+  glow: z.boolean().default(false),
 });
 export type Theme = z.infer<typeof ThemeSchema>;
 
@@ -154,7 +158,7 @@ export const StoryboardSchema = z.object({
       tagline: z.string().default(''),
       logo: z.string().optional(),
       showWatermark: z.boolean().default(true),
-      /** Small badge in the top-right corner (plan watermark, e.g. "Made with Video Agent"). */
+      /** Small badge in the top-right corner (plan watermark, e.g. "Made with SOVID AI"). */
       badge: z.string().max(60).optional(),
     })
     .default({}),

@@ -34,6 +34,7 @@ export const ScriptSceneSchema = z.object({
   narration: z.string().default(''),
   visualKeywords: z.array(z.string()).default([]),
   visualPrompt: z.string().default(''),
+  productPhoto: z.number().int().min(0).catch(0).default(0),
 });
 
 export const ScriptSchema = z.object({ scenes: z.array(ScriptSceneSchema).min(1) });
@@ -48,7 +49,7 @@ export const SCRIPT_JSON_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['role', 'kind', 'headline', 'subheadline', 'body', 'items', 'statValue', 'statLabel', 'narration', 'visualKeywords', 'visualPrompt'],
+        required: ['role', 'kind', 'headline', 'subheadline', 'body', 'items', 'statValue', 'statLabel', 'narration', 'visualKeywords', 'visualPrompt', 'productPhoto'],
         properties: {
           role: str,
           kind: { type: 'string', enum: [...SCENE_KINDS] },
@@ -61,6 +62,7 @@ export const SCRIPT_JSON_SCHEMA = {
           narration: str,
           visualKeywords: strArray,
           visualPrompt: str,
+          productPhoto: { type: 'integer' },
         },
       },
     },

@@ -1,6 +1,7 @@
 /** Subscription plans and monthly quotas. Stripe prices map to plans through STRIPE_PRICE_*. */
 import type { AppConfig } from '../config/config';
 import type { Db } from './db';
+import type { CommerceSettings } from './commerce';
 
 export const PLAN_IDS = ['free', 'creator', 'pro'] as const;
 export type PlanId = (typeof PLAN_IDS)[number];
@@ -12,11 +13,13 @@ export interface Plan {
   videosPerMonth: number;
   /** Rendered minutes per month. */
   minutesPerMonth: number;
+  /** Generated songs per calendar month (UTC). */
+  songsPerMonth: number;
   /** Longest video. */
   maxDurationSec: number;
   /** Publishing to social networks. */
   publish: boolean;
-  /** "Made with Video Agent" badge on the video. */
+  /** "Made with SOVID AI" badge on the video. */
   badge: boolean;
   /** Price shown on the pricing page. */
   price: string;
@@ -24,12 +27,21 @@ export interface Plan {
 }
 
 export const listPlans = (config: AppConfig): Plan[] => [
-  { id: 'free', name: 'Free', videosPerMonth: 3, minutesPerMonth: 3, maxDurationSec: 60, publish: false, badge: true, price: '0' },
-  { id: 'creator', name: 'Creator', videosPerMonth: 30, minutesPerMonth: 60, maxDurationSec: 180, publish: true, badge: false, price: config.env.PLAN_CREATOR_PRICE, stripePriceId: config.env.STRIPE_PRICE_CREATOR },
-  { id: 'pro', name: 'Pro', videosPerMonth: 120, minutesPerMonth: 300, maxDurationSec: 600, publish: true, badge: false, price: config.env.PLAN_PRO_PRICE, stripePriceId: config.env.STRIPE_PRICE_PRO },
+  { id: 'free', name: 'Free', videosPerMonth: 3, minutesPerMonth: 3, songsPerMonth: 1, maxDurationSec: 60, publish: false, badge: true, price: '0' },
+  { id: 'creator', name: 'Creator', videosPerMonth: 30, minutesPerMonth: 30, songsPerMonth: 8, maxDurationSec: 120, publish: true, badge: false, price: config.env.PLAN_CREATOR_PRICE, stripePriceId: config.env.STRIPE_PRICE_CREATOR },
+  { id: 'pro', name: 'Pro', videosPerMonth: 80, minutesPerMonth: 60, songsPerMonth: 20, maxDurationSec: 300, publish: true, badge: false, price: config.env.PLAN_PRO_PRICE, stripePriceId: config.env.STRIPE_PRICE_PRO },
 ];
 
 export const getPlan = (config: AppConfig, id: string | null | undefined): Plan => listPlans(config).find((p) => p.id === id) ?? listPlans(config)[0]!;
+
+export const applyCommerceLimits = (plan: Plan, settings: CommerceSettings): Plan =>
+  ({
+    ...plan,
+    videosPerMonth: plan.id === 'free' ? settings.freeVideosPerMonth : plan.id === 'creator' ? settings.creatorVideosPerMonth : settings.proVideosPerMonth,
+    minutesPerMonth: plan.id === 'free' ? settings.freeMinutesPerMonth : plan.id === 'creator' ? settings.creatorMinutesPerMonth : settings.proMinutesPerMonth,
+    songsPerMonth: plan.id === 'free' ? settings.freeSongsPerMonth : plan.id === 'creator' ? settings.creatorSongsPerMonth : settings.proSongsPerMonth,
+    maxDurationSec: plan.id === 'free' ? settings.freeMaxDurationSec : plan.id === 'creator' ? settings.creatorMaxDurationSec : settings.proMaxDurationSec,
+  });
 
 /** Status of plans bought as prepaid passes (mobile money, cards without recurring billing). */
 export const PREPAID = 'prepaid';
@@ -51,6 +63,7 @@ export interface Usage {
   periodStart: string;
   videos: number;
   seconds: number;
+  songs: number;
 }
 
 /** Videos started this month (failed and cancelled ones, and those paid with a credit, are not counted) and rendered seconds. */
@@ -58,13 +71,21 @@ export const getUsage = async (db: Db, userId: string, now = new Date()): Promis
   const start = periodStart(now);
   const row = await db.one<{ videos: string | number; seconds: string | number | null }>(
     `SELECT count(*) AS videos, coalesce(sum(duration_sec), 0) AS seconds FROM jobs
-     WHERE user_id = $1 AND created_at >= $2 AND status IN ('queued', 'running', 'completed') AND NOT paid_with_credit`,
+     WHERE user_id = $1 AND created_at >= $2 AND status IN ('queued', 'running', 'completed') AND NOT paid_with_credit AND revision_of IS NULL`,
     [userId, start.toISOString()],
   );
-  return { periodStart: start.toISOString(), videos: Number(row?.videos ?? 0), seconds: Math.round(Number(row?.seconds ?? 0)) };
+  const songRow = await db.one<{ songs: string | number }>(
+    `SELECT count(*) AS songs FROM songs
+     WHERE user_id = $1 AND created_at >= $2 AND status IN ('queued', 'running', 'completed')`,
+    [userId, start.toISOString()],
+  );
+  return { periodStart: start.toISOString(), videos: Number(row?.videos ?? 0), seconds: Math.round(Number(row?.seconds ?? 0)), songs: Number(songRow?.songs ?? 0) };
 };
 
-export type QuotaError = { code: 'videos' | 'minutes' | 'duration'; limit: number };
+export const checkSongQuota = (plan: Plan, usage: Usage): QuotaError | null =>
+  usage.songs >= plan.songsPerMonth ? { code: 'songs', limit: plan.songsPerMonth } : null;
+
+export type QuotaError = { code: 'videos' | 'minutes' | 'duration' | 'songs'; limit: number };
 
 /** Can this user start one more video of (about) this duration? */
 export const checkQuota = (plan: Plan, usage: Usage, requestedDurationSec?: number): QuotaError | null => {

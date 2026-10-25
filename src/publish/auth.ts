@@ -56,7 +56,7 @@ export const runOAuthFlow = async (opts: OAuthFlowOptions): Promise<string> => {
       }
       try {
         const code = extractCode(full.toString(), state);
-        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end('<h1>✅ Video Agent est autorisé.</h1><p>Vous pouvez fermer cet onglet et revenir au terminal.</p>');
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end('<h1>✅ SOVID AI est autorisé.</h1><p>Vous pouvez fermer cet onglet et revenir au terminal.</p>');
         finish(null, code);
       } catch (err) {
         res.writeHead(400, { 'content-type': 'text/html; charset=utf-8' }).end(`<h1>❌ ${(err as Error).message}</h1>`);

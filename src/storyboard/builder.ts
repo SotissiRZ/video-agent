@@ -3,6 +3,7 @@ import type { PlannedScene, VideoBrief, VideoConcept } from '../core/types';
 import { StoryboardSchema, type Scene, type SceneKind, type Storyboard } from '../remotion/contract/storyboard';
 import type { StyleDefinition } from '../remotion/contract/styles';
 import { computeTotalDuration } from '../remotion/contract/timeline';
+import { MAX_ITEMS } from './scenes';
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'scene';
 
@@ -69,7 +70,7 @@ export const buildStoryboard = ({ brief, concept, scenes, style }: BuildStoryboa
     headline: s.headline,
     subheadline: s.subheadline,
     body: s.body,
-    items: s.items.slice(0, 5),
+    items: s.items.slice(0, MAX_ITEMS),
     stat: s.kind === 'stat' ? { value: s.statValue, label: s.statLabel } : undefined,
     narration: s.narration,
     background: { variant: 'gradient' },

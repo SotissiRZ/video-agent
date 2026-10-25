@@ -6,7 +6,8 @@ import { createLogger } from '../src/core/logger';
 import { signStripePayload, stripeForm, verifyStripeSignature } from '../src/saas/billing';
 import { hashPassword, Vault, verifyPassword } from '../src/saas/crypto';
 import { connectPglite, migrate, type Db } from '../src/saas/db';
-import { checkQuota, getPlan } from '../src/saas/plans';
+import { checkQuota, checkSongQuota, getPlan } from '../src/saas/plans';
+import { activatePayment } from '../src/saas/payments';
 import { startSaasServer } from '../src/saas/server';
 import type { PlatformId } from '../src/publish/types';
 import { fakeRenderer, testConfig, tmpDir } from './helpers';
@@ -27,13 +28,17 @@ class Client {
   }
 }
 
-const published: Array<{ platform: PlatformId; userId: string }> = [];
+const clonedVoices: string[] = [];
+const removedVoices: string[] = [];
+const published: Array<{ platform: PlatformId; userId: string; videoFile: string }> = [];
 
 let base: string;
 let db: Db;
 let config: AppConfig;
 let close: () => Promise<void>;
 let envFile: string;
+let failSongLyricsGeneration = false;
+let failSongAudioGeneration = false;
 
 const waitFor = async <T>(fn: () => Promise<T | undefined>, timeoutMs = 15_000): Promise<T> => {
   const start = Date.now();
@@ -79,11 +84,31 @@ beforeAll(async () => {
         id: platform,
         label: platform,
         constraints: { maxCaption: 2200, maxHashtags: 30, minDurationSec: 1, maxDurationSec: 600, vertical: false, nativeScheduling: false },
-        publish: async () => {
-          published.push({ platform, userId });
+        publish: async (request) => {
+          published.push({ platform, userId, videoFile: path.basename(request.videoFile) });
           return { platform, status: 'published', url: `https://${platform}.test/v` };
         },
       }),
+    },
+    songLyricsGenerator: async () => {
+      if (failSongLyricsGeneration) throw new Error('provider unavailable');
+      return { title: 'Joyeux anniversaire', lyrics: '[Verse 1]\nLe soleil se lève pour toi\n[Chorus]\nJoyeux anniversaire Aïcha\n' };
+    },
+    voiceCloner: {
+      create: async ({ name }) => {
+        clonedVoices.push(name);
+        return `voice_${clonedVoices.length}`;
+      },
+      remove: async (voiceId) => {
+        removedVoices.push(voiceId);
+      },
+    },
+    songPreviewer: async (input, output) => {
+      fs.writeFileSync(output, `preview of ${fs.readFileSync(input, 'utf8')}`);
+    },
+    songGenerator: async () => {
+      if (failSongAudioGeneration) throw new Error('[elevenlabs-music] HTTP 402: {"detail":{"status":"paid_plan_required"}}');
+      return Buffer.from('fake mp3');
     },
     stripe: async (p) => {
       if (p === '/checkout/sessions') return { url: 'https://checkout.stripe.test/s' };
@@ -121,10 +146,15 @@ describe('crypto', () => {
 describe('plans', () => {
   it('limits videos, minutes and duration per plan', () => {
     const free = getPlan(config, 'free');
-    expect(checkQuota(free, { periodStart: '', videos: 0, seconds: 0 }, 30)).toBeNull();
-    expect(checkQuota(free, { periodStart: '', videos: 3, seconds: 0 })).toEqual({ code: 'videos', limit: 3 });
-    expect(checkQuota(free, { periodStart: '', videos: 0, seconds: 0 }, 120)).toEqual({ code: 'duration', limit: 60 });
-    expect(checkQuota(free, { periodStart: '', videos: 1, seconds: 170 }, 30)).toEqual({ code: 'minutes', limit: 3 });
+    const usage = { periodStart: '', videos: 0, seconds: 0, songs: 0 };
+    expect(checkQuota(free, usage, 30)).toBeNull();
+    expect(checkQuota(free, { ...usage, videos: 3 })).toEqual({ code: 'videos', limit: 3 });
+    expect(checkQuota(free, usage, 120)).toEqual({ code: 'duration', limit: 60 });
+    expect(checkQuota(free, { ...usage, videos: 1, seconds: 170 }, 30)).toEqual({ code: 'minutes', limit: 3 });
+    expect(checkSongQuota(free, usage)).toBeNull();
+    expect(checkSongQuota(free, { ...usage, songs: 1 })).toEqual({ code: 'songs', limit: 1 });
+    expect(getPlan(config, 'creator').songsPerMonth).toBe(8);
+    expect(getPlan(config, 'pro').songsPerMonth).toBe(20);
     expect(getPlan(config, 'unknown').id).toBe('free');
   });
 });
@@ -135,9 +165,13 @@ describe('accounts', () => {
     expect(pub.body).toMatchObject({ firstUser: true, signupOpen: true, billing: true });
     expect(pub.body.plans.map((p: { id: string }) => p.id)).toEqual(['free', 'creator', 'pro']);
     expect(JSON.stringify(pub.body)).not.toContain('price_creator');
+    // Customers see limits and prices, not the services or exchange rates behind them.
+    expect(pub.body.commerce).toMatchObject({ maxProductImages: 4 });
+    expect(pub.body.commerce.providers).toBeUndefined();
+    expect(pub.body.commerce.usdRateXof).toBeUndefined();
 
     const admin = new Client(base);
-    const s = await admin.json('POST', '/api/auth/signup', { email: 'Admin@Example.com', password: 'motdepasse1', name: 'Admin' });
+    const s = await admin.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'Admin@Example.com', password: 'motdepasse1', name: 'Admin' });
     expect(s.status).toBe(200);
     expect(s.body.user).toMatchObject({ email: 'admin@example.com', role: 'admin', plan: 'free' });
     expect(admin.cookie).toMatch(/^va_session=/);
@@ -145,17 +179,28 @@ describe('accounts', () => {
 
     const anon = new Client(base);
     expect((await anon.json('GET', '/api/me')).status).toBe(401);
-    expect((await anon.json('POST', '/api/auth/signup', { email: 'admin@example.com', password: 'motdepasse2' })).body.code).toBe('email_taken');
-    expect((await anon.json('POST', '/api/auth/signup', { email: 'x@y.z', password: 'court' })).body.code).toBe('weak_password');
+    expect((await anon.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'admin@example.com', password: 'motdepasse2' })).body.code).toBe('email_taken');
+    expect((await anon.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'x@y.z', password: 'court' })).body.code).toBe('weak_password');
     expect((await anon.json('POST', '/api/auth/login', { email: 'admin@example.com', password: 'nope-nope' })).body.code).toBe('invalid_credentials');
 
     const bob = new Client(base);
-    expect((await bob.json('POST', '/api/auth/signup', { email: 'bob@example.com', password: 'motdepasse2', locale: 'en' })).body.user).toMatchObject({ role: 'user', locale: 'en' });
+    expect((await bob.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'bob@example.com', password: 'motdepasse2', locale: 'en' })).body.user).toMatchObject({ role: 'user', locale: 'en' });
     await bob.json('POST', '/api/auth/logout');
     expect((await bob.json('GET', '/api/me')).status).toBe(401);
     expect((await bob.json('POST', '/api/auth/login', { email: 'BOB@example.com', password: 'motdepasse2' })).status).toBe(200);
     expect((await bob.json('GET', '/api/admin/users')).status).toBe(403);
     expect((await admin.json('GET', '/api/admin/users')).body).toHaveLength(2);
+    const commerce = await admin.json('GET', '/api/admin/commerce');
+    expect(commerce.body).toMatchObject({ videoPriceXof: 1000, songPriceMad: 25, correctionsPerVideo: 1 });
+    expect((await admin.json('PUT', '/api/admin/commerce', { ...commerce.body, videoPriceXof: -1 })).status).toBe(400);
+    const updatedCommerce = await admin.json('PUT', '/api/admin/commerce', { ...commerce.body, correctionsPerSong: 2 });
+    expect(updatedCommerce.body.correctionsPerSong).toBe(2);
+    expect((await admin.json('PUT', '/api/admin/commerce', commerce.body)).status).toBe(200);
+    expect(commerce.body.providers.free).toMatchObject({ llm: 'groq', voice: 'piper', music: 'none' });
+    const costs = await admin.json('GET', '/api/admin/costs?days=7');
+    expect(costs.status).toBe(200);
+    expect(costs.body).toMatchObject({ days: 7, rates: { XOF: 600, MAD: 10 }, totals: { costUsd: expect.any(Number) } });
+    expect((await bob.json('GET', '/api/admin/costs')).status).toBe(403);
   });
 
   it('refuses cross-site requests', async () => {
@@ -171,7 +216,7 @@ describe('videos', () => {
 
   it('queues, renders (embedded worker) and serves a video, scoped to its owner', async () => {
     alice = new Client(base);
-    await alice.json('POST', '/api/auth/signup', { email: 'alice@example.com', password: 'motdepasse3' });
+    await alice.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'alice@example.com', password: 'motdepasse3' });
     const created = await alice.json('POST', '/api/jobs', { prompt: 'Crée une vidéo de 2 minutes pour promouvoir un café à Dakar', subtitles: false });
     expect(created.status).toBe(201);
     jobId = created.body.id;
@@ -179,16 +224,17 @@ describe('videos', () => {
       const j = await alice.json('GET', `/api/jobs/${jobId}`);
       return ['completed', 'failed'].includes(j.body.status) ? j.body : undefined;
     });
+
     expect(done.error).toBeUndefined();
     expect(done.status).toBe('completed');
     // Free plan: duration capped at 60 s and badge in the video.
     expect(done.durationSec).toBeLessThanOrEqual(61);
     const storyboard = await (await alice.req('GET', `/api/jobs/${jobId}/files/storyboard.json`)).json();
-    expect(storyboard.brand.badge).toBe('Made with Video Agent');
+    expect(storyboard.brand.badge).toBe('Made with SOVID AI');
     expect(await (await alice.req('GET', `/api/jobs/${jobId}/video`)).text()).toBe('fake video');
 
     const mallory = new Client(base);
-    await mallory.json('POST', '/api/auth/signup', { email: 'mallory@example.com', password: 'motdepasse4' });
+    await mallory.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'mallory@example.com', password: 'motdepasse4' });
     expect((await mallory.json('GET', `/api/jobs/${jobId}`)).status).toBe(404);
     expect((await mallory.req('GET', `/api/jobs/${jobId}/video`)).status).toBe(404);
     expect((await mallory.json('GET', '/api/jobs')).body).toEqual([]);
@@ -204,7 +250,7 @@ describe('videos', () => {
 
   it('enforces the monthly quota of the free plan', async () => {
     const eve = new Client(base);
-    await eve.json('POST', '/api/auth/signup', { email: 'eve@example.com', password: 'motdepasse5' });
+    await eve.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'eve@example.com', password: 'motdepasse5' });
     const ids: string[] = [];
     for (let i = 0; i < 3; i++) ids.push((await eve.json('POST', '/api/jobs', { prompt: `Vidéo ${i} pour un salon de coiffure`, durationSec: 10 })).body.id);
     const refused = await eve.json('POST', '/api/jobs', { prompt: 'Une de trop', durationSec: 10 });
@@ -214,10 +260,151 @@ describe('videos', () => {
     await waitFor(async () => ((await eve.json('GET', '/api/jobs')).body as Array<{ status: string }>).every((j) => j.status === 'completed' || j.status === 'failed') || undefined);
   }, 30_000);
 
+  it('retries a failed video as a new owner-scoped job', async () => {
+    const owner = new Client(base);
+    await owner.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'retry-video@example.com', password: 'motdepasse8' });
+    const original = (await owner.json('POST', '/api/jobs', { prompt: 'Une vidéo de 10 secondes pour un café', durationSec: 10 })).body;
+    await waitFor(async () => {
+      const result = await owner.json('GET', `/api/jobs/${original.id}`);
+      return result.body.status === 'completed' ? result.body : undefined;
+    });
+    expect((await owner.json('POST', `/api/jobs/${original.id}/retry`)).body.code).toBe('job_not_retryable');
+    await db.query("UPDATE jobs SET status = 'failed', error = 'test failure', finished_at = now(), video_file = NULL WHERE id = $1", [original.id]);
+    const retryResponse = await owner.json('POST', `/api/jobs/${original.id}/retry`);
+    expect(retryResponse.status).toBe(201);
+    const retry = retryResponse.body;
+    expect(retry.id).not.toBe(original.id);
+    expect(retry).toMatchObject({ prompt: original.prompt, status: 'queued' });
+    const stranger = new Client(base);
+    await stranger.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'retry-stranger@example.com', password: 'motdepasse8' });
+    expect((await stranger.json('POST', `/api/jobs/${original.id}/retry`)).status).toBe(404);
+    const finishedRetry = await waitFor(async () => {
+      const result = await owner.json('GET', `/api/jobs/${retry.id}`);
+      return ['completed', 'failed'].includes(result.body.status) ? result.body : undefined;
+    });
+    expect((await owner.json('DELETE', `/api/jobs/${retry.id}?remove=1`)).body.removed).toBe(true);
+    expect((await owner.json('GET', `/api/jobs/${retry.id}`)).status).toBe(404);
+    if (finishedRetry.status === 'failed') expect(finishedRetry.error).toBeDefined();
+    expect((await owner.json('DELETE', `/api/jobs/${original.id}?remove=1`)).body.removed).toBe(true);
+  }, 30_000);
+
+  it('requires explicit acceptance of the terms and lets customers download their data', async () => {
+    const visitor = new Client(base);
+    const refused = await visitor.json('POST', '/api/auth/signup', { email: 'no-terms@example.com', password: 'motdepasse9' });
+    expect(refused.status).toBe(400);
+    expect((await db.one('SELECT id FROM users WHERE email = $1', ['no-terms@example.com']))).toBeUndefined();
+    await visitor.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'terms@example.com', password: 'motdepasse9' });
+    const row = await db.one<{ terms_version: string; terms_accepted_at: Date | null }>('SELECT terms_version, terms_accepted_at FROM users WHERE email = $1', ['terms@example.com']);
+    expect(row?.terms_version).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(row?.terms_accepted_at).toBeTruthy();
+
+    const exported = await visitor.req('GET', '/api/me/export');
+    expect(exported.headers.get('content-disposition')).toContain('attachment');
+    const data = await exported.json();
+    expect(data.account).toMatchObject({ email: 'terms@example.com' });
+    expect(data).toHaveProperty('videos');
+    expect(data).toHaveProperty('payments');
+    expect(JSON.stringify(data)).not.toMatch(/password_hash|scrypt/);
+
+    // The public site only learns what is configured, never a secret.
+    const pub = (await visitor.json('GET', '/api/public/config')).body;
+    expect(pub.features).toMatchObject({ mobileMoney: expect.any(Boolean), publish: expect.any(Array), songs: expect.any(Boolean) });
+    expect(pub.company).toHaveProperty('hosting');
+    expect(JSON.stringify(pub)).not.toMatch(/sk_test|whsec|secret/i);
+  });
+
+  it('stores product photos and serves their thumbnails to their owner only', async () => {
+    const owner = new Client(base);
+    await owner.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'photos@example.com', password: 'motdepasse9' });
+    const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+    const res = await fetch(`${base}/api/product-images?filename=bissap.png`, { method: 'POST', body: png, headers: { cookie: owner.cookie, 'content-type': 'application/octet-stream' } });
+    expect(res.status).toBe(201);
+    const image = await res.json();
+    expect(image).toMatchObject({ name: 'bissap.png' });
+    const thumbnail = await owner.req('GET', `/api/product-images/${image.id}/file`);
+    expect(thumbnail.status).toBe(200);
+    expect(Buffer.from(await thumbnail.arrayBuffer())).toEqual(png);
+    const stranger = new Client(base);
+    await stranger.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'photos-stranger@example.com', password: 'motdepasse9' });
+    expect((await stranger.req('GET', `/api/product-images/${image.id}/file`)).status).toBe(404);
+  });
+
+  it('clones the voice of paid customers, keeps their pronunciations and uses both in videos', async () => {
+    const owner = new Client(base);
+    await owner.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'voice@example.com', password: 'motdepasse9' });
+    const audio = Buffer.alloc(40_000, 1);
+    const upload = (query: string, type = 'audio/webm') => fetch(`${base}/api/voice/clone?${query}`, { method: 'POST', body: audio, headers: { cookie: owner.cookie, 'content-type': type } });
+
+    expect((await owner.json('GET', '/api/voice')).body).toEqual({ clone: null, cloneAvailable: false, pronunciations: [] });
+    expect((await (await upload('consent=1')).json()).code).toBe('voice_clone_plan');
+    expect((await owner.json('POST', '/api/jobs', { prompt: 'Une vidéo de 10 secondes pour un pressing', durationSec: 10, voiceClone: true })).body.code).toBe('voice_clone_plan');
+
+    const userId = (await owner.json('GET', '/api/me')).body.user.id;
+    await db.query("UPDATE users SET plan = 'creator' WHERE id = $1", [userId]);
+    expect((await (await upload('name=Moi')).json()).code).toBe('voice_clone_consent');
+    expect((await (await upload('consent=1', 'text/plain')).json()).code).toBe('voice_clone_format');
+    expect((await owner.json('POST', '/api/jobs', { prompt: 'Une vidéo de 10 secondes pour un pressing', durationSec: 10, voiceClone: true })).body.code).toBe('voice_clone_missing');
+    const created = await upload('consent=1&name=Moi');
+    expect(created.status).toBe(201);
+    expect(await created.json()).toMatchObject({ name: 'Moi' });
+    // A new recording replaces the previous voice, which is freed on ElevenLabs.
+    expect((await upload('consent=1&name=Moi%202')).status).toBe(201);
+    expect(removedVoices).toContain('voice_1');
+
+    const saved = await owner.json('PUT', '/api/voice/pronunciations', { entries: [{ word: 'Pressing', spoken: 'Prè-sing' }, { word: 'pressing', spoken: 'doublon' }] });
+    expect(saved.body).toEqual([{ word: 'pressing', spoken: 'doublon' }]);
+    expect((await owner.json('GET', '/api/voice')).body).toMatchObject({ clone: { name: 'Moi 2' }, cloneAvailable: true });
+
+    const job = await owner.json('POST', '/api/jobs', { prompt: 'Une vidéo de 10 secondes pour un pressing', durationSec: 10, voiceClone: true });
+    expect(job.status).toBe(201);
+    expect(job.body.options).toMatchObject({ voiceClone: true });
+    const done = await waitFor(async () => {
+      const result = await owner.json('GET', `/api/jobs/${job.body.id}`);
+      return ['completed', 'failed'].includes(result.body.status) ? result.body : undefined;
+    });
+    expect(done.status).toBe('completed');
+    // No voice service in this environment: there is no voice-over to fix.
+    expect((await owner.json('POST', `/api/jobs/${job.body.id}/pronunciation`, { word: 'pressing', spoken: 'x' })).body.code).toBe('job_without_voice');
+    // With a voice-over: the word must be spoken in the video, and fixes are counted per video.
+    await db.query(`UPDATE jobs SET providers = '{"voice":"piper"}' WHERE id = $1`, [job.body.id]);
+    expect((await owner.json('POST', `/api/jobs/${job.body.id}/pronunciation`, { word: 'Zanzibar', spoken: 'x' })).body.code).toBe('pronunciation_word_missing');
+    const narration = (await (await owner.req('GET', `/api/jobs/${job.body.id}/files/storyboard.json`)).json()).scenes.map((s: { narration: string }) => s.narration).join(' ');
+    const word = narration.replace(/\*/g, '').match(/\p{L}{5,}/u)![0];
+    const fix = await owner.json('POST', `/api/jobs/${job.body.id}/pronunciation`, { word, spoken: 'tchou', save: true });
+    expect(fix.status).toBe(201);
+    expect(fix.body).toMatchObject({ correction: `Prononciation : « ${word} » → « tchou »`, status: 'queued' });
+    expect((await owner.json('GET', `/api/jobs/${job.body.id}`)).body.pronunciationFixesUsed).toBe(1);
+    expect((await owner.json('GET', '/api/voice')).body.pronunciations).toContainEqual({ word, spoken: 'tchou' });
+    await waitFor(async () => (['completed', 'failed'].includes((await owner.json('GET', `/api/jobs/${fix.body.id}`)).body.status) ? true : undefined));
+
+    expect((await owner.json('DELETE', '/api/voice/clone')).body.removed).toBe(true);
+    expect(removedVoices).toContain('voice_2');
+  }, 30_000);
+
+  it('applies the included correction once, as a new version of the video', async () => {
+    const owner = new Client(base);
+    await owner.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'correct-video@example.com', password: 'motdepasse9' });
+    const original = (await owner.json('POST', '/api/jobs', { prompt: 'Une vidéo de 10 secondes pour une boulangerie', durationSec: 10 })).body;
+    await waitFor(async () => ((await owner.json('GET', `/api/jobs/${original.id}`)).body.status === 'completed' ? true : undefined));
+    const corrected = await owner.json('POST', `/api/jobs/${original.id}/correct`, { instruction: 'Mets le nom de la boulangerie en titre' });
+    expect(corrected.status).toBe(201);
+    expect(corrected.body).toMatchObject({ correction: 'Mets le nom de la boulangerie en titre', status: 'queued' });
+    // No LLM in this environment: the correction falls back to a full regeneration and still completes.
+    const done = await waitFor(async () => {
+      const result = await owner.json('GET', `/api/jobs/${corrected.body.id}`);
+      return ['completed', 'failed'].includes(result.body.status) ? result.body : undefined;
+    });
+    expect(done.status).toBe('completed');
+    // Each generation records the plan it ran under, for the cost dashboard.
+    expect((await db.one<{ plan: string }>('SELECT plan FROM jobs WHERE id = $1', [original.id]))?.plan).toBe('free');
+    expect((await owner.json('POST', `/api/jobs/${original.id}/correct`, { instruction: 'Encore une correction' })).body.code).toBe('correction_limit');
+    expect((await owner.json('GET', '/api/me')).body.usage.videos).toBe(1);
+  }, 30_000);
+
   it('publishes on connected accounts with a paid plan (tokens stored encrypted)', async () => {
-    // Free plan: no publishing, no connection.
-    expect((await alice.json('POST', '/api/connections/youtube/start')).status).toBe(402);
-    expect((await alice.json('POST', `/api/jobs/${jobId}/publish`, { platforms: ['youtube'] })).body.code).toBe('plan_publish');
+    // Free users can connect accounts before paying for an export.
+    expect((await alice.json('POST', '/api/connections/youtube/start')).status).toBe(200);
+    expect((await alice.json('POST', `/api/jobs/${jobId}/publish`, { platforms: ['youtube'] })).body.code).toBe('export_payment_required');
 
     // Stripe webhook → Creator plan.
     const me = (await alice.json('GET', '/api/me')).body.user;
@@ -258,6 +445,8 @@ describe('videos', () => {
     });
     expect(finished.status).toBe('done');
     expect(published.map((p) => p.platform).sort()).toEqual(['instagram', 'youtube']);
+    // The video was rendered with the free-plan badge: what goes out is the badge-free export.
+    expect(published.map((p) => p.videoFile)).toEqual(['export.mp4', 'export.mp4']);
 
     // Scheduled publication can be cancelled.
     const later = await alice.json('POST', `/api/jobs/${jobId}/publish`, { platforms: ['facebook'], at: new Date(Date.now() + 3600_000).toISOString() });
@@ -266,10 +455,115 @@ describe('videos', () => {
   }, 30_000);
 });
 
+describe('songs', () => {
+  it('returns an actionable error when lyric providers fail', async () => {
+    const singer = new Client(base);
+    await singer.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'lyrics-error@example.com', password: 'motdepasse6' });
+    failSongLyricsGeneration = true;
+    try {
+      const response = await singer.json('POST', '/api/songs', { prompt: 'Chanson anniversaire', style: 'Afrobeats', mood: 'Joyful and celebratory' });
+      expect(response.status).toBe(503);
+      expect(response.body.code).toBe('song_lyrics_provider_failed');
+    } finally {
+      failSongLyricsGeneration = false;
+    }
+  });
+
+  it('keeps lyrics editable until explicit generation, isolates audio, and enforces the separate quota', async () => {
+    const singer = new Client(base);
+    await singer.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'singer@example.com', password: 'motdepasse6' });
+    const draft = await singer.json('POST', '/api/songs', { prompt: 'Chanson romantique anniversaire pour Aïcha', style: 'Afrobeats', mood: 'Romantic and tender', durationSec: 90 });
+    expect(draft.status).toBe(201);
+    expect(draft.body).toMatchObject({ title: 'Joyeux anniversaire', status: 'draft', lyrics: expect.stringContaining('Aïcha') });
+    const edited = await singer.json('PUT', `/api/songs/${draft.body.id}/lyrics`, { title: 'Pour Aïcha', lyrics: '[Verse 1]\nPour toi' });
+    expect(edited.body).toMatchObject({ title: 'Pour Aïcha', status: 'draft' });
+    const started = await singer.json('POST', `/api/songs/${draft.body.id}/generate`);
+    expect(started.status).toBe(202);
+    const finished = await waitFor(async () => {
+      const result = await singer.json('GET', `/api/songs/${draft.body.id}`);
+      return ['completed', 'failed'].includes(result.body.status) ? result.body : undefined;
+    });
+    expect(finished.status).toBe('completed');
+    // Free plan: the 90 s requested are capped to the free song length.
+    expect(finished.durationSec).toBe(60);
+    expect(await (await singer.req('GET', finished.audioUrl)).text()).toBe('preview of fake mp3');
+    expect((await singer.json('GET', '/api/me')).body.usage.songs).toBe(1);
+    expect((await singer.req('GET', `${finished.audioUrl}?download=1`)).status).toBe(402);
+    const userId = (await singer.json('GET', '/api/me')).body.user.id;
+    await db.query(
+      `INSERT INTO payments (id, user_id, provider, plan, amount, currency, target_id)
+       VALUES ('pay_song_export_test', $1, 'youcanpay', 'export_song', 25, 'MAD', $2)`,
+      [userId, draft.body.id],
+    );
+    expect(await activatePayment(db, 'pay_song_export_test')).toBe(true);
+    expect((await singer.req('GET', `${finished.audioUrl}?download=1`)).status).toBe(200);
+    expect(await (await singer.req('GET', finished.audioUrl)).text()).toBe('fake mp3');
+
+    const corrected = await singer.json('PUT', `/api/songs/${draft.body.id}/lyrics`, { title: 'Pour Aïcha, version corrigée', lyrics: '[Verse 1]\nPour toi encore' });
+    expect(corrected.status).toBe(200);
+    expect(corrected.body).toMatchObject({ status: 'draft', correctionsUsed: 1, exportPaid: true });
+    expect((await singer.json('POST', `/api/songs/${draft.body.id}/generate`)).status).toBe(202);
+    const correctedSong = await waitFor(async () => {
+      const result = await singer.json('GET', `/api/songs/${draft.body.id}`);
+      return ['completed', 'failed'].includes(result.body.status) ? result.body : undefined;
+    });
+    expect(correctedSong.status).toBe('completed');
+    expect((await singer.req('GET', `${correctedSong.downloadUrl}`)).status).toBe(200);
+    expect((await singer.json('PUT', `/api/songs/${draft.body.id}/lyrics`, { title: 'No', lyrics: 'No' })).status).toBe(409);
+
+    const anotherDraft = await singer.json('POST', '/api/songs', { prompt: 'Another birthday song', style: 'Pop', mood: 'Joyful and celebratory' });
+    expect((await singer.json('POST', `/api/songs/${anotherDraft.body.id}/generate`)).body).toMatchObject({ code: 'quota_songs', limit: 1 });
+    const other = new Client(base);
+    await other.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'another-singer@example.com', password: 'motdepasse7' });
+    expect((await other.json('GET', `/api/songs/${draft.body.id}`)).status).toBe(404);
+    expect((await other.req('GET', finished.audioUrl)).status).toBe(404);
+  }, 30_000);
+
+  it('shows a friendly paid-plan error, retries failed audio, and deletes songs only for their owner', async () => {
+    const singer = new Client(base);
+    await singer.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'song-retry@example.com', password: 'motdepasse6' });
+    const draft = await singer.json('POST', '/api/songs', { prompt: 'Une chanson de fête', style: 'Afrobeats', mood: 'Joyful and celebratory' });
+
+    failSongAudioGeneration = true;
+    try {
+      await singer.json('POST', `/api/songs/${draft.body.id}/generate`);
+      const failed = await waitFor(async () => {
+        const result = await singer.json('GET', `/api/songs/${draft.body.id}`);
+        return result.body.status === 'failed' ? result.body : undefined;
+      });
+      expect(failed.error).toBe('paid_plan_required');
+      expect(JSON.stringify(failed)).not.toContain('HTTP 402');
+      expect(JSON.stringify(failed)).not.toContain('"detail"');
+    } finally {
+      failSongAudioGeneration = false;
+    }
+
+    const retried = await singer.json('POST', `/api/songs/${draft.body.id}/generate`);
+    expect(retried.status).toBe(202);
+    const completed = await waitFor(async () => {
+      const result = await singer.json('GET', `/api/songs/${draft.body.id}`);
+      return result.body.status === 'completed' ? result.body : undefined;
+    });
+    expect(completed.status).toBe('completed');
+
+    const stranger = new Client(base);
+    await stranger.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'song-stranger@example.com', password: 'motdepasse6' });
+    expect((await stranger.json('DELETE', `/api/songs/${draft.body.id}`)).status).toBe(404);
+    expect((await singer.json('DELETE', `/api/songs/${draft.body.id}`)).body.removed).toBe(true);
+    expect((await singer.json('GET', `/api/songs/${draft.body.id}`)).status).toBe(404);
+
+    const active = await singer.json('POST', '/api/songs', { prompt: 'Une chanson en cours', style: 'Pop', mood: 'Joyful and celebratory' });
+    await db.query("UPDATE songs SET status = 'running' WHERE id = $1", [active.body.id]);
+    expect((await singer.json('DELETE', `/api/songs/${active.body.id}`)).body.code).toBe('song_running');
+    await db.query("UPDATE songs SET status = 'failed' WHERE id = $1", [active.body.id]);
+    expect((await singer.json('DELETE', `/api/songs/${active.body.id}`)).body.removed).toBe(true);
+  }, 30_000);
+});
+
 describe('brand kit', () => {
   it('stores a logo and colours and applies them to the videos', async () => {
     const zsr = new Client(base);
-    await zsr.json('POST', '/api/auth/signup', { email: 'contact@zsr-technum.com', password: 'motdepasse9' });
+    await zsr.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'contact@zsr-technum.com', password: 'motdepasse9' });
     expect((await zsr.json('GET', '/api/brand')).body).toEqual({ name: '', colors: [] });
     expect((await zsr.json('PUT', '/api/brand', { name: 'ZSR-TechNum', colors: ['#0b1c8c', 'red'] })).body.code).toBe('invalid_colors');
     const saved = await zsr.json('PUT', '/api/brand', { name: 'ZSR-TechNum', colors: ['#0b1c8c', '#3cc8c8'] });
@@ -287,7 +581,7 @@ describe('brand kit', () => {
     expect((await zsr.req('GET', kit.logoUrl)).status).toBe(200);
     // Another customer never sees this logo.
     const other = new Client(base);
-    await other.json('POST', '/api/auth/signup', { email: 'other-brand@example.com', password: 'motdepasse8' });
+    await other.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'other-brand@example.com', password: 'motdepasse8' });
     expect((await other.req('GET', '/api/brand/logo')).status).toBe(404);
 
     const job = (await zsr.json('POST', '/api/jobs', { prompt: 'Une vidéo de 10 secondes pour présenter nos services numériques', durationSec: 10 })).body;
@@ -311,11 +605,18 @@ describe('admin settings', () => {
     await admin.json('POST', '/api/auth/login', { email: 'admin@example.com', password: 'motdepasse1' });
     const get = await admin.json('GET', '/api/admin/settings');
     expect(get.body.groups.map((g: { id: string }) => g.id)).toContain('stock');
+    const fields = get.body.groups.flatMap((group: { fields: Array<{ key: string; secret?: boolean }> }) => group.fields);
+    expect(fields.some((field: { secret?: boolean }) => field.secret)).toBe(false);
+    expect(fields.some((field: { key: string }) => field.key === 'OPENAI_COMPATIBLE_BASE_URL')).toBe(true);
+    expect(get.body.groups.every((group: { fields: unknown[] }) => group.fields.length > 0)).toBe(true);
     const put = await admin.json('PUT', '/api/admin/settings', { PIXABAY_API_KEY: 'px' });
     expect(put.status).toBe(200);
     expect(put.body.providers.stock).toContain('pixabay');
+    expect(put.body.groups.find((group: { id: string }) => group.id === 'stock').configuredFields).toContain('Clé Pixabay');
     expect(fs.readFileSync(envFile, 'utf8')).toContain('PIXABAY_API_KEY=px');
-    expect(JSON.stringify((await admin.json('GET', '/api/admin/settings')).body)).not.toContain('"px"');
+    const settingsJson = JSON.stringify((await admin.json('GET', '/api/admin/settings')).body);
+    expect(settingsJson).not.toContain('"px"');
+    expect(settingsJson).not.toContain('PIXABAY_API_KEY');
     const bob = new Client(base);
     await bob.json('POST', '/api/auth/login', { email: 'bob@example.com', password: 'motdepasse2' });
     expect((await bob.json('PUT', '/api/admin/settings', { GROQ_API_KEY: 'x' })).status).toBe(403);

@@ -30,6 +30,8 @@ export interface StockResult {
   pageUrl: string;
   /** File extension of the rendition, without dot. */
   extension: string;
+  /** What the media shows (alt text, tags or page slug), used to reject off-topic or unsuitable results and to describe it later. */
+  description?: string;
 }
 
 export interface StockProvider {
@@ -50,4 +52,20 @@ export const pickRendition = <T extends { width: number; height: number }>(items
   const short = (i: T) => Math.min(i.width, i.height);
   const bigEnough = valid.filter((i) => short(i) >= minShortSide * 0.9).sort((a, b) => short(a) - short(b));
   return bigEnough[0] ?? valid.sort((a, b) => short(b) - short(a))[0];
+};
+
+/** Pick stock media that can fill the output without an extreme crop or upscale. */
+export const pickStockResult = <T extends { width: number; height: number }>(items: T[], width: number, height: number, maxUpscale = 1.5): T | undefined => {
+  if (width <= 0 || height <= 0) return undefined;
+  const targetRatio = width / height;
+  const suitable = items
+    .filter((item) => item.width > 0 && item.height > 0)
+    .map((item) => {
+      const ratioDifference = Math.abs(Math.log(item.width / item.height / targetRatio));
+      const upscale = Math.max(width / item.width, height / item.height, 1);
+      return { item, ratioDifference, upscale };
+    })
+    .filter(({ ratioDifference, upscale }) => ratioDifference <= Math.log(1.5) && upscale <= maxUpscale)
+    .sort((a, b) => a.upscale - b.upscale || a.ratioDifference - b.ratioDifference);
+  return suitable[0]?.item;
 };

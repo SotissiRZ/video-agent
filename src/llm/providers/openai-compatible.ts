@@ -13,6 +13,7 @@ export interface OpenAICompatibleOptions {
 
 interface ChatCompletion {
   model?: string;
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
   choices?: Array<{ message?: { content?: string | null; refusal?: string | null }; finish_reason?: string }>;
 }
 
@@ -33,7 +34,11 @@ export class OpenAICompatibleProvider implements LLMProvider {
   async generate(request: LLMRequest): Promise<LLMResponse> {
     const messages = [
       ...(request.system ? [{ role: 'system', content: request.system }] : []),
-      ...request.messages,
+      ...request.messages.map(({ role, content, images }) =>
+        images?.length
+          ? { role, content: [{ type: 'text', text: content }, ...images.map((image) => ({ type: 'image_url', image_url: { url: `data:${image.mediaType};base64,${image.data}` } }))] }
+          : { role, content },
+      ),
     ];
     const body: Record<string, unknown> = {
       model: this.model,
@@ -59,7 +64,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
     if (choice?.message?.refusal) throw new ProviderError(this.id, `refusal: ${choice.message.refusal}`);
     const text = choice?.message?.content?.trim();
     if (!text) throw new ProviderError(this.id, `empty response (finish_reason: ${choice?.finish_reason ?? 'unknown'})`);
-    return { text, provider: this.id, model: completion.model ?? this.model };
+    const usage = completion.usage ? { inputTokens: completion.usage.prompt_tokens ?? 0, outputTokens: completion.usage.completion_tokens ?? 0 } : undefined;
+    return { text, provider: this.id, model: completion.model ?? this.model, usage };
   }
 
   private call(body: Record<string, unknown>, signal?: AbortSignal): Promise<ChatCompletion> {

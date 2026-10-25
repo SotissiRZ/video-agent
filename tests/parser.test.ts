@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { parseBusinessDetails, parsePhone } from '../src/prompt/business';
 import { detectLanguage, extractKeywords, parseDuration, parseFormat, parsePrompt } from '../src/prompt/parser';
 
 const SIRAGO = 'Crée une vidéo verticale de 30 secondes pour promouvoir Sirago auprès des chauffeurs au Burkina Faso.';
@@ -77,6 +78,14 @@ describe('prompt parser', () => {
     expect(extractKeywords('Vidéo pour une marque de café')).toEqual(['marque', 'cafe']);
   });
 
+  it('uses the futuristic style only when the request asks for it', () => {
+    expect(parsePrompt('Une vidéo futuriste pour notre application de paiement').styleHints[0]).toBe('futuristic');
+    expect(parsePrompt('Pub sci-fi avec hologrammes pour un casque VR').styleHints).toContain('futuristic');
+    // Natural requests stay natural, even when they talk about the future.
+    expect(parsePrompt('Présente notre futur magasin de fruits bio à Dakar').styleHints).not.toContain('futuristic');
+    expect(parsePrompt('Vidéo chaleureuse pour une boulangerie familiale').styleHints).toEqual(['warm']);
+  });
+
   it('detects language', () => {
     expect(detectLanguage('Create a video for our new product')).toBe('en');
     expect(detectLanguage('Fais une vidéo pour notre nouveau produit')).toBe('fr');
@@ -115,5 +124,30 @@ describe('brand detection', () => {
     expect(p.topic).toBe('notre plateforme SaaS de cybersécurité');
     expect(parsePrompt('Make a video about our AI API for developers').brand).toBeUndefined();
     expect(parsePrompt('Crée une vidéo pour promouvoir Sirago auprès des chauffeurs').brand).toBe('Sirago');
+  });
+});
+
+describe('local business details', () => {
+  it('reads the shop name, kind, offers, phone and perks', () => {
+    const prompt = 'Crée une vidéo verticale de 20 secondes pour faire la publicité du restaurant Chez Awa à Ouagadougou, spécialité riz gras et poulet braisé, livraison au 70 00 00 00.';
+    expect(parsePrompt(prompt).brand).toBe('Chez Awa');
+    expect(parseBusinessDetails(prompt, 'fr')).toEqual({
+      kind: expect.objectContaining({ id: 'restaurant', food: true }),
+      offers: ['Riz gras', 'Poulet braisé'],
+      phone: '70 00 00 00',
+      perks: ['Livraison à domicile'],
+    });
+  });
+
+  it('stops the offer list before payment details and finds names after the shop word', () => {
+    const prompt = 'Vidéo TikTok pour la boutique Fatou Mode à Dakar qui vend des pagnes, des sacs et des chaussures, paiement Wave accepté';
+    expect(parsePrompt(prompt).brand).toBe('Fatou Mode');
+    expect(parseBusinessDetails(prompt, 'fr')).toMatchObject({ offers: ['Pagnes', 'Sacs', 'Chaussures'], perks: ['Paiement mobile money'] });
+    expect(parsePrompt('Pub pour mon salon de coiffure Belle Dame à Abidjan').brand).toBe('Belle Dame');
+  });
+
+  it('does not take durations or resolutions for a phone number', () => {
+    expect(parsePhone('Vidéo de 30 secondes en 1080x1920 pour 2026')).toBeUndefined();
+    expect(parsePhone('call +234 803 123 4567')).toBe('+234 803 123 4567');
   });
 });

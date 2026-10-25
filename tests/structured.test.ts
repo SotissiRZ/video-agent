@@ -8,6 +8,26 @@ import { getStyle } from '../src/remotion/contract/styles';
 
 const text = fs.readFileSync(path.join(__dirname, 'fixtures', 'structured-prompt.txt'), 'utf8');
 
+describe('production notes after the script', () => {
+  it('never shows or reads aloud the notes written after the final texts', () => {
+    const prompt = fs.readFileSync(path.resolve('tests/fixtures/zsr-script-with-notes.txt'), 'utf8');
+    const script = parseStructuredPrompt(prompt)!;
+    expect(script.finalTexts).toEqual(['ZSR-TechNum', 'Votre idée. Notre technologie.', 'Contactez-nous pour votre projet.']);
+    expect(script.voiceover).toMatch(/^Vous avez une idée/);
+    expect(script.voiceover).not.toMatch(/impression de confiance|IMPORTANT|faux logo/);
+    const planned = plannedFromStructured(script, { brand: 'ZSR-TechNum', totalSec: 60, language: 'fr' });
+    const everything = JSON.stringify(planned);
+    expect(everything).not.toMatch(/impression de confiance|Le rendu doit|IMPORTANT|faux logo|texte déformé/);
+    // A six-item list keeps all its items.
+    expect(planned.find((p) => p.items.includes('PDF'))!.items).toEqual(['Logo', 'Affiche', 'Bannière', 'Flyer', 'PDF', 'PPTX']);
+  });
+
+  it('keeps an unquoted voice-over written on several lines', () => {
+    const script = parseStructuredPrompt(['SCÈNE 1 — A (0–5 s)', 'Texte : « Bonjour »', 'SCÈNE 2 — B (5–10 s)', 'Texte : « Merci »', 'Voix off :', 'Bienvenue chez nous.', 'Nous livrons partout à Dakar.'].join('\n'))!;
+    expect(script.voiceover).toBe('Bienvenue chez nous. Nous livrons partout à Dakar.');
+  });
+});
+
 describe('detailed scripts (SCÈNE 1 — … (0–5 s))', () => {
   it('reads scenes, timings, on-screen texts, voice-over and final texts', () => {
     const s = parseStructuredPrompt(text)!;
@@ -32,7 +52,11 @@ describe('detailed scripts (SCÈNE 1 — … (0–5 s))', () => {
     expect(planned[4]!.narration).toMatch(/contenus professionnels/);
     expect(planned[6]).toMatchObject({ headline: 'Votre idée. Notre *technologie.*', subheadline: 'Contactez-nous' });
     expect(planned[6]!.narration).toMatch(/Contactez-nous/);
-    expect(planned[1]!.visualKeywords).toEqual(expect.arrayContaining(['website design', 'dashboard', 'smartphone']));
+    expect(planned[1]!.visualKeywords).toEqual(expect.arrayContaining(['web designer laptop', 'smartphone app interface', 'analytics dashboard laptop']));
+    // "Apparition du logo ZSR-TechNum" / "retour au logo ZSR-TechNum": the brand logo, not a stock search.
+    expect(planned[0]!.visualKeywords).not.toContain('graphic designer laptop');
+    // The closing montage reuses the visuals of the other scenes.
+    expect(planned[6]!.visualKeywords[0]).toBe(planned[1]!.visualKeywords[0]);
     expect(planned.map((p) => p.weight)).toEqual([5, 7, 8, 8, 8, 8, 16]);
   });
 
@@ -43,7 +67,7 @@ describe('detailed scripts (SCÈNE 1 — … (0–5 s))', () => {
     // "sécurité" in the first sentence must not pull the whole text to the last scene.
     const out = alignNarration(['Bonjour, en toute sécurité.', 'Le paiement mobile.', 'La sécurité avant tout.'], scenes, [3, 3, 3]);
     expect(out).toEqual(['Bonjour, en toute sécurité.', 'Le paiement mobile.', 'La sécurité avant tout.']);
-    expect(visualKeywordsFor('formulaires, bases de données et notifications')).toEqual(expect.arrayContaining(['online form', 'database server', 'notification']));
+    expect(visualKeywordsFor('formulaires, bases de données et notifications')).toEqual(['online form laptop', 'server room data center', 'data charts screen', 'smartphone notification']);
   });
 
   it('uses the style named after "Style visuel :" and the brand colours', () => {

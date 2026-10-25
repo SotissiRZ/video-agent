@@ -8,12 +8,14 @@ interface PixabayImage {
   imageWidth: number;
   imageHeight: number;
   largeImageURL: string;
+  tags?: string;
 }
 interface PixabayVideo {
   id: number;
   pageURL: string;
   user: string;
   duration: number;
+  tags?: string;
   videos: Record<'large' | 'medium' | 'small' | 'tiny', { url: string; width: number; height: number }>;
 }
 
@@ -49,13 +51,14 @@ export class PixabayProvider implements StockProvider {
         author: h.user,
         pageUrl: h.pageURL,
         extension: 'jpg',
+        description: h.tags,
       }));
     }
     const res = await httpJson<{ hits?: PixabayVideo[] }>(`https://pixabay.com/api/videos/?${params}`, { provider: this.id, signal: q.signal, timeoutMs: 30_000 });
     return (res.hits ?? []).flatMap((h) => {
       const file = pickRendition(Object.values(h.videos).filter((v) => v.url), q.minShortSide);
       if (!file) return [];
-      return [{ provider: this.id, id: `pixabay-video-${h.id}`, kind: 'video' as const, downloadUrl: file.url, width: file.width, height: file.height, durationSec: h.duration, author: h.user, pageUrl: h.pageURL, extension: 'mp4' }];
+      return [{ provider: this.id, id: `pixabay-video-${h.id}`, kind: 'video' as const, downloadUrl: file.url, width: file.width, height: file.height, durationSec: h.duration, author: h.user, pageUrl: h.pageURL, extension: 'mp4', description: h.tags }];
     });
   }
 }

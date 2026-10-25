@@ -33,17 +33,24 @@ export interface VideoOptions {
   offline?: boolean;
   /** Upper bound for the duration (plan limit), applied after prompt parsing. */
   maxDurationSec?: number;
-  /** Small badge shown in a corner of the video (e.g. free plan: "Made with Video Agent"). */
+  /** Small badge shown in a corner of the video (e.g. free plan: "Made with SOVID AI"). */
   badge?: string;
   /** Brand kit: name used when the prompt names no brand, colours (#RRGGBB), logo file (absolute path). */
   brandName?: string;
   brandColors?: string[];
   brandLogo?: string;
+  /** Narrator: female (default) or male; a cloned voice (ElevenLabs voice id) wins over both. */
+  voiceGender?: 'female' | 'male';
+  voiceId?: string;
+  /** Words the voice must say differently from how they are written. */
+  pronunciations?: Array<{ word: string; spoken: string }>;
 }
 
 export interface VideoRequest {
   prompt: string;
   options?: VideoOptions;
+  /** Product images selected by the account owner: absolute paths, optionally with what a vision model saw in them. */
+  productImages?: Array<string | { file: string; name?: string; description?: string }>;
 }
 
 /** Result of the deterministic prompt analysis. */
@@ -96,6 +103,8 @@ export interface VideoBrief {
   subtitles: boolean;
   /** Corner badge (plan watermark). */
   badge?: string;
+  /** Customer product photos shown in the video (descriptions, numbered from 1). */
+  productPhotos?: string[];
   parsed: ParsedPrompt;
 }
 
@@ -123,6 +132,8 @@ export interface PlannedScene {
   visualKeywords: string[];
   /** Prompt for an image/video generation provider. */
   visualPrompt: string;
+  /** Customer product photo to show (1-based), when the script asked for one. */
+  productPhoto?: number;
   /** Relative weight used to split the total duration. */
   weight: number;
 }

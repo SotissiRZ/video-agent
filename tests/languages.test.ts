@@ -35,7 +35,7 @@ describe('local languages', () => {
 
   it('asks the LLM to write in the language; without an LLM the video falls back to the base language', async () => {
     const llm = new FakeLLM([new Error('offline'), new Error('offline'), new Error('offline'), new Error('offline')]);
-    const result = await new VideoAgent(testConfig(), { renderer: fakeRenderer, logger, voice: null, llm, stock: [], image: null }).run({
+    const result = await new VideoAgent(testConfig(), { renderer: fakeRenderer, logger, voice: null, llm, stock: [], image: null, direction: false }).run({
       prompt: 'Crée une vidéo de 15 secondes en lingala pour mon restaurant à Kinshasa',
     });
     expect(String(llm.requests[0]!.messages[0]!.content)).toContain('in Lingala');

@@ -53,12 +53,17 @@ export const useLayout = (): Layout => {
 
 /**
  * Pick a font size so that `text` fits comfortably: shrinks as text grows.
- * `scale` is relative to the layout unit (shortest side).
+ * `scale` is relative to the layout unit (shortest side). The longest word always fits on
+ * one line, so that a name such as "ZSR-TechNum" is never broken at its hyphen.
  */
 export const fitFontSize = (text: string, layout: Layout, scale: number, min = 0.035, reference = layout.isPortrait ? 22 : 34): number => {
-  const length = Math.max(1, text.replace(/\*/g, '').length);
+  const plain = text.replace(/\*/g, '');
+  const length = Math.max(1, plain.length);
   const factor = Math.min(1, Math.sqrt(reference / length));
-  return Math.round(layout.unit * Math.max(min, scale * factor));
+  const longestWord = Math.max(1, ...plain.split(/\s+/).map((w) => w.length));
+  // Bold display fonts average ~0.72 em per character (uppercase included).
+  const wordFit = layout.contentWidth / (longestWord * 0.72);
+  return Math.round(Math.min(wordFit, layout.unit * Math.max(min, scale * factor)));
 };
 
 export interface TextSegment {

@@ -1,5 +1,6 @@
 import type { SceneKind } from '../remotion/contract/storyboard';
 import type { VideoConcept } from '../core/types';
+import type { BusinessDetails } from '../prompt/business';
 
 /** One slot in a template's narrative structure. */
 export interface SceneBlueprint {
@@ -26,6 +27,8 @@ export interface CopyContext {
   location: string;
   locationPhrase: string;
   topic: string;
+  /** Shop kind, offers, phone and perks read from the brief (local-business copy). */
+  business?: BusinessDetails;
 }
 
 export interface SceneCopy {

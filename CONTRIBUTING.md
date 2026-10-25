@@ -1,4 +1,4 @@
-# Contribuer à Video Agent
+# Contribuer à SOVID AI
 
 Merci de votre intérêt ! Ce guide explique comment préparer l'environnement, les conventions du projet et la procédure de contribution.
 

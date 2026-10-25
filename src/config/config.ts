@@ -29,7 +29,11 @@ const bool = (def: boolean) =>
 const int = (def: number, min: number, max: number) =>
   z.preprocess((v) => (emptyToUndefined(v) === undefined ? def : Number(v)), z.number().int().min(min).max(max));
 const enumWithDefault = <T extends readonly [string, ...string[]]>(values: T, def: T[number]) =>
-  z.preprocess((v) => (emptyToUndefined(v) === undefined ? def : String(v).toLowerCase()), z.enum(values));
+  z.preprocess((v) => {
+    if (emptyToUndefined(v) === undefined) return def;
+    const normalized = String(v).toLowerCase();
+    return values.find((value) => value.toLowerCase() === normalized) ?? normalized;
+  }, z.enum(values));
 
 const EnvSchema = z.object({
   // --- LLM -------------------------------------------------------------
@@ -87,7 +91,9 @@ const EnvSchema = z.object({
   OPENAI_TTS_MODEL: z.preprocess(emptyToUndefined, z.string().default('gpt-4o-mini-tts')),
   OPENAI_TTS_VOICE: z.preprocess(emptyToUndefined, z.string().default('alloy')),
   ELEVENLABS_API_KEY: optionalString,
-  ELEVENLABS_VOICE_ID: z.preprocess(emptyToUndefined, z.string().default('21m00Tcm4TlvDq8ikWAM')),
+  /** Female and male voices. Premade voices work on every ElevenLabs plan (library voices need a paid one). */
+  ELEVENLABS_VOICE_ID: z.preprocess(emptyToUndefined, z.string().default('EXAVITQu4vr4xnSDxMaL')),
+  ELEVENLABS_VOICE_ID_MALE: z.preprocess(emptyToUndefined, z.string().default('JBFqnCBsd6RMkjVDRZzb')),
   ELEVENLABS_MODEL: z.preprocess(emptyToUndefined, z.string().default('eleven_multilingual_v2')),
   VIDEO_AGENT_SYSTEM_VOICE: optionalString,
   /** Piper (free neural voices). Data dir holds the binary and downloaded voices. */
@@ -95,6 +101,8 @@ const EnvSchema = z.object({
   PIPER_BINARY: optionalString,
   PIPER_VOICE_FR: z.preprocess(emptyToUndefined, z.string().default('fr_FR-siwis-medium')),
   PIPER_VOICE_EN: z.preprocess(emptyToUndefined, z.string().default('en_US-lessac-medium')),
+  PIPER_VOICE_FR_MALE: z.preprocess(emptyToUndefined, z.string().default('fr_FR-tom-medium')),
+  PIPER_VOICE_EN_MALE: z.preprocess(emptyToUndefined, z.string().default('en_US-ryan-medium')),
   /** >1 = slower speech. */
   PIPER_LENGTH_SCALE: z.preprocess((v) => (emptyToUndefined(v) === undefined ? 1 : Number(v)), z.number().min(0.5).max(2)),
   PIPER_AUTO_DOWNLOAD: bool(true),
@@ -222,16 +230,24 @@ const EnvSchema = z.object({
 
   /** Outgoing e-mail (password reset, verification): smtp(s)://user:password@host:port. Empty = links written to the logs. */
   SMTP_URL: optionalString,
-  /** Sender, e.g. "Video Agent <no-reply@example.com>". */
-  MAIL_FROM: z.preprocess(emptyToUndefined, z.string().default('Video Agent <no-reply@localhost>')),
+  /** Sender, e.g. "SOVID AI <no-reply@example.com>". */
+  MAIL_FROM: z.preprocess(emptyToUndefined, z.string().default('SOVID AI <no-reply@localhost>')),
   /** Videos can be created only once the e-mail address is confirmed. */
   REQUIRE_EMAIL_VERIFICATION: bool(false),
   /** Delete videos older than this many days (0 = keep forever). */
   VIDEO_AGENT_RETENTION_DAYS: int(0, 0, 3650),
   /** Legal pages (terms, privacy, legal notice). */
-  COMPANY_NAME: z.preprocess(emptyToUndefined, z.string().default('Video Agent')),
+  COMPANY_NAME: z.preprocess(emptyToUndefined, z.string().default('SOVID AI')),
   COMPANY_ADDRESS: z.preprocess(emptyToUndefined, z.string().default('')),
   CONTACT_EMAIL: z.preprocess(emptyToUndefined, z.string().default('')),
+  /** Legal form and registration (e.g. "SARL au capital de 1 000 000 FCFA, RCCM BF-OUA-2026-B-1234, IFU 00012345A"). */
+  COMPANY_REGISTRATION: z.preprocess(emptyToUndefined, z.string().default('')),
+  /** Person legally responsible for the published content (directeur de la publication). */
+  COMPANY_DIRECTOR: z.preprocess(emptyToUndefined, z.string().default('')),
+  /** Country whose law applies and whose data protection authority is competent (e.g. "Burkina Faso"). */
+  COMPANY_COUNTRY: z.preprocess(emptyToUndefined, z.string().default('')),
+  /** Hosting provider: name, address and phone (legal notice). */
+  HOSTING_PROVIDER: z.preprocess(emptyToUndefined, z.string().default('')),
 
   VIDEO_AGENT_LOG_LEVEL: enumWithDefault(['debug', 'info', 'warn', 'error', 'silent'] as const, 'info'),
 });
@@ -253,7 +269,8 @@ export const findPackageRoot = (start: string): string => {
     const pkg = path.join(dir, 'package.json');
     if (fs.existsSync(pkg)) {
       try {
-        if (JSON.parse(fs.readFileSync(pkg, 'utf8')).name === 'video-agent') return dir;
+        const name = JSON.parse(fs.readFileSync(pkg, 'utf8')).name;
+        if (name === 'video-agent' || name === 'sovid-ai') return dir;
       } catch {
         /* keep searching */
       }

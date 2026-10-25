@@ -9,7 +9,12 @@ const SAMPLE_RATE = 22050;
 /** ElevenLabs text-to-speech, requested as raw PCM and wrapped in WAV. */
 export class ElevenLabsVoiceProvider implements VoiceProvider {
   readonly id = 'elevenlabs';
-  constructor(private readonly opts: { apiKey: string; voiceId: string; model: string }) {}
+  constructor(private readonly opts: { apiKey: string; voiceId: string; maleVoiceId?: string; model: string }) {}
+
+  private voiceFor(req: VoiceRequest): string {
+    if (req.voiceId) return req.voiceId;
+    return req.gender === 'male' && this.opts.maleVoiceId ? this.opts.maleVoiceId : this.opts.voiceId;
+  }
 
   supports(language: string): boolean {
     const info = getLanguage(language);
@@ -18,7 +23,7 @@ export class ElevenLabsVoiceProvider implements VoiceProvider {
 
   async synthesize(req: VoiceRequest): Promise<VoiceResult> {
     const pcm = await httpBuffer(
-      `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(this.opts.voiceId)}?output_format=pcm_${SAMPLE_RATE}`,
+      `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(this.voiceFor(req))}?output_format=pcm_${SAMPLE_RATE}`,
       {
         provider: this.id,
         headers: { 'xi-api-key': this.opts.apiKey, accept: 'audio/pcm' },

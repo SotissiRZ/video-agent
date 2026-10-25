@@ -33,7 +33,7 @@ export const SceneShell: React.FC<SceneProps & { children: React.ReactNode; just
           <MediaStack media={[scene.media, ...(scene.shots ?? [])]} kenBurns={scene.animation.kenBurns} />
           <AbsoluteFill
             style={{
-              background: `linear-gradient(180deg, ${withAlpha(theme.palette.background, 0.55)} 0%, ${withAlpha(theme.palette.background, 0.85)} 100%)`,
+              background: `linear-gradient(180deg, ${withAlpha(theme.palette.background, 0.2)} 0%, ${withAlpha(theme.palette.background, 0.52)} 100%)`,
             }}
           />
         </>
@@ -48,6 +48,8 @@ export const SceneShell: React.FC<SceneProps & { children: React.ReactNode; just
           justifyContent: justify,
           alignItems: align,
           gap: layout.unit * 0.035,
+          // Inherited by every text of the scene.
+          textShadow: theme.glow ? `0 0 ${layout.unit * 0.012}px ${withAlpha(theme.palette.primary, 0.75)}, 0 0 ${layout.unit * 0.035}px ${withAlpha(theme.palette.primary, 0.35)}` : undefined,
         }}
       >
         {children}

@@ -11,7 +11,7 @@ export const applyAnimations = (storyboard: Storyboard, style: StyleDefinition):
 
   const scenes: Scene[] = storyboard.scenes.map((scene, i) => {
     const isLast = i === storyboard.scenes.length - 1;
-    const background = scene.kind === 'cta' ? 'gradient' : style.backgrounds[i % style.backgrounds.length]!;
+    const background = scene.kind === 'cta' ? style.ctaBackground ?? 'gradient' : style.backgrounds[i % style.backgrounds.length]!;
     // Never let a transition eat more than a third of the shorter neighbour.
     const next = storyboard.scenes[i + 1];
     const maxTransition = next ? Math.floor(Math.min(scene.durationInFrames, next.durationInFrames) / 3) : 0;
@@ -22,7 +22,7 @@ export const applyAnimations = (storyboard: Storyboard, style: StyleDefinition):
       animation: {
         entrance: scene.kind === 'quote' ? 'blur' : style.entrances[i % style.entrances.length]!,
         stagger,
-        kenBurns: scene.media ? 0.08 : 0.04,
+        kenBurns: scene.media ? 0.025 : 0.04,
       },
       transitionOut: {
         type,

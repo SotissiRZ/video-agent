@@ -29,7 +29,7 @@ export interface LoadedJob {
   credits: MediaCredit[];
 }
 
-export const loadJob = (jobDir: string): LoadedJob => {
+export const loadJob = (jobDir: string, videoFile?: string): LoadedJob => {
   const dir = path.resolve(jobDir);
   const read = <T>(name: string): T => {
     const file = path.join(dir, name);
@@ -38,7 +38,7 @@ export const loadJob = (jobDir: string): LoadedJob => {
   };
   const storyboard = StoryboardSchema.parse(read('storyboard.json'));
   const job = fs.existsSync(path.join(dir, 'job.json')) ? read<{ videoFile?: string; posterFile?: string }>('job.json') : {};
-  const videoName = job.videoFile ?? fs.readdirSync(dir).find((f) => /^video\.(mp4|mov|webm|gif)$/.test(f));
+  const videoName = videoFile ? path.relative(dir, path.resolve(dir, videoFile)) : job.videoFile ?? fs.readdirSync(dir).find((f) => /^video\.(mp4|mov|webm|gif)$/.test(f));
   if (!videoName || !fs.existsSync(path.join(dir, videoName))) throw new VideoAgentError(`Aucune vidéo rendue dans ${dir}`, 'Lancez "video-agent render <job>" d’abord.');
   const credits = storyboard.scenes.flatMap((s) => (s.media?.credit ? [{ sceneId: s.id, provider: s.media.credit.source, author: s.media.credit.author, url: s.media.credit.url ?? '' }] : []));
   const poster = job.posterFile ?? 'poster.jpg';
@@ -98,13 +98,15 @@ export interface PublishJobOptions {
   llm?: LLMProvider | null;
   signal?: AbortSignal;
   onProgress?: (platform: PlatformId, message: string) => void;
+  /** Rendered file to publish instead of the one recorded in job.json (e.g. the badge-free export). */
+  videoFile?: string;
   /** Test seam. */
   publisherFactory?: (id: PlatformId) => Publisher;
   scheduleStore?: ScheduleStore;
 }
 
 export const publishJob = async (config: AppConfig, jobDir: string, opts: PublishJobOptions): Promise<{ outcomes: PublishOutcome[]; warnings: string[] }> => {
-  const job = loadJob(jobDir);
+  const job = loadJob(jobDir, opts.videoFile);
   const warnings: string[] = [];
   const platforms = [...new Set(opts.platforms)];
   if (!platforms.length) throw new VideoAgentError('Aucune plateforme indiquée', 'Exemple : --to tiktok,instagram,youtube');

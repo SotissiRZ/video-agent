@@ -4,9 +4,9 @@ import { scoreTemplates, selectTemplate } from '../src/templates/selector';
 import type { CopyContext, TemplateDefinition } from '../src/templates/types';
 
 describe('template registry & selection', () => {
-  it('ships the 7 required templates', () => {
+  it('ships the 8 required templates', () => {
     expect(listTemplates().map((t) => t.id).sort()).toEqual(
-      ['advertisement', 'announcement', 'app-demo', 'product-presentation', 'social-media', 'storytelling', 'tutorial'].sort(),
+      ['advertisement', 'announcement', 'app-demo', 'local-business', 'product-presentation', 'social-media', 'storytelling', 'tutorial'].sort(),
     );
   });
 
@@ -21,6 +21,8 @@ describe('template registry & selection', () => {
     ['Explain how to set up the router step by step', 'tutorial'],
     ["Raconte l'histoire d'une couturière qui lance sa marque grâce aux réseaux sociaux", 'storytelling'],
     ['Tutoriel TikTok : comment monter une vidéo', 'tutorial'],
+    ['Fais une pub pour le maquis Le Bon Goût, on propose attiéké poisson et alloco', 'local-business'],
+    ['Publicité du restaurant Chez Awa, spécialité riz gras, livraison', 'local-business'],
   ])('"%s" → %s', (prompt, expected) => {
     expect(selectTemplate(prompt).template.id).toBe(expected);
   });

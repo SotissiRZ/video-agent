@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createLogger } from '../src/core/logger';
@@ -36,6 +38,7 @@ const sign = (secret: string, raw: string) => crypto.createHmac('sha256', secret
 
 /** Fake gateways: GeniusPay status per reference, YouCan Pay tokens. */
 const remote = new Map<string, { status: string; amount: number; currency: string }>();
+let tokens = 0;
 const calls: Array<{ url: string; init?: RequestInit }> = [];
 const gatewayFetch: typeof fetch = async (input, init) => {
   const url = String(input);
@@ -48,7 +51,8 @@ const gatewayFetch: typeof fetch = async (input, init) => {
   }
   const m = /merchant\/payments\/([^/?]+)$/.exec(url);
   if (m) return remote.has(m[1]!) ? Response.json({ success: true, data: { reference: m[1], ...remote.get(m[1]!) } }) : Response.json({ success: false }, { status: 404 });
-  if (url === 'https://youcanpay.com/sandbox/api/tokenize') return Response.json({ token: { id: 'tok_123' } });
+  // Real tokens are unique per checkout (payments.provider_ref is unique).
+  if (url === 'https://youcanpay.com/sandbox/api/tokenize') return Response.json({ token: { id: tokens++ ? `tok_123_${tokens}` : 'tok_123' } });
   return new Response('not found', { status: 404 });
 };
 
@@ -66,8 +70,8 @@ beforeAll(async () => {
     db,
     embeddedWorker: false,
     reminders: false,
-    logger: createLogger('silent'),
-    deps: { renderer: fakeRenderer, logger: createLogger('silent'), llm: null, voice: null, stock: [] },
+    logger: createLogger('error'),
+    deps: { renderer: fakeRenderer, logger: createLogger('error'), llm: null, voice: null, stock: [] },
     mailer: { kind: 'log', send: async () => undefined },
     paymentFetch: gatewayFetch,
   });
@@ -89,7 +93,7 @@ describe('prepaid passes', () => {
 
   it('GeniusPay: checkout, signed webhook, confirmation with the gateway, 30-day pass extended on renewal', async () => {
     const c = new Client(base);
-    await c.json('POST', '/api/auth/signup', { email: 'awa@shop.ci', password: 'motdepasse1', name: 'Awa' });
+    await c.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'awa@shop.ci', password: 'motdepasse1', name: 'Awa' });
     const pay = await c.json('POST', '/api/billing/pay', { plan: 'creator', provider: 'geniuspay' });
     expect(pay.status).toBe(200);
     expect(pay.body.url).toBe('https://geniuspay.ci/checkout/MTX-1');
@@ -125,7 +129,7 @@ describe('prepaid passes', () => {
 
   it('GeniusPay: an underpaid or foreign-currency payment is not activated', async () => {
     const c = new Client(base);
-    await c.json('POST', '/api/auth/signup', { email: 'koffi@shop.ci', password: 'motdepasse1' });
+    await c.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'koffi@shop.ci', password: 'motdepasse1' });
     const pay = await c.json('POST', '/api/billing/pay', { plan: 'creator', provider: 'geniuspay' });
     const ref = new URL(pay.body.url).pathname.split('/').pop()!;
     remote.set(ref, { status: 'completed', amount: 200, currency: 'XOF' });
@@ -136,7 +140,7 @@ describe('prepaid passes', () => {
 
   it('YouCan Pay: hosted payment form, webhook signed with the private key, amounts in centimes', async () => {
     const c = new Client(base);
-    await c.json('POST', '/api/auth/signup', { email: 'youssef@shop.ma', password: 'motdepasse1', locale: 'fr' });
+    await c.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'youssef@shop.ma', password: 'motdepasse1', locale: 'fr' });
     const pay = await c.json('POST', '/api/billing/pay', { plan: 'creator', provider: 'youcanpay', months: 3 });
     expect(pay.body.url).toBe('https://youcanpay.com/sandbox/payment-form/tok_123?lang=fr');
     const form = calls.find((x) => x.url.endsWith('/tokenize'))!.init!.body as FormData;
@@ -153,6 +157,41 @@ describe('prepaid passes', () => {
     const me = (await c.json('GET', '/api/me')).body;
     expect(me.plan.id).toBe('creator');
     expect((new Date(me.user.currentPeriodEnd).getTime() - Date.now()) / 86_400_000).toBeGreaterThan(89.9);
+  });
+
+  it('charges a one-off song export and unlocks the download after a signed payment', async () => {
+    const c = new Client(base);
+    await c.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'export@shop.ma', password: 'motdepasse1', locale: 'fr' });
+    const userId = (await c.json('GET', '/api/me')).body.user.id;
+    const id = crypto.randomUUID();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'video-agent-export-'));
+    const audioFile = path.join(dir, 'song.mp3');
+    fs.writeFileSync(audioFile, 'paid audio');
+    try {
+      await db.query(
+        `INSERT INTO songs (id, user_id, prompt, title, lyrics, style, mood, status, audio_file)
+         VALUES ($1, $2, 'Test', 'Test song', 'Lyrics', 'Pop', 'Happy', 'completed', $3)`,
+        [id, userId, audioFile],
+      );
+      const audioUrl = `/api/songs/${id}/audio?download=1`;
+      expect((await c.json('GET', `/api/songs/${id}`)).body.status).toBe('completed');
+      expect((await c.json('GET', audioUrl)).status).toBe(402);
+
+      const payment = await c.json('POST', '/api/billing/pay', { export: { product: 'song', targetId: id }, provider: 'youcanpay' });
+      expect(payment.status, JSON.stringify(payment.body)).toBe(200);
+      const form = calls.filter((call) => call.url.endsWith('/tokenize')).at(-1)!.init!.body as FormData;
+      expect(form.get('amount')).toBe('2500');
+      expect(form.get('metadata[plan]')).toBe('export_song');
+
+      const event = JSON.stringify({ event_name: 'transaction.paid', payload: { transaction: { order_id: payment.body.id, amount: 2500, currency: 'MAD' } } });
+      const result = await c.json('POST', '/api/payments/youcanpay/webhook', event, { 'x-youcanpay-signature': sign('pri_sandbox_test', event) });
+      expect(result.body.applied).toBe(true);
+      const downloaded = await fetch(`${base}${audioUrl}`, { headers: { cookie: c.cookie } });
+      expect(downloaded.status).toBe(200);
+      expect(await downloaded.text()).toBe('paid audio');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('YouCan Pay live: the transaction is read back before activation', async () => {
@@ -182,7 +221,7 @@ describe('prepaid passes', () => {
 
   it('extra-video packs: bought with mobile money, used beyond the quota, refunded when a video fails', async () => {
     const c = new Client(base);
-    await c.json('POST', '/api/auth/signup', { email: 'fatou@shop.sn', password: 'motdepasse1' });
+    await c.json('POST', '/api/auth/signup', { acceptTerms: true, email: 'fatou@shop.sn', password: 'motdepasse1' });
     const cfg = (await c.json('GET', '/api/public/config')).body;
     expect(cfg.creditPack).toEqual({ videos: 10, prices: { XOF: 5000, MAD: 90 } });
 

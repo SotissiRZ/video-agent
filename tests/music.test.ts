@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { VideoAgent } from '../src/agent/orchestrator';
 import { createLogger } from '../src/core/logger';
 import { ElevenLabsMusicProvider } from '../src/providers/music/elevenlabs';
+import { ElevenLabsSongProvider } from '../src/providers/music/elevenlabs-song';
 import { buildMusicPrompt } from '../src/providers/music/prompt';
 import { resolveMusicProvider } from '../src/providers/music/registry';
 import { ReplicateMusicProvider } from '../src/providers/music/replicate';
@@ -27,6 +28,40 @@ describe('music prompt', () => {
 });
 
 describe('music providers', () => {
+  it('sends approved lyrics and vocal direction in an ElevenLabs composition plan', async () => {
+    const fetchMock = vi.fn(async () => new Response(new Uint8Array([1, 2, 3])));
+    vi.stubGlobal('fetch', fetchMock);
+    const audio = await new ElevenLabsSongProvider('song-key').generate({
+      lyrics: '[Verse 1]\nHere is the first line\n[Chorus]\nSing these words',
+      style: 'Afrobeats',
+      mood: 'Romantic and tender',
+      durationSec: 90,
+    });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(String(init.body));
+    expect(url).toBe('https://api.elevenlabs.io/v1/music');
+    expect(body).toMatchObject({
+      model_id: 'music_v2_5',
+      composition_plan: { chunks: [{ text: '[Verse 1]\nHere is the first line\n[Chorus]\nSing these words', duration_ms: 90_000 }] },
+    });
+    expect(body.composition_plan.chunks[0].positive_styles).toContain('song with vocals');
+    expect(body).not.toHaveProperty('force_instrumental');
+    expect((init.headers as Record<string, string>)['xi-api-key']).toBe('song-key');
+    expect(audio).toEqual(Buffer.from([1, 2, 3]));
+  });
+
+  it('rejects lyrics outside ElevenLabs section limits before making an API request', async () => {
+    const fetchMock = vi.fn(async () => new Response(new Uint8Array([1])));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(new ElevenLabsSongProvider('song-key').generate({
+      lyrics: Array.from({ length: 31 }, (_, i) => `line ${i}`).join('\n'),
+      style: 'Pop',
+      mood: 'Joyful',
+      durationSec: 90,
+    })).rejects.toThrow(/1–30 lines/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('ElevenLabs sends the length in ms and forces instrumental', async () => {
     const fetchMock = vi.fn(async () => new Response(new Uint8Array([1, 2, 3])));
     vi.stubGlobal('fetch', fetchMock);

@@ -34,11 +34,9 @@ export const resolveImageProvider = (config: AppConfig, requested?: string): Ima
   const id = requested ?? config.env.VIDEO_AGENT_IMAGE_PROVIDER;
   if (id === 'none') return null;
   if (id === 'auto') {
-    for (const candidate of IMAGE_AUTO_ORDER) {
-      const p = factories.get(candidate)?.(config);
-      if (p) return p;
-    }
-    return null;
+    const chain = IMAGE_AUTO_ORDER.map((candidate) => factories.get(candidate)?.(config)).filter((p): p is ImageProvider => Boolean(p));
+    if (chain.length <= 1) return chain[0] ?? null;
+    return new FallbackImageProvider(chain);
   }
   const factory = factories.get(id);
   if (!factory) throw new ConfigError(`Unknown image provider "${id}"`, `Available: auto, none, ${[...factories.keys()].join(', ')}`);
@@ -48,3 +46,32 @@ export const resolveImageProvider = (config: AppConfig, requested?: string): Ima
 };
 
 export const listImageProviders = () => [...factories.keys()];
+
+/**
+ * "auto" with several configured services: the next one takes over when one fails (wrong account id,
+ * free quota used up). A service that failed is skipped for the rest of the video.
+ */
+export class FallbackImageProvider implements ImageProvider {
+  private readonly failed = new Set<string>();
+
+  constructor(private readonly providers: ImageProvider[]) {}
+
+  get id(): string {
+    return this.providers.find((p) => !this.failed.has(p.id))?.id ?? this.providers[0]!.id;
+  }
+
+  async generate(request: Parameters<ImageProvider['generate']>[0]): Promise<{ file: string }> {
+    const errors: string[] = [];
+    for (const provider of this.providers) {
+      if (this.failed.has(provider.id)) continue;
+      try {
+        return await provider.generate(request);
+      } catch (err) {
+        if (request.signal?.aborted) throw err;
+        this.failed.add(provider.id);
+        errors.push(err instanceof Error ? err.message : String(err));
+      }
+    }
+    throw new Error(errors.join(' | ') || 'no image service left');
+  }
+}

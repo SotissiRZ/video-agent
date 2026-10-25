@@ -127,12 +127,15 @@ export const parseLocation = (text: string): ParsedLocation | undefined => {
   return undefined;
 };
 
+/** Shop words written before a business name ("restaurant Chez Awa", "salon de coiffure Belle Dame"). */
+const SHOP_NOUNS = "restaurant|maquis|boutique|magasin|salon(?:\\s+de\\s+(?:coiffure|beaut[ée]))?|boulangerie|p[âa]tisserie|caf[ée]|traiteur|pharmacie|garage|h[ôo]tel|pressing|supermarch[ée]|auto-[ée]cole|atelier(?:\\s+de\\s+couture)?|shop|bakery";
+
 export const parseBrand = (text: string, location?: string): string | undefined => {
   const quoted = /["«“]\s*([^"»”]{2,40}?)\s*["»”]/.exec(text);
   if (quoted) return quoted[1]!.trim();
   // After an intent verb: "promouvoir Sirago", "présenter Acme Pay", "launch of Zeta".
-  const verbs = '(?:promouvoir|promotion\\s+de|pub(?:licit[ée])?\\s+(?:pour|de)|pr[ée]senter|pr[ée]sentation\\s+de|lancer|lancement\\s+de|annoncer|faire\\s+conna[iî]tre|vanter|valoriser|promote|present|presenting|introduce|introducing|launch|launching|announce|advertise|advertising|showcase|for|pour|about|sur)';
-  const afterVerb = new RegExp(`${verbs}\\s+(?:l'|le\\s+|la\\s+|les\\s+|the\\s+|our\\s+|notre\\s+|nos\\s+|l’)?(?:(?:application|app|marque|brand|produit|product|service|plateforme|platform|startup|entreprise|company|solution|logiciel|software)\\s+)?(${CAP_GROUP})`, 'g');
+  const verbs = '(?:promouvoir|promotion\\s+de|pub(?:licit[ée])?\\s+(?:pour|de|du|des)|pr[ée]senter|pr[ée]sentation\\s+de|lancer|lancement\\s+de|annoncer|faire\\s+conna[iî]tre|vanter|valoriser|promote|present|presenting|introduce|introducing|launch|launching|announce|advertise|advertising|showcase|for|pour|about|sur)';
+  const afterVerb = new RegExp(`${verbs}\\s+(?:l'|le\\s+|la\\s+|les\\s+|the\\s+|our\\s+|my\\s+|notre\\s+|nos\\s+|mon\\s+|ma\\s+|l’)?(?:(?:application|app|marque|brand|produit|product|service|plateforme|platform|startup|entreprise|company|solution|logiciel|software|${SHOP_NOUNS})\\s+)?(${CAP_GROUP})`, 'g');
   let m: RegExpExecArray | null;
   while ((m = afterVerb.exec(text))) {
     const candidate = m[1]!.replace(/[.,;:!?]+$/, '');
@@ -141,6 +144,9 @@ export const parseBrand = (text: string, location?: string): string | undefined 
     if (candidate.split(/\s+/).every((w) => NOT_BRANDS.has(normalize(w)))) continue;
     if (!NOT_BRANDS.has(normalize(candidate))) return candidate;
   }
+  // "le restaurant Chez Awa", "salon de coiffure Belle Dame": the name follows the kind of shop.
+  const shop = new RegExp(`\\b(?:${SHOP_NOUNS})\\s+(${CAP_GROUP})`).exec(text);
+  if (shop && shop[1] !== location && !NOT_BRANDS.has(normalize(shop[1]!.split(/\s+/)[0]!))) return shop[1]!.replace(/[.,;:!?]+$/, '');
   // Any capitalised word that is not the first word of a sentence nor part of the location.
   const words = text.split(/\s+/);
   for (let i = 1; i < words.length; i++) {
@@ -181,7 +187,9 @@ const STYLE_HINTS: Record<string, string[]> = {
   corporate: ['corporate', 'professionnel', 'professionnelle', 'professional', 'institutionnel', 'institutionnelle', 'b2b', 'serieux', 'serieuse'],
   elegant: ['elegant', 'elegante', 'luxe', 'luxury', 'premium', 'chic', 'haut de gamme', 'sombre', 'dark', 'cinematique', 'cinematic'],
   playful: ['ludique', 'playful', 'fun', 'amusant', 'amusante', 'enfants', 'kids', 'cartoon', 'joyeux', 'joyeuse'],
-  tech: ['tech', 'technologie', 'technology', 'technologique', 'futuriste', 'futuristic', 'saas', 'logiciel', 'software', 'digital', 'numerique', 'neon'],
+  // Opt-in only: unambiguous words ("notre futur magasin" must stay natural).
+  futuristic: ['futuriste', 'futuristic', 'sci-fi', 'science-fiction', 'science fiction', 'cyberpunk', 'hologramme', 'holographique', 'holographic', 'high-tech', 'neon'],
+  tech: ['tech', 'technologie', 'technology', 'technologique', 'saas', 'logiciel', 'software', 'digital', 'numerique'],
   warm: ['chaleureux', 'chaleureuse', 'warm', 'humain', 'humaine', 'convivial', 'conviviale', 'familial', 'authentique', 'authentic'],
 };
 
@@ -272,6 +280,28 @@ export const parsePrompt = (raw: string): ParsedPrompt => {
     wantsSubtitles: toggle(t, /\b(sous[- ]titres?|sous[- ]titrees?|subtitles?|captions?)\b/, /\b(sans|no|without|pas de)\s+(sous[- ]titres?|subtitles?|captions?)/),
     keywords: extractKeywords(text),
   };
+};
+
+/** Things the prompt asks not to show → English words found in stock photo descriptions. */
+const AVOIDABLE: Array<[RegExp, string[]]> = [
+  [/robot|androide|cyborg|humanoide/, ['robot', 'android', 'cyborg', 'humanoid']],
+  [/logo|marque/, ['logo', 'emblem']],
+  [/voiture|vehicule|\bcars?\b/, ['car', 'vehicle']],
+  [/enfant|bebe|child|kid/, ['child', 'kid', 'baby']],
+  [/\barmes?\b|weapon|\bguns?\b|pistolet/, ['gun', 'weapon', 'pistol']],
+  [/alcool|alcohol|biere|\bvin\b|wine/, ['alcohol', 'beer', 'wine']],
+  [/cigarette|tabac|smok/, ['cigarette', 'smoking']],
+  [/\bsports?\b|ballon|\bball\b/, ['ball', 'sport']],
+  [/costume|deguis|cosplay/, ['costume', 'cosplay']],
+];
+
+/** "Éviter les robots futuristes, les faux logos…" → ['robot', …, 'logo', 'emblem']. */
+export const parseAvoidTerms = (text: string): string[] => {
+  const t = normalize(text);
+  const parts = [...t.matchAll(/\b(?:eviter|evitez|evite|ne pas (?:montrer|inventer|afficher|utiliser)|pas de|aucun|aucune|avoid|do not show|don't show|no)\b[^.\n]*/g)].map((m) => m[0]);
+  const out = new Set<string>();
+  for (const part of parts) for (const [re, terms] of AVOIDABLE) if (re.test(part)) terms.forEach((w) => out.add(w));
+  return [...out];
 };
 
 export const KNOWN_FORMATS = FORMAT_PRESETS.map((p) => p.id);

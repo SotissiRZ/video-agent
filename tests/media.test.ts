@@ -4,17 +4,18 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ensureJobDirs, jobPaths } from '../src/agent/job';
 import { createLogger } from '../src/core/logger';
 import { detectDomain } from '../src/media/domains';
-import { buildStockQueries, ROLE_VISUAL_HINTS, MediaDirector, shotsFor, wantsMedia } from '../src/media/director';
+import { parseAvoidTerms } from '../src/prompt/parser';
+import { buildStockQueries, isRelevant, ROLE_VISUAL_HINTS, MediaDirector, shotsFor, wantsMedia } from '../src/media/director';
 import { visibleShots } from '../src/remotion/components/MediaLayer';
 import { PexelsProvider } from '../src/providers/stock/pexels';
 import { PixabayProvider } from '../src/providers/stock/pixabay';
 import { resolveStockProviders } from '../src/providers/stock/registry';
-import { pickRendition, type StockProvider, type StockQuery, type StockResult } from '../src/providers/stock/types';
+import { pickRendition, pickStockResult, type StockProvider, type StockQuery, type StockResult } from '../src/providers/stock/types';
 import { UnsplashProvider } from '../src/providers/stock/unsplash';
 import { StoryboardSchema } from '../src/remotion/contract/storyboard';
 import { getStyle } from '../src/remotion/contract/styles';
 import { computeTotalDuration } from '../src/remotion/contract/timeline';
-import type { VideoBrief } from '../src/core/types';
+import type { PlannedScene, VideoBrief } from '../src/core/types';
 import { json, mockFetch } from './fetch-mock';
 import { testConfig, tmpDir } from './helpers';
 
@@ -28,6 +29,16 @@ describe('stock providers', () => {
     const files = [{ width: 640, height: 360 }, { width: 1920, height: 1080 }, { width: 3840, height: 2160 }];
     expect(pickRendition(files, 1080)).toEqual({ width: 1920, height: 1080 });
     expect(pickRendition([{ width: 640, height: 360 }], 1080)).toEqual({ width: 640, height: 360 });
+  });
+
+  it('prefers stock media close to the output aspect ratio and avoids extreme upscaling', () => {
+    const landscape = { width: 1280, height: 720 };
+    const portrait720 = { width: 720, height: 1280 };
+    const portrait1080 = { width: 1080, height: 1920 };
+    expect(pickStockResult([landscape, portrait720, portrait1080], 1080, 1920)).toBe(portrait1080);
+    expect(pickStockResult([landscape], 1080, 1920)).toBeUndefined();
+    expect(pickStockResult([portrait720], 1080, 1920)).toBe(portrait720);
+    expect(pickStockResult([landscape, { width: 1920, height: 1080 }], 1920, 1080)).toEqual({ width: 1920, height: 1080 });
   });
 
   it('parses Pexels photos and videos', async () => {
@@ -93,8 +104,23 @@ describe('media director', () => {
     const llm = buildStockQueries({ role: 'point' }, { visualKeywords: ['security analyst', 'monitors'] }, { brand: '', audience: '', location: '', keywords: [] }, 'en', domain.queries.slice(0, 2));
     expect(llm[0]!.query).toBe('security analyst monitors');
     expect(llm.map((q) => q.query)).toContain(domain.queries[0]);
+    // One stray word must not decide the industry: "accompagne" contains "pagne", "transformation" contains "formation".
+    expect(detectDomain('ZSR-TechNum vous accompagne dans votre transformation numérique : sites web, IA, automatisation.').id).toBe('tech');
+    expect(detectDomain('boutique de pagnes wax à Abidjan').id).toBe('fashion-beauty');
+    // Script keywords are complete searches, never merged together.
+    const phrases = buildStockQueries({ role: 'x' }, { visualKeywords: ['analytics dashboard laptop', 'hand holding smartphone'] }, { brand: '', audience: '', location: '', keywords: [] }, 'en', ['laptop software dashboard'], true);
+    expect(phrases.map((q) => q.query)).toEqual(['analytics dashboard laptop', 'hand holding smartphone', 'laptop software dashboard']);
     // No generic hint that brings children's pictures.
     expect(Object.values(ROLE_VISUAL_HINTS).join(' ')).not.toMatch(/young people|celebration|kids|children/);
+  });
+
+  it('rejects off-topic stock results and avoided subjects', () => {
+    expect(isRelevant({ description: 'black car steering wheel' }, 'analytics dashboard laptop')).toBe(false);
+    expect(isRelevant({ description: 'person using laptop with analytics dashboards' }, 'analytics dashboard laptop')).toBe(true);
+    expect(isRelevant({ description: 'robot on a laptop screen' }, 'laptop desk', ['robot'])).toBe(false);
+    expect(isRelevant({}, 'laptop desk')).toBe(true);
+    expect(parseAvoidTerms('Éviter les robots futuristes, les faux logos. Montrer des ordinateurs.')).toEqual(expect.arrayContaining(['robot', 'logo']));
+    expect(parseAvoidTerms('Une vidéo sur le transport et les ordinateurs.')).toEqual([]);
   });
 
   const makeStoryboard = () => {
@@ -140,6 +166,44 @@ describe('media director', () => {
     expect(director.credits).toHaveLength(4);
     expect(warnings.some((w) => w.includes('broken'))).toBe(true);
     expect(n).toBeGreaterThan(0);
+  });
+
+  it('prefers sharp pictures, leaves out alcohol nobody asked for, and finds replacements', async () => {
+    const photo = (provider: string, id: string, width: number, height: number, description: string): StockResult => ({
+      provider, id, kind: 'photo', downloadUrl: `https://cdn.test/${id}`, width, height, author: id, pageUrl: `https://p/${id}`, extension: 'jpg', description,
+    });
+    const small: StockProvider = {
+      id: 'small',
+      supports: ['photo'],
+      search: async () => [photo('small', 'alcohol', 1080, 1920, 'bottles, alcohol, wine, drinks, bar'), photo('small', 'small-juice', 820, 1280, 'juice, glass, fruit')],
+    };
+    const sharp: StockProvider = { id: 'sharp', supports: ['photo'], search: async () => [photo('sharp', 'sharp-juice', 1944, 3456, 'fresh hibiscus juice')] };
+    const m = mockFetch([['GET', /cdn\.test/, () => new Response('bytes')]]);
+    restore = m.restore;
+    const paths = jobPaths(path.join(tmpDir(), 'job'));
+    ensureJobDirs(paths);
+    const director = new MediaDirector(
+      { stock: [small, sharp], image: null, video: null, logger: createLogger('silent') },
+      { sources: ['stock'], coverage: 'all', stockVideos: false, maxGeneratedImages: 0, maxGeneratedClips: 0, keywordLanguage: 'en' },
+    );
+    const juiceBrief = { ...brief, prompt: 'Une pub pour mon jus de bissap' } as VideoBrief;
+    const juicePlan = makeStoryboard().scenes.map(() => ({ visualKeywords: ['fresh juice'], visualPrompt: 'fresh juice' }) as unknown as PlannedScene);
+    const sb = await director.run(makeStoryboard(), juicePlan, juiceBrief, paths, [], () => undefined);
+    // The sharp picture beats the smaller one listed first; the alcohol picture is never used.
+    expect(sb.scenes[0]!.media).toMatchObject({ alt: 'fresh hibiscus juice', origin: 'stock:sharp' });
+    expect(sb.scenes.every((s) => !s.media?.alt?.includes('alcohol'))).toBe(true);
+
+    const fresh = new MediaDirector(
+      { stock: [small, sharp], image: null, video: null, logger: createLogger('silent') },
+      { sources: ['stock'], coverage: 'all', stockVideos: false, maxGeneratedImages: 0, maxGeneratedClips: 0, keywordLanguage: 'en' },
+    );
+    // A correction never brings back a picture already in the video.
+    const replacement = await fresh.findReplacement(sb.scenes[1]!, ['fresh', 'juice'], juiceBrief, paths, ['https://p/sharp-juice'], []);
+    expect(replacement).toMatchObject({ alt: 'juice, glass, fruit' });
+    // Asked for: the same picture is allowed.
+    const bar = { ...brief, prompt: 'Pub pour mon bar à cocktails' } as VideoBrief;
+    const barDirector = new MediaDirector({ stock: [small], image: null, video: null, logger: createLogger('silent') }, { sources: ['stock'], coverage: 'all', stockVideos: false, maxGeneratedImages: 0, maxGeneratedClips: 0, keywordLanguage: 'en' });
+    expect(await barDirector.findReplacement(sb.scenes[1]!, ['drinks'], bar, paths, [], [])).toMatchObject({ alt: 'bottles, alcohol, wine, drinks, bar' });
   });
 
   it('shows several shots in long scenes, reusing the same searches', async () => {

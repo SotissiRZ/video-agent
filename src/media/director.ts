@@ -18,7 +18,7 @@ import { BUSINESS, detectDomain, type Domain } from './domains';
 import { normalize } from '../prompt/parser';
 import { httpBuffer } from '../providers/http';
 import type { ImageProvider } from '../providers/image/types';
-import { orientationFor, type StockKind, type StockProvider, type StockResult } from '../providers/stock/types';
+import { orientationFor, pickStockResult, type StockKind, type StockProvider, type StockResult } from '../providers/stock/types';
 import type { VideoProvider } from '../providers/video/types';
 import type { Media, Scene, Storyboard } from '../remotion/contract/storyboard';
 
@@ -42,6 +42,12 @@ export interface MediaDirectorOptions {
   keywordLanguage: string;
   /** Up to this many visuals in a long scene (stock and local assets only). */
   shotsPerScene?: number;
+  /** Art direction of the style, appended to AI image prompts (e.g. futuristic sci-fi look). */
+  imageDirection?: string;
+  /** Visual keywords are complete searches (user scripts): one query each, never merged. */
+  phraseKeywords?: boolean;
+  /** English words a stock result's description must not contain ("Éviter les robots…"). */
+  avoidTerms?: string[];
 }
 
 /** Shots for a scene of this length: one every ~2.5 s, at most `max`. */
@@ -94,6 +100,8 @@ export const buildStockQueries = (
   keywordLanguage: string,
   /** Industry searches for this scene (see detectDomain), in English. */
   domainQueries: string[] = [],
+  /** Keywords are complete searches ("analytics dashboard laptop"): one query each. */
+  phrases = false,
 ): Array<{ query: string; language: string }> => {
   const brandWords = new Set(normalize(brief.brand).split(/\s+/).filter(Boolean));
   const clean = (words: string[]) => {
@@ -111,7 +119,12 @@ export const buildStockQueries = (
     const query = words.join(' ').trim();
     if (query && !queries.some((q) => q.query === query)) queries.push({ query, language });
   };
-  if (keywordLanguage === 'en') {
+  if (phrases) {
+    // Script keywords are ready-made searches: mixing two of them ("network connection logo") finds nothing relevant.
+    // Complete searches keep their short words ("ai", "3d"); only the brand name is left out.
+    (plan?.visualKeywords ?? []).slice(0, 4).forEach((k) => push(k.split(/\s+/).filter((w) => w && !brandWords.has(normalize(w))), keywordLanguage));
+    domainQueries.forEach((q) => push(q.split(' '), 'en'));
+  } else if (keywordLanguage === 'en') {
     // LLM keywords are specific to the scene: they come first, the industry searches back them up.
     push(planned.slice(0, 3), 'en');
     push(planned.slice(0, 2), 'en');
@@ -127,11 +140,43 @@ export const buildStockQueries = (
   return queries.slice(0, 6);
 };
 
+/**
+ * Stock pictures that must not appear in an ad unless the customer asked for them: alcohol in a juice
+ * ad, cigarettes, weapons, gambling or revealing clothes would hurt the brand (and break local rules).
+ */
+const SENSITIVE_MEDIA = /\b(alcohol\w*|alcool\w*|wine|vins?|beer|bi[eè]res?|whisk(e)?y|vodka|rum|gin|liquor|liqueurs?|cocktails?|champagne|spirits|brewery|cigar(ette)?s?|smok(e|ing)|fum(er|eur)|tobacco|tabac|vap(e|ing)|guns?|weapons?|armes?|rifles?|pistols?|pistolets?|casino|gambling|poker|lingerie|bikini|nude|sexy)\b/i;
+const ASKED_SENSITIVE = /\b(alcool\w*|vins?|bi[eè]res?|whisky|vodka|cocktails?|champagne|bars?|alcohol\w*|wine|beer|tabac|cigar\w*|chicha|armes?|fusils?|casino|paris sportifs?|lingerie|maillots? de bain|bikini)\b/i;
+
+export const isSensitiveMedia = (description: string | undefined, prompt: string): boolean =>
+  Boolean(description && SENSITIVE_MEDIA.test(description) && !ASKED_SENSITIVE.test(prompt));
+
+/** Readable words of a stock page URL ("…/photos/bottles-alcohol-wine-drinks-bar-8346642/" → "bottles alcohol wine drinks bar"). */
+export const describeFromUrl = (url: string | undefined): string =>
+  (url ?? '').split('?')[0]!.split('/').filter(Boolean).pop()?.replace(/-?\d+$/, '').replace(/[-_]+/g, ' ').trim() ?? '';
+const stem = (w: string) => w.slice(0, 4);
+const words = (text: string) => normalize(text).split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
+
+/**
+ * Whether a stock result fits its search, judged on the provider's description (alt text, tags,
+ * page slug): it must share a word with the query and contain no avoided term. Search engines
+ * return loosely related pictures (a car dashboard for "analytics dashboard laptop").
+ * Results without any description are accepted.
+ */
+export const isRelevant = (result: Pick<StockResult, 'description'>, query: string, avoid: string[] = []): boolean => {
+  const described = words(result.description ?? '');
+  if (!described.length) return true;
+  const stems = new Set(described.map(stem));
+  if (avoid.some((term) => described.some((w) => w.startsWith(normalize(term))))) return false;
+  return words(query).some((w) => stems.has(stem(w)));
+};
+
 export const wantsMedia = (scene: Scene, coverage: MediaCoverage): boolean =>
   coverage === 'all' ? true : coverage === 'visual' ? scene.kind === 'image' : false;
 
 export class MediaDirector {
   private readonly used = new Set<string>();
+  /** Stock pages already shown in the video (a correction must not bring them back). */
+  private readonly usedPages = new Set<string>();
   private readonly disabledProviders = new Set<string>();
   private generatedImages = 0;
   private domain: Domain = BUSINESS;
@@ -195,6 +240,16 @@ export class MediaDirector {
     return sb;
   }
 
+  /**
+   * New picture for one scene from keywords (correction "replace this image"): stock first, then AI,
+   * never a picture already used in the video.
+   */
+  async findReplacement(scene: Scene, keywords: string[], brief: VideoBrief, paths: JobPaths, usedPages: string[], warnings: string[], signal?: AbortSignal): Promise<Media | undefined> {
+    for (const page of usedPages) this.usedPages.add(page);
+    const plan = { visualKeywords: keywords, visualPrompt: keywords.join(', ') } as PlannedScene;
+    return this.findMedia(scene, plan, brief, paths, false, warnings, signal);
+  }
+
   private async findMedia(scene: Scene, plan: PlannedScene | undefined, brief: VideoBrief, paths: JobPaths, preferVideo: boolean, warnings: string[], signal?: AbortSignal): Promise<Media | undefined> {
     for (const source of this.options.sources) {
       if (source === 'assets') {
@@ -230,8 +285,10 @@ export class MediaDirector {
     // Two industry searches per scene, rotating so that scenes get different pictures.
     const n = this.domain.queries.length;
     const domainQueries = [this.domain.queries[(this.sceneIndex * 2) % n]!, this.domain.queries[(this.sceneIndex * 2 + 1) % n]!];
-    const queries = buildStockQueries(scene, plan, brief, this.options.keywordLanguage, domainQueries);
+    const queries = buildStockQueries(scene, plan, brief, this.options.keywordLanguage, domainQueries, this.options.phraseKeywords);
 
+    // Sharp first: a picture scaled up more than 15 % looks soft on a phone; larger upscales only as a last resort.
+    for (const maxUpscale of [1.15, 1.5])
     for (const { query, language } of queries) {
       for (const kind of kinds) {
         if (kind === 'video' && !this.options.stockVideos) continue;
@@ -248,7 +305,12 @@ export class MediaDirector {
             this.handleProviderError(provider.id, err, warnings);
             continue;
           }
-          const result = results.find((r) => !this.used.has(r.id));
+          const result = pickStockResult(
+            results.filter((r) => !this.used.has(r.id) && !this.usedPages.has(r.pageUrl) && !isSensitiveMedia(r.description, brief.prompt ?? '') && (language !== 'en' || isRelevant(r, query, this.options.avoidTerms))),
+            brief.width,
+            brief.height,
+            maxUpscale,
+          );
           if (!result) continue;
           try {
             const file = path.join(paths.publicDir, 'media', `${scene.id}-${provider.id}-${++this.downloads}.${result.extension}`);
@@ -262,6 +324,7 @@ export class MediaDirector {
               src: path.relative(paths.publicDir, file).split(path.sep).join('/'),
               fit: 'cover',
               origin: `stock:${provider.id}`,
+              alt: (result.description || query).slice(0, 500),
               durationInFrames: result.durationSec ? Math.max(1, Math.floor(result.durationSec * brief.fps) - 1) : undefined,
               credit: { author: result.author, source: provider.id, url: result.pageUrl },
             };
@@ -276,9 +339,9 @@ export class MediaDirector {
   }
 
   private async fromAI(scene: Scene, plan: PlannedScene | undefined, brief: VideoBrief, paths: JobPaths, warnings: string[], signal?: AbortSignal): Promise<Media | undefined> {
-    const prompt =
-      plan?.visualPrompt ||
-      [scene.headline.replace(/\*/g, ''), brief.audience, brief.location, 'photorealistic, natural light, no text'].filter(Boolean).join(', ');
+    const direction = this.options.imageDirection;
+    const subject = plan?.visualPrompt || [scene.headline.replace(/\*/g, ''), brief.audience, brief.location, direction ? '' : 'photorealistic, natural light, no text'].filter(Boolean).join(', ');
+    const prompt = direction ? `${subject}. Style: ${direction}` : subject;
     const base = path.join(paths.publicDir, 'media', `${scene.id}-generated`);
     const { video, image } = this.deps;
     if (video && scene.kind === 'image' && this.generatedClips < this.options.maxGeneratedClips) {
@@ -295,7 +358,7 @@ export class MediaDirector {
       try {
         const { file } = await image.generate({ prompt, width: brief.width, height: brief.height, outFileBase: base, signal });
         this.generatedImages++;
-        return { type: 'image', src: path.relative(paths.publicDir, file).split(path.sep).join('/'), fit: 'cover', origin: `ai:${image.id}` };
+        return { type: 'image', src: path.relative(paths.publicDir, file).split(path.sep).join('/'), fit: 'cover', origin: `ai:${image.id}`, alt: subject.slice(0, 500) };
       } catch (err) {
         if (signal?.aborted) throw err;
         this.handleProviderError(`ai:${image.id}`, err, warnings);

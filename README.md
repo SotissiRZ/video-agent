@@ -1,6 +1,6 @@
-# 🎬 Video Agent
+# 🎬 SOVID AI
 
-**Agent autonome de génération vidéo.** Décrivez la vidéo en une phrase et l'agent fait le reste, du concept au fichier MP4 final. Le rendu est effectué localement avec [Remotion](https://www.remotion.dev).
+**Génération de vidéos et de chansons par IA.** Décrivez une vidéo pour obtenir un MP4 rendu localement avec [Remotion](https://www.remotion.dev), ou passez en mode Chanson dans l'application web pour faire rédiger, relire et valider des paroles avant de générer un MP3 chanté avec ElevenLabs Music.
 
 ```bash
 video-agent "Crée une vidéo verticale de 30 secondes pour promouvoir Sirago auprès des chauffeurs au Burkina Faso."
@@ -65,7 +65,7 @@ Il produit `output/<job>/video.mp4` (1080×1920, 30 s, 30 fps), avec animations,
 
 **Formats** : 1920×1080 (16:9), 1080×1920 (9:16), 1080×1080 (1:1), 1080×1350 (4:5) ou toute résolution `LxH`. La durée, le nombre de fps et le conteneur de sortie (`mp4`, `webm`, `mov`, `gif`) sont réglables.
 
-**Templates** : publicité, présentation produit, tutoriel, annonce, réseaux sociaux, démonstration d'application, storytelling.
+**Templates** : publicité, commerce local (restaurant, boutique, salon… : spécialités, livraison, numéro de téléphone), présentation produit, tutoriel, annonce, réseaux sociaux, démonstration d'application, storytelling.
 
 **Styles** : modern, vibrant, minimal, corporate, elegant, playful, tech, warm.
 
@@ -420,7 +420,7 @@ Contenu de `output/<job>/` :
 | Symptôme | Solution |
 |---|---|
 | `Node.js … 20.3 ou plus récente est requise` | Installez Node.js LTS (`winget install OpenJS.NodeJS.LTS`, `brew install node@22`, nvm…). |
-| `Video Agent is not built yet` | Lancez `npm run build`, ou utilisez `npm run dev -- "…"`. |
+| `SOVID AI is not built yet` | Lancez `npm run build`, ou utilisez `npm run dev -- "…"`. |
 | Échec du téléchargement de Chrome Headless Shell (403, proxy, hors-ligne) | Indiquez un Chromium existant : `VIDEO_AGENT_BROWSER_EXECUTABLE=/chemin/vers/chrome-headless-shell`. Le Chromium de Playwright est détecté automatiquement. |
 | Linux : `error while loading shared libraries` au rendu | Installez les bibliothèques listées dans les [Prérequis](#3-prérequis). |
 | Docker sous Windows : `entrypoint.sh: not found` ou `\r: command not found` | Fins de ligne Windows (CRLF). Le dépôt force maintenant LF (`.gitattributes`). Sur un clone existant : `git rm --cached -r . -q` puis `git reset --hard`, puis `docker compose build --no-cache`. |
@@ -539,7 +539,7 @@ Si le retour automatique sur `localhost` n'est pas possible (machine distante, r
 
 ## 16. SaaS : déploiement en production
 
-Video Agent est une application multi-clients : chaque client a son compte, ses vidéos, ses comptes sociaux et son offre.
+SOVID AI est une application multi-clients : chaque client a son compte, ses vidéos, ses comptes sociaux et son offre. La commande CLI reste `video-agent` pour préserver la compatibilité des installations existantes.
 
 ```
              Internet (HTTPS)
@@ -570,17 +570,19 @@ cp .env.example .env
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-Ouvrez `https://app.example.com/app`, créez le premier compte (administrateur), puis complétez les clés dans **Administration › Services**. Pour fermer les inscriptions publiques : `SIGNUP_MODE=closed`.
+Ouvrez `https://app.example.com/app`, créez le premier compte (administrateur), puis complétez les clés dans **Administration › Services**. Pour le mode Chanson, configurez aussi un fournisseur LLM pour rédiger les paroles et `ELEVENLABS_API_KEY` pour générer l'audio (Music API payante, accès payant requis). Pour fermer les inscriptions publiques : `SIGNUP_MODE=closed`.
 
 **Offres et quotas** (remis à zéro le 1er du mois) :
 
-| Offre | Vidéos / mois | Minutes / mois | Durée max | Publication | Filigrane |
-|---|---|---|---|---|---|
-| Gratuit | 3 | 3 | 1 min | non | « Made with Video Agent » |
-| Créateur | 30 | 60 | 3 min | oui | non |
-| Pro | 120 | 300 | 10 min | oui | non |
+| Offre | Vidéos / mois | Minutes / mois | Chansons / mois | Durée max vidéo | Publication | Filigrane |
+|---|---|---|---|---|---|---|
+| Gratuit | 3 | 3 | 1 | 1 min | non | « Made with SOVID AI » |
+| Créateur | 30 | 60 | 10 | 3 min | oui | non |
+| Pro | 120 | 300 | 40 | 10 min | oui | non |
 
 Les limites sont définies dans `src/saas/plans.ts` ; les prix affichés dans `PLAN_CREATOR_PRICE` et `PLAN_PRO_PRICE`. Un administrateur peut aussi changer l'offre d'un client depuis **Administration**.
+
+**Mode Chanson** : dans **Chansons**, décrivez le morceau et choisissez son style, son ambiance et sa durée (1 à 2 min). L'IA propose un brouillon éditable ; aucune génération audio n'a lieu avant de cliquer sur « Générer la chanson ». Le MP3 et les brouillons restent privés au compte. ElevenLabs Music utilise les paroles structurées comme guide de composition, mais ne garantit ni la présence de voix ni que chaque ligne soit chantée fidèlement ; vérifiez le résultat. La génération est facturée par ElevenLabs selon son offre et n'utilise pas le quota vidéo.
 
 **Paiement Stripe** :
 1. Créez deux produits avec un prix mensuel ; copiez leurs identifiants `price_…` dans `STRIPE_PRICE_CREATOR` et `STRIPE_PRICE_PRO`.
@@ -600,7 +602,7 @@ Les limites sont définies dans `src/saas/plans.ts` ; les prix affichés dans `P
 
 **Plans multiples** : les scènes longues enchaînent jusqu'à `VIDEO_AGENT_SHOTS_PER_SCENE` photos ou clips (3 par défaut), en fondu, pour un rythme de 2 à 4 s par plan.
 
-**Pages légales** : `/legal` (conditions d'utilisation, confidentialité, mentions légales) en français et en anglais, remplies avec `COMPANY_NAME`, `COMPANY_ADDRESS` et `CONTACT_EMAIL`. Ce sont des modèles : faites-les relire pour votre pays et votre activité.
+**Pages légales** : `/legal` (mentions légales, conditions d'utilisation, conditions de vente, confidentialité, IA et voix) en français et en anglais. Elles sont remplies avec l'identité de l'éditeur (`COMPANY_NAME`, `COMPANY_REGISTRATION`, `COMPANY_ADDRESS`, `COMPANY_COUNTRY`, `COMPANY_DIRECTOR`, `CONTACT_EMAIL`, `HOSTING_PROVIDER`), modifiables dans Administration › Réglages › Entreprise, et listent automatiquement les prestataires réellement configurés. Tant qu'un champ manque, l'administration l'affiche en alerte. L'inscription exige une case « 18 ans et plus, conditions acceptées », enregistrée avec la version des conditions (`TERMS_VERSION`). Le site public n'annonce que les fonctions disponibles sur le serveur (paiements, publication, chansons, clonage de voix). Ce sont des modèles : faites-les relire pour votre pays et votre activité.
 
 **Conservation** : `VIDEO_AGENT_RETENTION_DAYS=30` supprime chaque heure les vidéos de plus de 30 jours (sauf celles dont une publication est programmée).
 
@@ -626,6 +628,12 @@ Prix par mois : `PLAN_CREATOR_PRICE_XOF` / `PLAN_PRO_PRICE_XOF` (10 000 / 25 000
 - YouCan Pay : `https://app.example.com/api/payments/youcanpay/webhook` (événement `transaction.paid`), signé avec la clé privée.
 
 **Sécurité** : un pass n'est activé qu'après un webhook à la signature valide **et** une confirmation auprès de la passerelle (statut payé, montant et devise vérifiés). Les webhooks rejoués n'ont aucun effet. Si le webhook tarde, le client peut cliquer sur « Vérifier » dans **Facturation**. L'administration affiche les paiements et le chiffre d'affaires en FCFA et en MAD.
+
+### Aperçu gratuit et exports à l'unité
+
+Les offres Free, Creator et Pro conservent leurs quotas et avantages. Les résultats restent lisibles sur la plateforme ; un compte Free peut payer une seule fois par résultat pour télécharger la vidéo ou la chanson et publier la vidéo depuis la plateforme. Les exports inclus par les abonnements payants ne nécessitent pas de paiement supplémentaire. Le filigrane « Made with SOVID AI » est retiré du fichier vidéo téléchargé ou publié, sans changer l'aperçu.
+
+Tarifs de lancement : **vidéo 1 000 FCFA / 15 MAD**, **chanson 1 500 FCFA / 25 MAD**. L'administrateur peut modifier les prix, les quotas Free/Creator/Pro, la durée maximale, le nombre de corrections incluses ainsi que le nombre et la taille des images produit dans **Administration → Réglages commerciaux**. Les clients peuvent téléverser des images de leurs produits et les associer à une génération vidéo. Une correction incluse est disponible par vidéo et par chanson par défaut ; les limites sont administrables.
 
 **Vidéos supplémentaires** : quand le quota du mois est atteint, le client achète des packs de `CREDIT_PACK_VIDEOS` vidéos (10 par défaut ; `CREDIT_PACK_PRICE_XOF` = 5 000 FCFA, `CREDIT_PACK_PRICE_MAD` = 90 MAD par pack) dans **Abonnement**. Ces vidéos n'expirent pas et s'utilisent automatiquement au-delà du quota, dans la limite de durée de son offre. Une vidéo annulée ou en échec rend son crédit.
 
@@ -689,4 +697,4 @@ Voir [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licence
 
-Code de Video Agent : MIT. **Remotion a sa propre licence** : gratuite pour les particuliers, les associations et les entreprises de 3 personnes au plus, licence d'entreprise payante au-delà. Voir [remotion.dev/license](https://www.remotion.dev/license).
+Code de SOVID AI : MIT. **Remotion a sa propre licence** : gratuite pour les particuliers, les associations et les entreprises de 3 personnes au plus, licence d'entreprise payante au-delà. Voir [remotion.dev/license](https://www.remotion.dev/license).

@@ -205,6 +205,104 @@ export const MIGRATIONS: string[] = [
     PRIMARY KEY (user_id, kind, period_end)
   );
   `,
+  // 5. Standalone songs, separate from video jobs and quotas.
+  `
+  CREATE TABLE songs (
+    id text PRIMARY KEY,
+    user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    prompt text NOT NULL,
+    title text NOT NULL,
+    lyrics text NOT NULL,
+    style text NOT NULL,
+    mood text NOT NULL,
+    duration_sec integer NOT NULL DEFAULT 90,
+    status text NOT NULL DEFAULT 'draft',
+    error text,
+    audio_file text,
+    heartbeat_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    finished_at timestamptz
+  );
+  CREATE INDEX songs_user ON songs(user_id, created_at DESC);
+  CREATE INDEX songs_usage ON songs(user_id, created_at) WHERE status IN ('queued', 'running', 'completed');
+  `,
+  // 6 — paid export entitlements and admin-managed commerce settings
+  `
+  ALTER TABLE jobs ADD COLUMN export_paid boolean NOT NULL DEFAULT false;
+  ALTER TABLE songs ADD COLUMN export_paid boolean NOT NULL DEFAULT false;
+  ALTER TABLE payments ADD COLUMN target_id text;
+  CREATE TABLE commerce_settings (
+    id integer PRIMARY KEY CHECK (id = 1),
+    settings jsonb NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  );
+  INSERT INTO commerce_settings (id, settings) VALUES (1, '{"videoPriceXof":1000,"videoPriceMad":15,"songPriceXof":1500,"songPriceMad":25,"freeVideosPerMonth":3,"freeMinutesPerMonth":3,"freeSongsPerMonth":1,"freeMaxDurationSec":60,"creatorVideosPerMonth":30,"creatorMinutesPerMonth":60,"creatorSongsPerMonth":10,"creatorMaxDurationSec":180,"proVideosPerMonth":120,"proMinutesPerMonth":300,"proSongsPerMonth":40,"proMaxDurationSec":600,"correctionsPerVideo":1,"correctionsPerSong":1,"maxProductImages":4,"maxProductImageMb":5}'::jsonb);
+  `,
+  // 7 — customer product images and included corrections
+  `
+  ALTER TABLE jobs ADD COLUMN product_image_ids text[] NOT NULL DEFAULT '{}';
+  ALTER TABLE jobs ADD COLUMN corrections_used integer NOT NULL DEFAULT 0;
+  ALTER TABLE jobs ADD COLUMN revision_of text REFERENCES jobs(id) ON DELETE SET NULL;
+  ALTER TABLE songs ADD COLUMN corrections_used integer NOT NULL DEFAULT 0;
+  CREATE TABLE product_images (
+    id text PRIMARY KEY,
+    user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name text NOT NULL,
+    file text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  );
+  CREATE INDEX product_images_user ON product_images(user_id, created_at DESC);
+  CREATE UNIQUE INDEX payments_pending_export ON payments(user_id, target_id) WHERE target_id IS NOT NULL AND status = 'pending';
+  `,
+  // 8 — what the vision model sees in product photos, targeted corrections of a rendered video
+  `
+  ALTER TABLE product_images ADD COLUMN description text;
+  ALTER TABLE jobs ADD COLUMN correction text;
+  ALTER TABLE jobs ADD COLUMN correction_of text REFERENCES jobs(id) ON DELETE SET NULL;
+  `,
+  // 9 — paid services used by each generation (cost tracking) and the plan it ran under
+  `
+  ALTER TABLE jobs ADD COLUMN usage jsonb NOT NULL DEFAULT '[]';
+  ALTER TABLE jobs ADD COLUMN plan text;
+  ALTER TABLE songs ADD COLUMN usage jsonb NOT NULL DEFAULT '[]';
+  ALTER TABLE songs ADD COLUMN plan text;
+  `,
+  // 10 — profitable quotas with the per-plan services; values an admin already changed are kept
+  `
+  UPDATE commerce_settings SET settings = jsonb_set(settings, '{creatorMinutesPerMonth}', '30') WHERE id = 1 AND settings->>'creatorMinutesPerMonth' = '60';
+  UPDATE commerce_settings SET settings = jsonb_set(settings, '{creatorSongsPerMonth}', '8') WHERE id = 1 AND settings->>'creatorSongsPerMonth' = '10';
+  UPDATE commerce_settings SET settings = jsonb_set(settings, '{creatorMaxDurationSec}', '120') WHERE id = 1 AND settings->>'creatorMaxDurationSec' = '180';
+  UPDATE commerce_settings SET settings = jsonb_set(settings, '{proVideosPerMonth}', '80') WHERE id = 1 AND settings->>'proVideosPerMonth' = '120';
+  UPDATE commerce_settings SET settings = jsonb_set(settings, '{proMinutesPerMonth}', '60') WHERE id = 1 AND settings->>'proMinutesPerMonth' = '300';
+  UPDATE commerce_settings SET settings = jsonb_set(settings, '{proSongsPerMonth}', '20') WHERE id = 1 AND settings->>'proSongsPerMonth' = '40';
+  UPDATE commerce_settings SET settings = jsonb_set(settings, '{proMaxDurationSec}', '300') WHERE id = 1 AND settings->>'proMaxDurationSec' = '600';
+  UPDATE commerce_settings SET settings = jsonb_set(settings, '{songPreviewSec}', '30') WHERE id = 1 AND settings->>'songPreviewSec' = '45';
+  `,
+  // 11 — customer voices (cloned voice, pronunciation dictionary) and pronunciation fixes of a video
+  `
+  CREATE TABLE voice_clones (
+    user_id text PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    provider text NOT NULL,
+    voice_id text NOT NULL,
+    name text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  );
+  CREATE TABLE pronunciations (
+    user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    word text NOT NULL,
+    spoken text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, word)
+  );
+  ALTER TABLE jobs ADD COLUMN pronunciation_fix jsonb;
+  ALTER TABLE jobs ADD COLUMN pronunciation_fixes_used integer NOT NULL DEFAULT 0;
+  `,
+  // 12 — proof of acceptance of the terms (version and date) at sign-up
+  `
+  ALTER TABLE users ADD COLUMN terms_version text;
+  ALTER TABLE users ADD COLUMN terms_accepted_at timestamptz;
+  `,
 ];
 
 /** Apply pending migrations (serialized with an advisory lock: several containers may start together). */

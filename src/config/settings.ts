@@ -32,6 +32,22 @@ const opt = (...pairs: Array<[string, string]>) => pairs.map(([value, label]) =>
 
 export const SETTING_GROUPS: SettingGroup[] = [
   {
+    id: 'company',
+    title: 'Entreprise et mentions légales',
+    description: 'Identité de l’éditeur affichée dans les mentions légales, les conditions et la politique de confidentialité. Obligatoire avant d’ouvrir le site au public.',
+    fields: [
+      { key: 'COMPANY_NAME', label: 'Nom commercial ou raison sociale' },
+      { key: 'COMPANY_REGISTRATION', label: 'Forme juridique et immatriculation', placeholder: 'SARL au capital de … FCFA, RCCM …, IFU …' },
+      { key: 'COMPANY_ADDRESS', label: 'Adresse du siège' },
+      { key: 'COMPANY_COUNTRY', label: 'Pays (droit applicable)', placeholder: 'Burkina Faso' },
+      { key: 'COMPANY_DIRECTOR', label: 'Directeur de la publication', placeholder: 'Prénom Nom' },
+      { key: 'CONTACT_EMAIL', label: 'E-mail de contact (affiché publiquement)' },
+      { key: 'HOSTING_PROVIDER', label: 'Hébergeur (nom, adresse, téléphone)', placeholder: 'Hetzner Online GmbH, Industriestr. 25, 91710 Gunzenhausen, Allemagne' },
+      { key: 'PUBLIC_URL', label: 'Adresse publique du site', placeholder: 'https://sovid.ai' },
+      { key: 'VIDEO_AGENT_RETENTION_DAYS', label: 'Conservation des vidéos (jours, 0 = illimitée)', help: 'Affichée dans les conditions et la politique de confidentialité.' },
+    ],
+  },
+  {
     id: 'llm',
     title: 'Textes et script (LLM)',
     description: 'Écrit le concept, le script et les légendes. Plusieurs fournisseurs = relais automatique si l’un échoue (crédit épuisé, clé invalide). Sans LLM : textes génériques.',
@@ -82,7 +98,7 @@ export const SETTING_GROUPS: SettingGroup[] = [
       { key: 'PIPER_VOICE_FR', label: 'Voix Piper française', free: true, options: opt(['fr_FR-siwis-medium', 'Siwis (femme)'], ['fr_FR-tom-medium', 'Tom (homme)'], ['fr_FR-upmc-medium', 'UPMC (femme/homme)'], ['fr_FR-gilles-low', 'Gilles (homme)']), link: 'https://rhasspy.github.io/piper-samples/' },
       { key: 'PIPER_VOICE_EN', label: 'Voix Piper anglaise', free: true, options: opt(['en_US-lessac-medium', 'Lessac (US, femme)'], ['en_US-ryan-medium', 'Ryan (US, homme)'], ['en_GB-alba-medium', 'Alba (UK, femme)']) },
       { key: 'PIPER_LENGTH_SCALE', label: 'Débit Piper (1 = normal, 1.2 = plus lent)' },
-      { key: 'ELEVENLABS_API_KEY', label: 'Clé ElevenLabs', secret: true, link: 'https://elevenlabs.io/app/settings/api-keys' },
+      { key: 'ELEVENLABS_API_KEY', label: 'Clé ElevenLabs', secret: true, link: 'https://elevenlabs.io/app/settings/api-keys', help: 'Nécessaire pour la voix-off ElevenLabs et la génération de chansons chantées (offre Music payante).' },
       { key: 'ELEVENLABS_VOICE_ID', label: 'Voix ElevenLabs (id)' },
     ],
   },
@@ -131,7 +147,6 @@ export const SETTING_GROUPS: SettingGroup[] = [
     title: 'Publication (applications développeur)',
     description: 'Vos applications développeur : chaque client connecte ensuite ses propres comptes dans « Comptes connectés ». URL de retour OAuth : <PUBLIC_URL>/api/connections/<youtube|tiktok|linkedin|meta>/callback.',
     fields: [
-      { key: 'VIDEO_AGENT_PUBLISH_PLATFORMS', label: 'Plateformes par défaut', placeholder: 'tiktok,instagram,youtube' },
       { key: 'YOUTUBE_CLIENT_ID', label: 'YouTube : Client ID', credential: true, free: true, link: 'https://console.cloud.google.com/apis/credentials' },
       { key: 'YOUTUBE_CLIENT_SECRET', label: 'YouTube : Client secret', secret: true },
       { key: 'YOUTUBE_PRIVACY', label: 'YouTube : visibilité', options: opt(['public', 'Publique'], ['unlisted', 'Non répertoriée'], ['private', 'Privée']) },
@@ -148,16 +163,25 @@ export const SETTING_GROUPS: SettingGroup[] = [
 
 const FIELDS = new Map(SETTING_GROUPS.flatMap((g) => g.fields.map((f) => [f.key, f] as const)));
 
-/** View for the browser: secrets are reported as configured/not configured only. */
+/** View for the browser: secrets stay in the environment and are not editable from the UI. */
 export const settingsView = (config: AppConfig) =>
   SETTING_GROUPS.map((g) => ({
     ...g,
-    fields: g.fields.map((f) => {
-      const raw = config.env[f.key];
-      const value = raw === undefined || raw === null ? '' : Array.isArray(raw) ? raw.join(',') : String(raw);
-      return { ...f, configured: value !== '', value: f.secret ? '' : value };
-    }),
-  }));
+    configuredFields: g.fields
+      .filter((f) => f.secret || f.credential)
+      .filter((f) => {
+        const raw = config.env[f.key];
+        return raw !== undefined && raw !== null && String(raw) !== '';
+      })
+      .map((f) => f.label),
+    fields: g.fields
+      .filter((f) => !f.secret)
+      .map((f) => {
+        const raw = config.env[f.key];
+        const value = raw === undefined || raw === null ? '' : Array.isArray(raw) ? raw.join(',') : String(raw);
+        return { ...f, configured: value !== '', value };
+      }),
+  })).filter((g) => g.fields.length > 0);
 
 /**
  * Write settings into the .env file after validating the resulting configuration.

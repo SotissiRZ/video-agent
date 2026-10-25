@@ -12,14 +12,16 @@ import type { AgentDependencies } from '../agent/orchestrator';
 import { providerStatus } from '../agent/doctor';
 import { loadConfig, type AppConfig } from '../config/config';
 import { saveSettings, settingsView } from '../config/settings';
-import { errorMessage, VideoAgentError } from '../core/errors';
+import { errorMessage, summarizeError, VideoAgentError } from '../core/errors';
 import { OUTPUT_FORMATS, SUPPORTED_FPS } from '../core/formats';
 import { createLogger, type Logger } from '../core/logger';
 import { resolveLLM } from '../llm/registry';
+import { ElevenLabsSongProvider } from '../providers/music/elevenlabs-song';
 import { ensureCaptions, loadJob, publishJob, saveCaptions } from '../publish/service';
 import { PLATFORM_IDS, type Captions, type PlatformId } from '../publish/types';
 import { STYLES } from '../remotion/contract/styles';
 import { listTemplates } from '../templates/registry';
+import { TERMS_VERSION } from './auth';
 import { AuthError, changePassword, consumeEmailToken, createEmailToken, createSession, destroySession, findUserByEmail, getUser, login, markEmailVerified, parseCookies, RateLimiter, resetPassword, SESSION_COOKIE, sessionCookie, signup, userForSession, type User } from './auth';
 import { buildEmail, createMailer, type Mailer } from './mail';
 import { createPayment, CURRENCY, enabledProviders, handleGeniusPayWebhook, handleYouCanPayWebhook, listPayments, localPrices, PAYMENT_PROVIDERS, publicPayment, refreshPayment, creditPack } from './payments';
@@ -44,9 +46,19 @@ import { clientIp, HttpError, json, readBuffer, readJson, readRaw, redirect, sen
 import { deleteLogo, getBrandKit, MAX_LOGO_BYTES, publicBrandKit, saveBrandKit, saveLogo } from './brand';
 import { sendPassReminders } from './reminders';
 import { createJob, deleteJob, getJob, JOB_ID, listJobs, publicJob, queuePosition, refundCredits, requestCancel, useCredit, userJobsDir, type JobRow } from './jobs';
-import { checkQuota, getPlan, getUsage, listPlans, PLAN_IDS, planOfUser } from './plans';
+import { applyCommerceLimits, checkQuota, checkSongQuota, getPlan, getUsage, listPlans, PLAN_IDS, planOfUser } from './plans';
+import { exportPrice, getCommerceSettings, publicCommerce, saveCommerceSettings } from './commerce';
+import { deleteProductImage, describeProductImage, listProductImages, productImageFiles, publicProductImage, saveProductImage } from './product-images';
+import { ensureCleanVideoExport } from './export';
 import { cancelPublication, createPublication, listPublications, publicPublication } from './publications';
 import { Worker } from './worker';
+import { addSongUsage, createSongDraft, deleteSong, getSong, listSongs, publicSong, removeSongPreviews, SONG_ID, songDirectory, songPreviewFile, updateSongLyrics, type SongRow } from './songs';
+import { makeAudioPreview } from '../audio/ffmpeg';
+import { UsageMeter } from '../core/usage';
+import { planConfig, planLLM } from './plan-providers';
+import { costReport } from './costs';
+import { mentionsAny } from '../core/pronunciation';
+import { audioExtension, deleteVoiceClone, elevenLabsCloner, getVoiceClone, listPronunciations, MAX_PRONUNCIATIONS, PronunciationSchema, replacePronunciations, saveVoiceClone, upsertPronunciation, type VoiceClone, type VoiceCloner } from './voices';
 
 export const CreateJobSchema = z.object({
   prompt: z.string().trim().min(3).max(4000),
@@ -67,6 +79,10 @@ export const CreateJobSchema = z.object({
   mediaCoverage: z.enum(['all', 'visual', 'none']).optional(),
   /** Apply the customer's brand kit (default: yes when one exists). */
   brandKit: z.boolean().optional(),
+  productImageIds: z.array(z.string().uuid()).max(20).optional(),
+  /** Narrator: female or male voice, or the customer's cloned voice (paid plans). */
+  voiceGender: z.enum(['female', 'male']).optional(),
+  voiceClone: z.boolean().optional(),
 });
 
 const CaptionSchema = z.object({ title: z.string().max(300), caption: z.string().max(6000), hashtags: z.array(z.string().max(100)).max(30) });
@@ -76,11 +92,31 @@ export const PublishSchema = z.object({
   captions: z.record(z.enum(PLATFORM_IDS), CaptionSchema).optional(),
   dryRun: z.boolean().optional(),
 });
-const SignupSchema = z.object({ email: z.string().max(254), password: z.string().max(200), name: z.string().max(100).optional(), locale: z.enum(['fr', 'en']).optional() });
+const SignupSchema = z.object({
+  email: z.string().max(254),
+  password: z.string().max(200),
+  name: z.string().max(100).optional(),
+  locale: z.enum(['fr', 'en']).optional(),
+  /** Explicit box: 18 or older, terms of use and sale, privacy policy. */
+  acceptTerms: z.literal(true, { errorMap: () => ({ message: 'Vous devez avoir 18 ans et accepter les conditions pour créer un compte.' }) }),
+});
 const LoginSchema = z.object({ email: z.string().max(254), password: z.string().max(200) });
 const ProfileSchema = z.object({ name: z.string().max(100).optional(), locale: z.enum(['fr', 'en']).optional() });
 const PasswordSchema = z.object({ current: z.string().max(200), next: z.string().max(200) });
 const ConnectionPatchSchema = z.object({ privacy: z.enum(['public', 'unlisted', 'private']).optional(), mode: z.enum(['draft', 'direct']).optional(), pageId: z.string().max(100).optional() });
+const SongDraftSchema = z.object({
+  prompt: z.string().trim().min(3).max(2000),
+  style: z.string().trim().min(2).max(80),
+  mood: z.string().trim().min(2).max(80),
+  durationSec: z.number().int().min(30).max(120).default(90),
+});
+const SongLyricsSchema = z.object({
+  title: z.string().trim().min(1).max(120),
+  lyrics: z.string().trim().min(1).max(6000),
+});
+const SongUpdateSchema = SongLyricsSchema;
+const VideoCorrectionSchema = z.object({ instruction: z.string().trim().min(5).max(1000) });
+const PronunciationFixSchema = PronunciationSchema.extend({ save: z.boolean().optional() });
 
 const parse = <T>(schema: z.ZodType<T>, data: unknown): T => {
   const r = schema.safeParse(data);
@@ -108,6 +144,16 @@ export interface SaasOptions {
   reminders?: boolean;
   /** fetch used for GeniusPay / YouCan Pay calls. */
   paymentFetch?: typeof fetch;
+  /** Test seam for the standalone song provider. */
+  songGenerator?: (request: { lyrics: string; style: string; mood: string; durationSec: number }) => Promise<Buffer>;
+  /** Test seam for song lyric drafting. */
+  /** Test seam: ElevenLabs voice cloning. */
+  voiceCloner?: VoiceCloner;
+  /** Test seam: what the ElevenLabs account allows (default: asked to ElevenLabs, cached one hour). */
+  elevenLabsAccess?: () => Promise<{ songs: boolean; voiceClone: boolean }>;
+  /** Test seam: builds the free-listening excerpt of a song (ffmpeg by default). */
+  songPreviewer?: (input: string, output: string, seconds: number) => Promise<void>;
+  songLyricsGenerator?: (request: { prompt: string; style: string; mood: string }) => Promise<{ title: string; lyrics: string }>;
   workerOptions?: Partial<ConstructorParameters<typeof Worker>[0]>;
 }
 
@@ -131,8 +177,13 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
   const stripe = () => options.stripe ?? stripeClient(config);
   const exchanger = () => options.exchanger ?? defaultExchanger(config);
   const loginLimiter = new RateLimiter(10, 15 * 60_000);
-  const signupLimiter = new RateLimiter(20, 60 * 60_000);
+  // Mobile carriers put many customers behind one IP (CGNAT): generous per-IP sign-up limit.
+  const signupLimiter = new RateLimiter(60, 60 * 60_000);
   const mailLimiter = new RateLimiter(5, 60 * 60_000);
+  const songDraftLimiter = new RateLimiter(5, 60 * 60_000);
+  const voiceCloneLimiter = new RateLimiter(3, 24 * 60 * 60_000);
+  const cloner = (): VoiceCloner | null => options.voiceCloner ?? (config.env.ELEVENLABS_API_KEY ? elevenLabsCloner(config.env.ELEVENLABS_API_KEY) : null);
+  const publicClone = (clone: VoiceClone | undefined) => (clone ? { name: clone.name, createdAt: new Date(clone.created_at).toISOString() } : null);
   const mailer = options.mailer ?? createMailer(config, logger);
   /** E-mails are sent in the background: a slow SMTP server must not delay the response. */
   const sendMail = (kind: 'verify' | 'reset', user: Pick<User, 'id' | 'email' | 'locale'>, link: string) =>
@@ -145,6 +196,11 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
   const runWorker = options.embeddedWorker ?? (config.env.VIDEO_AGENT_EMBEDDED_WORKER === 'auto' ? db.kind === 'pglite' : config.env.VIDEO_AGENT_EMBEDDED_WORKER === 'true');
   const worker = runWorker ? new Worker({ db, vault, config: () => config, logger, deps: options.deps, ...options.workerOptions }) : undefined;
   worker?.start();
+  const songTasks = new Set<Promise<void>>();
+  await db.query(
+    `UPDATE songs SET status = 'failed', error = 'La génération a été interrompue par un redémarrage du serveur. Relancez la chanson.', finished_at = now(), updated_at = now()
+     WHERE status = 'running' AND heartbeat_at < now() - interval '3 minutes'`,
+  );
 
   // Pass reminders, hourly. Links need the public address of the site.
   const remind = async () => {
@@ -158,6 +214,68 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
   const reminderTimers = options.reminders === false ? [] : [setTimeout(() => void remind(), 30_000), setInterval(() => void remind(), 3600_000)];
   for (const timer of reminderTimers) timer.unref?.();
 
+  // A free ElevenLabs account has no Music API and no voice cloning: never advertise them then.
+  let elevenLabsCache: { key: string; at: number; value: { songs: boolean; voiceClone: boolean } } | undefined;
+  const elevenLabsAccess = async (): Promise<{ songs: boolean; voiceClone: boolean }> => {
+    if (options.elevenLabsAccess) return options.elevenLabsAccess();
+    const key = config.env.ELEVENLABS_API_KEY;
+    if (!key) return { songs: false, voiceClone: false };
+    if (elevenLabsCache?.key === key && Date.now() - elevenLabsCache.at < 3600_000) return elevenLabsCache.value;
+    try {
+      const res = await fetch('https://api.elevenlabs.io/v1/user/subscription', { headers: { 'xi-api-key': key }, signal: AbortSignal.timeout(8000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const sub = (await res.json()) as { tier?: string; can_use_instant_voice_cloning?: boolean };
+      const value = { songs: Boolean(sub.tier) && sub.tier !== 'free', voiceClone: Boolean(sub.can_use_instant_voice_cloning) };
+      elevenLabsCache = { key, at: Date.now(), value };
+      return value;
+    } catch (err) {
+      logger.warn(`ElevenLabs subscription check failed: ${errorMessage(err)}`);
+      // Unknown: keep the last answer, else assume the configured account works.
+      return elevenLabsCache?.value ?? { songs: true, voiceClone: true };
+    }
+  };
+
+  /** Capabilities that depend on the configured services (the landing and legal pages follow them). */
+  const platformFeatures = async () => {
+    const e = config.env;
+    const payments = enabledProviders(config);
+    const eleven = await elevenLabsAccess();
+    return {
+      mobileMoney: payments.includes('geniuspay'),
+      moroccoPayments: payments.includes('youcanpay'),
+      cardSubscriptions: billingEnabled(config),
+      publish: PROVIDERS.filter((provider) => providerAvailable(config, provider)),
+      voiceClone: eleven.voiceClone,
+      songs: eleven.songs,
+      aiImages: e.VIDEO_AGENT_IMAGE_PROVIDER !== 'none' && Boolean(e.CLOUDFLARE_API_TOKEN || e.HF_TOKEN || e.REPLICATE_API_TOKEN || e.STABILITY_API_KEY || e.OPENAI_API_KEY),
+      stock: Boolean(e.PEXELS_API_KEY || e.PIXABAY_API_KEY || e.UNSPLASH_ACCESS_KEY),
+    };
+  };
+
+  /** Third parties that receive customer data on this server (privacy policy, GDPR art. 13). */
+  const processors = () => {
+    const e = config.env;
+    const list: Array<{ name: string; purpose: string }> = [];
+    const add = (on: unknown, name: string, purpose: string) => on && list.push({ name, purpose });
+    add(e.ANTHROPIC_API_KEY, 'Anthropic (Claude)', 'ai_text');
+    add(e.GROQ_API_KEY, 'Groq', 'ai_text');
+    add(e.OPENAI_API_KEY, 'OpenAI', 'ai_text');
+    add(e.ELEVENLABS_API_KEY, 'ElevenLabs', 'voice_music');
+    add(e.CLOUDFLARE_API_TOKEN, 'Cloudflare (Workers AI)', 'ai_images');
+    add(e.HF_TOKEN, 'Hugging Face', 'ai_images');
+    add(e.REPLICATE_API_TOKEN, 'Replicate', 'ai_images');
+    add(e.STABILITY_API_KEY, 'Stability AI', 'ai_images');
+    add(e.PEXELS_API_KEY, 'Pexels', 'stock');
+    add(e.PIXABAY_API_KEY, 'Pixabay', 'stock');
+    add(e.UNSPLASH_ACCESS_KEY, 'Unsplash', 'stock');
+    const payments = enabledProviders(config);
+    add(payments.includes('geniuspay'), 'GeniusPay', 'payment');
+    add(payments.includes('youcanpay'), 'YouCan Pay', 'payment');
+    add(billingEnabled(config), 'Stripe', 'payment');
+    add(config.env.SMTP_URL, 'SMTP', 'email');
+    return list;
+  };
+
   const llm = () => {
     if (options.deps?.llm !== undefined) return options.deps.llm;
     try {
@@ -165,6 +283,11 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     } catch {
       return null;
     }
+  };
+  const songLyricsProviderError = (err: unknown) => {
+    const details = errorMessage(err).split(' | ').map((message) => summarizeError(message, 180)).join(' | ');
+    logger.warn(`song lyric provider failed: ${details}`);
+    return new HttpError(503, 'Les fournisseurs IA de paroles sont indisponibles. Vérifiez leur configuration, leurs crédits et leur connexion réseau.', 'song_lyrics_provider_failed');
   };
   const baseUrl = (req: http.IncomingMessage) => {
     if (config.env.PUBLIC_URL) return config.env.PUBLIC_URL.replace(/\/$/, '');
@@ -189,9 +312,10 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
   };
 
   const accountSummary = async (user: User) => {
-    const plan = planOfUser(config, user);
+    const commerce = await getCommerceSettings(db);
+    const plan = applyCommerceLimits(planOfUser(config, user), commerce);
     const usage = await getUsage(db, user.id);
-    return { user: userView(user), plan, usage, billing: billingEnabled(config), paymentProviders: enabledProviders(config).map((p) => ({ id: p, currency: CURRENCY[p] })), requireVerification: config.env.REQUIRE_EMAIL_VERIFICATION, mail: mailer.kind };
+    return { user: userView(user), plan, usage, commerce: publicCommerce(commerce), billing: billingEnabled(config), paymentProviders: enabledProviders(config).map((p) => ({ id: p, currency: CURRENCY[p] })), requireVerification: config.env.REQUIRE_EMAIL_VERIFICATION, mail: mailer.kind };
   };
 
   const capabilities = () => {
@@ -237,6 +361,76 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     return job;
   };
 
+  const songFor = async (user: User, id: string): Promise<SongRow> => {
+    if (!SONG_ID.test(id)) throw new HttpError(400, 'Identifiant de chanson invalide', 'invalid_song_id');
+    const song = await getSong(db, user.id, id);
+    if (!song) throw new HttpError(404, 'Chanson introuvable', 'not_found');
+    return song;
+  };
+
+  const generateSong = async (song: SongRow, plan: string): Promise<void> => {
+    const currentConfig = config;
+    const generate = options.songGenerator ?? (currentConfig.env.ELEVENLABS_API_KEY
+      ? (input: { lyrics: string; style: string; mood: string; durationSec: number }) =>
+          new ElevenLabsSongProvider(currentConfig.env.ELEVENLABS_API_KEY!).generate(input)
+      : undefined);
+    if (!generate) {
+      await db.query("UPDATE songs SET status = 'failed', error = $2, finished_at = now(), updated_at = now() WHERE id = $1", [song.id, 'La clé ElevenLabs Music n’est pas configurée.']);
+      return;
+    }
+    const dir = songDirectory(currentConfig, song.user_id, song.id);
+    const audioFile = path.join(dir, 'song.mp3');
+    const temporaryFile = `${audioFile}.tmp`;
+    const heartbeat = setInterval(() => {
+      void db.query("UPDATE songs SET heartbeat_at = now() WHERE id = $1 AND status = 'running'", [song.id]).catch((err) => logger.warn(`song ${song.id} heartbeat failed: ${errorMessage(err)}`));
+    }, 30_000);
+    try {
+      const audio = await generate({ lyrics: song.lyrics, style: song.style, mood: song.mood, durationSec: song.duration_sec });
+      if (!audio.length) throw new Error('ElevenLabs a renvoyé un fichier audio vide.');
+      await addSongUsage(db, song.id, [{ kind: 'music', provider: 'elevenlabs', model: 'music', calls: 1, seconds: song.duration_sec }], plan);
+      fs.mkdirSync(dir, { recursive: true });
+      removeSongPreviews(dir);
+      fs.rmSync(temporaryFile, { force: true });
+      fs.writeFileSync(temporaryFile, audio, { flag: 'wx' });
+      fs.renameSync(temporaryFile, audioFile);
+      const saved = await db.query<{ id: string }>(
+        "UPDATE songs SET status = 'completed', audio_file = $2, error = NULL, finished_at = now(), updated_at = now() WHERE id = $1 RETURNING id",
+        [song.id, audioFile],
+      );
+      if (!saved.length) fs.rmSync(dir, { recursive: true, force: true });
+    } catch (err) {
+      fs.rmSync(temporaryFile, { force: true });
+      fs.rmSync(audioFile, { force: true });
+      const message = errorMessage(err);
+      await db.query("UPDATE songs SET status = 'failed', error = $2, finished_at = now(), updated_at = now() WHERE id = $1", [song.id, message]);
+      logger.warn(`song ${song.id} failed: ${message}`);
+    } finally {
+      clearInterval(heartbeat);
+    }
+  };
+
+  const songPreviews = new Map<string, Promise<string>>();
+  const ensureSongPreview = (song: SongRow, seconds: number): Promise<string> => {
+    const target = songPreviewFile(song, seconds);
+    if (fs.existsSync(target)) return Promise.resolve(target);
+    const existing = songPreviews.get(target);
+    if (existing) return existing;
+    const temporary = `${target}.tmp`;
+    const task = (options.songPreviewer ?? makeAudioPreview)(song.audio_file!, temporary, seconds)
+      .then(() => {
+        fs.renameSync(temporary, target);
+        return target;
+      })
+      .catch((err) => {
+        fs.rmSync(temporary, { force: true });
+        logger.warn(`song ${song.id} preview failed: ${errorMessage(err)}`);
+        throw new HttpError(503, 'L’extrait d’écoute est momentanément indisponible.', 'song_preview_unavailable');
+      })
+      .finally(() => songPreviews.delete(target));
+    songPreviews.set(target, task);
+    return task;
+  };
+
   const api = async (req: http.IncomingMessage, res: http.ServerResponse, url: URL, parts: string[]): Promise<void> => {
     const method = req.method ?? 'GET';
     const [, resource, id, sub, extra] = parts;
@@ -245,13 +439,29 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     if (resource === 'health' && method === 'GET') return json(res, 200, { ok: true, db: db.kind });
     if (resource === 'public' && id === 'config' && method === 'GET') {
       const users = Number((await db.one<{ n: string | number }>('SELECT count(*) AS n FROM users'))?.n ?? 0);
+      const commerce = await getCommerceSettings(db);
+      const plans = listPlans(config).map((plan) => ({ ...applyCommerceLimits(plan, commerce), purchasable: Boolean(plan.stripePriceId) || (plan.id !== 'free' && enabledProviders(config).length > 0), localPrices: plan.id === 'free' ? {} : localPrices(config, plan.id) }));
       return json(res, 200, {
         signupOpen: config.env.SIGNUP_MODE === 'open' || users === 0,
         firstUser: users === 0,
         billing: billingEnabled(config),
-        company: { name: config.env.COMPANY_NAME, address: config.env.COMPANY_ADDRESS, email: config.env.CONTACT_EMAIL, url: config.env.PUBLIC_URL ?? '' },
+        company: {
+          name: config.env.COMPANY_NAME,
+          address: config.env.COMPANY_ADDRESS,
+          email: config.env.CONTACT_EMAIL,
+          url: config.env.PUBLIC_URL ?? '',
+          registration: config.env.COMPANY_REGISTRATION,
+          director: config.env.COMPANY_DIRECTOR,
+          country: config.env.COMPANY_COUNTRY,
+          hosting: config.env.HOSTING_PROVIDER,
+        },
+        termsVersion: TERMS_VERSION,
+        // What the platform really does on this server: the public site only promises these.
+        features: await platformFeatures(),
+        processors: processors(),
         retentionDays: config.env.VIDEO_AGENT_RETENTION_DAYS,
-        plans: listPlans(config).map(({ stripePriceId, ...p }) => ({ ...p, purchasable: Boolean(stripePriceId) || (p.id !== 'free' && enabledProviders(config).length > 0), localPrices: p.id === 'free' ? {} : localPrices(config, p.id) })),
+        plans: plans.map(({ stripePriceId: _stripePriceId, ...p }) => p),
+        commerce: publicCommerce(commerce),
         paymentProviders: enabledProviders(config).map((p) => ({ id: p, currency: CURRENCY[p] })),
         creditPack: enabledProviders(config).length ? creditPack(config) : null,
       });
@@ -352,6 +562,23 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         const { token, maxAgeSec } = await createSession(db, user.id, req.headers['user-agent']);
         return json(res, 200, { ok: true }, { 'set-cookie': sessionCookie(token, maxAgeSec, baseUrl(req).startsWith('https://')) });
       }
+      if (id === 'export' && method === 'GET') {
+        // Right of access and portability: everything the account holds, in one readable file.
+        const [account] = await db.query('SELECT id, email, name, role, plan, locale, subscription_status, current_period_end, credits, email_verified_at, terms_version, terms_accepted_at, created_at FROM users WHERE id = $1', [user.id]);
+        const data = {
+          exportedAt: new Date().toISOString(),
+          account,
+          brandKit: publicBrandKit(await getBrandKit(db, user.id)),
+          videos: (await listJobs(db, user.id, 1000)).map((job) => ({ id: job.id, prompt: job.prompt, title: job.title, status: job.status, createdAt: job.created_at, durationSec: job.duration_sec })),
+          songs: (await listSongs(db, user.id)).map((song) => ({ id: song.id, title: song.title, prompt: song.prompt, lyrics: song.lyrics, style: song.style, status: song.status, createdAt: song.created_at })),
+          productImages: (await listProductImages(db, user.id)).map(publicProductImage),
+          voice: { clone: publicClone(await getVoiceClone(db, user.id)), pronunciations: await listPronunciations(db, user.id) },
+          connections: (await listConnections(db, user.id)).map((c) => ({ platform: c.platform, accountName: c.account_name, connectedAt: c.created_at })),
+          payments: (await listPayments(db, user.id)).map(publicPayment),
+          publications: (await listPublications(db, user.id)).map(publicPublication),
+        };
+        return json(res, 200, data, { 'content-disposition': 'attachment; filename="mes-donnees-sovid.json"' });
+      }
       if (!id && method === 'DELETE') {
         const body = parse(z.object({ password: z.string().max(200) }), await readJson(req));
         const row = await db.one<{ password_hash: string }>('SELECT password_hash FROM users WHERE id = $1', [user.id]);
@@ -359,8 +586,10 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         if (user.role === 'admin' && Number((await db.one<{ n: string | number }>("SELECT count(*) AS n FROM users WHERE role = 'admin'"))?.n ?? 0) <= 1) {
           throw new HttpError(409, 'Le dernier administrateur ne peut pas supprimer son compte', 'last_admin');
         }
+        const clone = await getVoiceClone(db, user.id);
         await db.query('DELETE FROM users WHERE id = $1', [user.id]);
         fs.rmSync(userJobsDir(config, user.id), { recursive: true, force: true });
+        if (clone) void cloner()?.remove(clone.voice_id).catch((err) => logger.warn(`voice ${clone.voice_id} not deleted on ElevenLabs: ${errorMessage(err)}`));
         return json(res, 200, { ok: true }, { 'set-cookie': sessionCookie('', 0, baseUrl(req).startsWith('https://')) });
       }
     }
@@ -378,26 +607,266 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       });
     }
 
+    if (resource === 'songs') {
+      if (!id && method === 'GET') return json(res, 200, (await listSongs(db, user.id)).map(publicSong));
+      if (!id && method === 'POST') {
+        if (config.env.REQUIRE_EMAIL_VERIFICATION && !user.email_verified_at) throw new HttpError(403, 'Confirmez votre adresse e-mail pour créer des chansons', 'email_unverified');
+        const body = parse(SongDraftSchema, await readJson(req));
+        // Lyrics are written with the plan's LLM; the tokens are added to the song's cost.
+        const songPlan = planOfUser(config, user).id;
+        const planProviders = (await getCommerceSettings(db)).providers[songPlan];
+        const warnProvider = (message: string) => logger.warn(`song (${songPlan}): ${message}`);
+        const writer = options.deps?.llm !== undefined ? options.deps.llm : planLLM(planConfig(config, planProviders, warnProvider), planProviders, warnProvider);
+        const lyricsMeter = new UsageMeter();
+        const lyricProvider = writer && lyricsMeter.llm(writer);
+        if (!options.songLyricsGenerator && !lyricProvider) throw new HttpError(503, 'Configurez un fournisseur de rédaction IA pour créer les paroles.', 'song_lyrics_unavailable');
+        if (!songDraftLimiter.take(user.id)) throw new HttpError(429, 'Trop de brouillons de chanson, réessayez plus tard', 'too_many_song_drafts');
+        let lyrics: z.infer<typeof SongLyricsSchema>;
+        if (options.songLyricsGenerator) {
+          try {
+            lyrics = SongLyricsSchema.parse(await options.songLyricsGenerator(body));
+          } catch (err) {
+            if (err instanceof z.ZodError) throw new HttpError(502, 'Le fournisseur IA a renvoyé des paroles invalides. Réessayez.', 'song_lyrics_invalid');
+            throw songLyricsProviderError(err);
+          }
+        } else {
+          let generated: Awaited<ReturnType<NonNullable<typeof lyricProvider>['generate']>>;
+          try {
+            generated = await lyricProvider!.generate({
+              system: 'You are a professional songwriter. Write original, singable lyrics based only on the user brief. Return valid JSON with title and lyrics. Use clear section labels such as [Verse 1], [Chorus], [Verse 2], [Bridge]. Keep the lyrics in the language requested or used by the user. Do not mention that these are AI-generated.',
+              messages: [{ role: 'user', content: `Brief: ${body.prompt}\nMusical style: ${body.style}\nMood: ${body.mood}` }],
+              maxTokens: 1600,
+              temperature: 0.8,
+              json: { name: 'song_lyrics', schema: { type: 'object', properties: { title: { type: 'string' }, lyrics: { type: 'string' } }, required: ['title', 'lyrics'], additionalProperties: false } },
+            });
+          } catch (err) {
+            throw songLyricsProviderError(err);
+          }
+          try {
+            lyrics = SongLyricsSchema.parse(JSON.parse(generated.text.replace(/^```(?:json)?\s*|\s*```$/g, '')));
+          } catch (err) {
+            logger.warn(`song lyric response from ${generated.provider} was invalid: ${errorMessage(err)}`);
+            throw new HttpError(502, 'Le fournisseur IA a renvoyé des paroles invalides. Réessayez.', 'song_lyrics_invalid');
+          }
+        }
+        const song = await createSongDraft(db, config, user.id, { ...body, ...lyrics, durationSec: body.durationSec ?? 90 });
+        await addSongUsage(db, song.id, lyricsMeter.lines, songPlan);
+        return json(res, 201, publicSong(song));
+      }
+      if (!id) throw new HttpError(405, 'method not allowed');
+      const song = await songFor(user, id);
+      if (!sub && method === 'GET') return json(res, 200, publicSong(song));
+      if (!sub && method === 'DELETE') {
+        const pendingExport = await db.one<{ id: string }>("SELECT id FROM payments WHERE target_id = $1 AND status = 'pending' LIMIT 1", [song.id]);
+        if (pendingExport) throw new HttpError(409, 'Un paiement est en cours pour cette chanson. Terminez-le avant de supprimer le résultat.', 'export_payment_pending');
+        const removed = await deleteSong(db, user.id, song.id);
+        if (!removed.length) throw new HttpError(409, 'Une chanson en cours de génération ne peut pas être supprimée.', 'song_running');
+        fs.rmSync(songDirectory(config, user.id, song.id), { recursive: true, force: true });
+        return json(res, 200, { removed: true });
+      }
+      if (sub === 'lyrics' && method === 'PUT') {
+        const body = parse(SongUpdateSchema, await readJson(req));
+        const settings = await getCommerceSettings(db);
+        const updated = await updateSongLyrics(db, user.id, song.id, body.title, body.lyrics, settings.correctionsPerSong);
+        if (!updated) throw new HttpError(409, 'Les paroles ne peuvent plus être modifiées pendant ou après la génération.', 'song_not_editable');
+        return json(res, 200, publicSong(updated));
+      }
+      if (sub === 'generate' && method === 'POST') {
+        if (config.env.REQUIRE_EMAIL_VERIFICATION && !user.email_verified_at) throw new HttpError(403, 'Confirmez votre adresse e-mail pour générer des chansons', 'email_unverified');
+        if (!options.songGenerator && !config.env.ELEVENLABS_API_KEY) throw new HttpError(503, 'La génération de chansons ElevenLabs n’est pas configurée.', 'song_provider_unavailable');
+        if (song.lyrics.split(/\r?\n/).filter((line) => line.trim()).length > 30 || song.lyrics.split(/\r?\n/).some((line) => line.length > 200)) {
+          throw new HttpError(400, 'ElevenLabs accepte au maximum 30 lignes de 200 caractères par chanson.', 'song_lyrics_too_long');
+        }
+        const updated = await db.tx(async (tx) => {
+          await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [user.id]);
+          const commerce = await getCommerceSettings(tx);
+          const plan = applyCommerceLimits(planOfUser(config, user), commerce);
+          const quota = checkSongQuota(plan, await getUsage(tx, user.id));
+          if (quota) throw new HttpError(402, 'Quota mensuel de chansons atteint', 'quota_songs', { limit: quota.limit, plan: plan.id });
+          // The free plan's songs are shorter: ElevenLabs Music is billed per minute.
+          const maxSec = plan.id === 'free' ? commerce.freeSongMaxSec : 120;
+          return tx.one<SongRow>(
+            `UPDATE songs SET status = 'running', error = NULL, finished_at = NULL, heartbeat_at = now(), updated_at = now(), duration_sec = LEAST(duration_sec, $3)
+             WHERE id = $1 AND user_id = $2 AND status IN ('draft', 'failed') RETURNING *`,
+            [song.id, user.id, maxSec],
+          );
+        });
+        if (!updated) throw new HttpError(409, 'Cette chanson est déjà en cours ou a déjà été générée.', 'song_not_ready');
+        const task = generateSong(updated, planOfUser(config, user).id).catch((err) => logger.error(`song ${updated.id} background task failed: ${errorMessage(err)}`)).finally(() => songTasks.delete(task));
+        songTasks.add(task);
+        return json(res, 202, publicSong(updated));
+      }
+      if (sub === 'audio' && song.audio_file && method === 'GET') {
+        const download = url.searchParams.get('download') === '1';
+        const entitled = planOfUser(config, user).id !== 'free' || song.export_paid;
+        if (download && !entitled) throw new HttpError(402, 'Débloquez cet export pour télécharger la chanson.', 'export_payment_required', { product: 'song', targetId: song.id });
+        if (entitled) return sendFile(req, res, song.audio_file, { download, cache: 'private, no-cache' });
+        // Not unlocked: listening on the platform only gets a short excerpt, never the full master.
+        const preview = await ensureSongPreview(song, (await getCommerceSettings(db)).songPreviewSec);
+        return sendFile(req, res, preview, { cache: 'no-store' });
+      }
+      throw new HttpError(404, 'not found', 'not_found');
+    }
+
+    if (resource === 'voice') {
+      if (!id && method === 'GET') {
+        return json(res, 200, {
+          clone: publicClone(await getVoiceClone(db, user.id)),
+          cloneAvailable: planOfUser(config, user).id !== 'free' && Boolean(cloner()) && (options.voiceCloner ? true : (await elevenLabsAccess()).voiceClone),
+          pronunciations: await listPronunciations(db, user.id),
+        });
+      }
+      if (id === 'clone' && method === 'POST') {
+        if (planOfUser(config, user).id === 'free') throw new HttpError(402, 'Le clonage de voix est inclus dans les offres Créateur et Pro.', 'voice_clone_plan');
+        const voices = cloner();
+        if (!voices) throw new HttpError(503, 'Le clonage de voix n’est pas configuré.', 'voice_clone_unavailable');
+        // The owner must state it is their own voice (or that they have the speaker's permission).
+        if (url.searchParams.get('consent') !== '1') throw new HttpError(400, 'Confirmez qu’il s’agit de votre voix.', 'voice_clone_consent');
+        const mimeType = String(req.headers['content-type'] ?? '');
+        if (!audioExtension(mimeType)) throw new HttpError(400, 'Format accepté : MP3, WAV, M4A, WebM ou OGG.', 'voice_clone_format');
+        const audio = await readBuffer(req, 10 * 1024 * 1024);
+        if (audio.length < 30_000) throw new HttpError(400, 'Enregistrement trop court : parlez au moins une minute.', 'voice_clone_sample');
+        if (!voiceCloneLimiter.take(user.id)) throw new HttpError(429, 'Trop d’essais de clonage aujourd’hui, réessayez demain.', 'too_many_voice_clones');
+        const name = (url.searchParams.get('name') ?? '').trim().slice(0, 60) || user.name || 'Ma voix';
+        const previous = await getVoiceClone(db, user.id);
+        const voiceId = await voices.create({ name: `${name} · ${user.id.slice(0, 8)}`, audio, mimeType });
+        const clone = await saveVoiceClone(db, user.id, voiceId, name);
+        if (previous) void voices.remove(previous.voice_id).catch((err) => logger.warn(`voice ${previous.voice_id} not deleted on ElevenLabs: ${errorMessage(err)}`));
+        return json(res, 201, publicClone(clone));
+      }
+      if (id === 'clone' && method === 'DELETE') {
+        const removed = await deleteVoiceClone(db, user.id);
+        if (removed) await cloner()?.remove(removed.voice_id).catch((err) => logger.warn(`voice ${removed.voice_id} not deleted on ElevenLabs: ${errorMessage(err)}`));
+        return json(res, 200, { removed: Boolean(removed) });
+      }
+      if (id === 'pronunciations' && method === 'PUT') {
+        const body = parse(z.object({ entries: z.array(PronunciationSchema).max(MAX_PRONUNCIATIONS) }), await readJson(req, 64 * 1024));
+        return json(res, 200, await replacePronunciations(db, user.id, body.entries));
+      }
+    }
+
+    if (resource === 'product-images') {
+      if (!id && method === 'GET') {
+        const images = await listProductImages(db, user.id);
+        return json(res, 200, images.map(publicProductImage));
+      }
+      if (!id && method === 'POST') {
+        const commerce = await getCommerceSettings(db);
+        const maxBytes = commerce.maxProductImageMb * 1024 * 1024;
+        const image = await saveProductImage(db, config, user.id, url.searchParams.get('filename') ?? '', await readBuffer(req, maxBytes + 1), commerce.maxProductImages, maxBytes);
+        // Shown back to the customer so they can check what the AI understood of their product.
+        const described = await describeProductImage(db, llm(), image, (message) => logger.warn(`product image ${image.id} not described: ${summarizeError(message)}`));
+        return json(res, 201, publicProductImage(described));
+      }
+      if (id && sub === 'file' && method === 'GET') {
+        const image = await db.one<{ file: string }>('SELECT file FROM product_images WHERE id = $1 AND user_id = $2', [id, user.id]);
+        if (!image) throw new HttpError(404, 'Image produit introuvable.', 'not_found');
+        return sendFile(req, res, image.file, { cache: 'private, max-age=86400' });
+      }
+      if (id && method === 'DELETE') {
+        const image = await deleteProductImage(db, user.id, id);
+        if (!image) throw new HttpError(404, 'Image produit introuvable.', 'not_found');
+        fs.rmSync(image.file, { force: true });
+        return json(res, 200, { removed: true });
+      }
+    }
+
     if (resource === 'jobs') {
       if (!id && method === 'GET') return json(res, 200, (await listJobs(db, user.id)).map(publicJob));
       if (!id && method === 'POST') {
         if (config.env.REQUIRE_EMAIL_VERIFICATION && !user.email_verified_at) throw new HttpError(403, 'Confirmez votre adresse e-mail pour créer des vidéos', 'email_unverified');
         const body = parse(CreateJobSchema, await readJson(req));
-        const plan = planOfUser(config, user);
+        const commerce = await getCommerceSettings(db);
+        const plan = applyCommerceLimits(planOfUser(config, user), commerce);
+        const productImageIds = body.productImageIds ?? [];
+        await productImageFiles(db, user.id, productImageIds, commerce.maxProductImages);
         const quota = checkQuota(plan, await getUsage(db, user.id), body.durationSec);
         // Beyond the monthly quota, an extra-video credit is used (never for a video longer than the plan allows).
         const withCredit = Boolean(quota && quota.code !== 'duration' && (await useCredit(db, user.id)));
         if (quota && !withCredit) throw new HttpError(402, 'Quota atteint', `quota_${quota.code}`, { limit: quota.limit, plan: plan.id, credits: user.credits });
-        const { prompt, ...rest } = body;
-        const job = await createJob(db, config, user.id, prompt, { ...rest, style: rest.style === 'auto' ? undefined : rest.style, template: rest.template === 'auto' ? undefined : rest.template }, withCredit);
+        if (body.voiceClone) {
+          if (plan.id === 'free') throw new HttpError(402, 'Le clonage de voix est inclus dans les offres Créateur et Pro.', 'voice_clone_plan');
+          if (!(await getVoiceClone(db, user.id))) throw new HttpError(400, 'Enregistrez d’abord votre voix dans Marque et voix › Ma voix.', 'voice_clone_missing');
+        }
+        const { prompt, productImageIds: _productImageIds, ...rest } = body;
+        const job = await createJob(db, config, user.id, prompt, { ...rest, style: rest.style === 'auto' ? undefined : rest.style, template: rest.template === 'auto' ? undefined : rest.template }, withCredit, productImageIds);
         worker?.poke();
         return json(res, 201, publicJob(job));
       }
       if (!id) throw new HttpError(405, 'method not allowed');
       const job = await jobFor(user, id);
       if (!sub && method === 'GET') return json(res, 200, { ...publicJob(job), queuePosition: await queuePosition(db, job) });
+      if (sub === 'retry' && method === 'POST') {
+        if (job.status !== 'failed') throw new HttpError(409, 'Seules les vidéos en échec peuvent être relancées.', 'job_not_retryable');
+        if (config.env.REQUIRE_EMAIL_VERIFICATION && !user.email_verified_at) throw new HttpError(403, 'Confirmez votre adresse e-mail pour générer des vidéos', 'email_unverified');
+        const requestedDuration = Number(job.options.durationSec) || job.duration_sec || 30;
+        const commerce = await getCommerceSettings(db);
+        const plan = applyCommerceLimits(planOfUser(config, user), commerce);
+        const quota = checkQuota(plan, await getUsage(db, user.id), requestedDuration);
+        const withCredit = Boolean(quota && quota.code !== 'duration' && (await useCredit(db, user.id)));
+        if (quota && !withCredit) throw new HttpError(402, 'Quota atteint', `quota_${quota.code}`, { limit: quota.limit, plan: plan.id, credits: user.credits });
+        const options = {
+          ...job.options,
+          style: job.options.style === 'auto' ? undefined : job.options.style,
+          template: job.options.template === 'auto' ? undefined : job.options.template,
+        };
+        const retried = await createJob(db, config, user.id, job.prompt, options, withCredit, job.product_image_ids ?? [], job.revision_of, job.export_paid, job.corrections_used, job.correction ? { instruction: job.correction, sourceId: job.correction_of, pronunciationFix: job.pronunciation_fix ?? undefined } : null);
+        worker?.poke();
+        return json(res, 201, publicJob(retried));
+      }
+      if (sub === 'pronunciation' && method === 'POST') {
+        if (job.status !== 'completed') throw new HttpError(409, 'Seule une vidéo terminée peut être corrigée.', 'job_not_correctable');
+        if (!job.providers?.voice || job.providers.voice === 'none') throw new HttpError(409, 'Cette vidéo n’a pas de voix-off.', 'job_without_voice');
+        const settings = await getCommerceSettings(db);
+        const fix = parse(PronunciationFixSchema, await readJson(req));
+        const storyboard = JSON.parse(fs.readFileSync(path.join(job.dir, 'storyboard.json'), 'utf8')) as { scenes: Array<{ narration?: string }> };
+        if (!storyboard.scenes.some((scene) => mentionsAny((scene.narration ?? '').replace(/\*/g, ''), [fix]))) {
+          throw new HttpError(400, `« ${fix.word} » n’est pas prononcé dans cette vidéo. Écrivez le mot comme dans le script.`, 'pronunciation_word_missing');
+        }
+        const corrected = await db.tx(async (tx) => {
+          await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [user.id]);
+          const rootId = job.revision_of ?? job.id;
+          const root = await tx.one<JobRow>(
+            `UPDATE jobs SET pronunciation_fixes_used = pronunciation_fixes_used + 1
+             WHERE id = $1 AND user_id = $2 AND status = 'completed' AND pronunciation_fixes_used < $3 RETURNING *`,
+            [rootId, user.id, settings.pronunciationFixesPerVideo],
+          );
+          if (!root) throw new HttpError(409, 'Les corrections de prononciation de cette vidéo sont épuisées.', 'pronunciation_limit');
+          const entitled = root.export_paid || planOfUser(config, user).id !== 'free';
+          return createJob(tx, config, user.id, job.prompt, job.options, false, job.product_image_ids ?? [], root.id, entitled, root.corrections_used, {
+            instruction: `Prononciation : « ${fix.word} » → « ${fix.spoken} »`,
+            sourceId: job.id,
+            pronunciationFix: [{ word: fix.word, spoken: fix.spoken }],
+          });
+        });
+        if (fix.save) await upsertPronunciation(db, user.id, { word: fix.word, spoken: fix.spoken });
+        worker?.poke();
+        return json(res, 201, publicJob(corrected));
+      }
+      if (sub === 'correct' && method === 'POST') {
+        if (job.status !== 'completed') throw new HttpError(409, 'Seule une vidéo terminée peut être corrigée.', 'job_not_correctable');
+        const settings = await getCommerceSettings(db);
+        if (job.corrections_used >= settings.correctionsPerVideo) throw new HttpError(409, 'La correction incluse a déjà été utilisée.', 'correction_limit');
+        const { instruction } = parse(VideoCorrectionSchema, await readJson(req));
+        const corrected = await db.tx(async (tx) => {
+          await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [user.id]);
+          const rootId = job.revision_of ?? job.id;
+          const root = await tx.one<JobRow>(
+            `UPDATE jobs SET corrections_used = corrections_used + 1
+             WHERE id = $1 AND user_id = $2 AND status = 'completed' AND corrections_used < $3 RETURNING *`,
+            [rootId, user.id, settings.correctionsPerVideo],
+          );
+          if (!root) throw new HttpError(409, 'La correction incluse a déjà été utilisée.', 'correction_limit');
+          const entitled = root.export_paid || planOfUser(config, user).id !== 'free';
+          return createJob(tx, config, user.id, `${job.prompt}\n\nCorrection demandée : ${instruction}`, job.options, false, job.product_image_ids ?? [], root.id, entitled, root.corrections_used, { instruction, sourceId: job.id });
+        });
+        worker?.poke();
+        return json(res, 201, publicJob(corrected));
+      }
       if (!sub && method === 'DELETE') {
         if (url.searchParams.get('remove') === '1') {
+          const pendingExport = await db.one<{ id: string }>("SELECT id FROM payments WHERE target_id = $1 AND status = 'pending' LIMIT 1", [job.id]);
+          if (pendingExport) throw new HttpError(409, 'Un paiement est en cours pour cette vidéo. Terminez-le avant de supprimer le résultat.', 'export_payment_pending');
           const removed = await deleteJob(db, user.id, job.id);
           if (!removed.length) throw new HttpError(409, 'Une vidéo en cours ne peut pas être supprimée', 'job_running');
           fs.rmSync(job.dir, { recursive: true, force: true });
@@ -408,7 +877,12 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         return json(res, 200, { cancelled });
       }
       if (sub === 'events' && method === 'GET') return streamJob(req, res, user.id, job.id);
-      if (sub === 'video' && job.video_file) return sendFile(req, res, job.video_file, { download: url.searchParams.get('download') === '1' });
+      if (sub === 'video' && job.video_file) {
+        const download = url.searchParams.get('download') === '1';
+        if (download && planOfUser(config, user).id === 'free' && !job.export_paid) throw new HttpError(402, 'Débloquez cet export pour télécharger la vidéo.', 'export_payment_required', { product: 'video', targetId: job.id });
+        const file = download ? await ensureCleanVideoExport(db, config, job, options.deps?.renderer) : job.video_file;
+        return sendFile(req, res, file, { download });
+      }
       if (sub === 'poster' && job.poster_file) return sendFile(req, res, job.poster_file, { cache: 'private, max-age=3600' });
       if (sub === 'files' && extra && JOB_FILES.includes(extra)) return sendFile(req, res, path.join(job.dir, extra), { download: url.searchParams.get('download') === '1' });
       if (sub === 'captions' && method === 'GET') {
@@ -420,7 +894,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       if (sub === 'publish' && method === 'POST') {
         if (job.status !== 'completed' || !job.video_file) throw new HttpError(409, 'La vidéo doit être générée avant publication', 'job_not_completed');
         const plan = planOfUser(config, user);
-        if (!plan.publish) throw new HttpError(402, 'La publication est disponible avec une offre payante', 'plan_publish');
+        if (!plan.publish && !job.export_paid) throw new HttpError(402, 'Débloquez cet export pour le publier.', 'export_payment_required', { product: 'video', targetId: job.id });
         const body = parse(PublishSchema, await readJson(req));
         const allowed = new Set(publishablePlatforms(vault, await listConnections(db, user.id)));
         const missing = body.platforms.filter((p) => !allowed.has(p));
@@ -476,7 +950,6 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       }
       if (id && isProvider(id)) {
         if (sub === 'start' && method === 'POST') {
-          if (!planOfUser(config, user).publish) throw new HttpError(402, 'La publication est disponible avec une offre payante', 'plan_publish');
           return json(res, 200, { url: await startConnection(db, config, user.id, id, baseUrl(req)) });
         }
         if (!sub && method === 'PATCH') {
@@ -496,11 +969,33 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         return json(res, 200, { url: await createCheckout(config, stripe(), full!, body.plan, baseUrl(req)) });
       }
       if (id === 'pay' && method === 'POST') {
-        const body = parse(z.object({ plan: z.enum(PLAN_IDS).optional(), packs: z.number().int().min(1).max(10).optional(), provider: z.enum(PAYMENT_PROVIDERS), months: z.number().int().min(1).max(12).optional() }).refine((b) => Boolean(b.plan) !== Boolean(b.packs), 'plan or packs'), await readJson(req));
+        const body = parse(z.object({
+          plan: z.enum(PLAN_IDS).optional(),
+          packs: z.number().int().min(1).max(10).optional(),
+          export: z.object({ product: z.enum(['video', 'song']), targetId: z.string().min(1).max(100) }).optional(),
+          provider: z.enum(PAYMENT_PROVIDERS),
+          months: z.number().int().min(1).max(12).optional(),
+        }).refine((b) => [Boolean(b.plan), Boolean(b.packs), Boolean(b.export)].filter(Boolean).length === 1, 'choose a plan, pack, or export'), await readJson(req));
+        let exportInput: { product: 'video' | 'song'; targetId: string; settings: Awaited<ReturnType<typeof getCommerceSettings>> } | undefined;
+        if (body.export) {
+          const commerce = await getCommerceSettings(db);
+          if (planOfUser(config, user).id !== 'free') throw new HttpError(409, 'Votre abonnement inclut déjà le téléchargement.', 'export_included');
+          const row = body.export.product === 'video'
+            ? await db.one<{ id: string; export_paid: boolean }>("SELECT id, export_paid FROM jobs WHERE id = $1 AND user_id = $2 AND status = 'completed'", [body.export.targetId, user.id])
+            : await db.one<{ id: string; export_paid: boolean }>("SELECT id, export_paid FROM songs WHERE id = $1 AND user_id = $2 AND status = 'completed'", [body.export.targetId, user.id]);
+          if (!row) throw new HttpError(404, 'Résultat introuvable ou pas encore terminé.', 'not_found');
+          if (row.export_paid) throw new HttpError(409, 'Cet export est déjà débloqué.', 'export_already_paid');
+          if (await db.one<{ id: string }>("SELECT id FROM payments WHERE user_id = $1 AND target_id = $2 AND status = 'pending' LIMIT 1", [user.id, row.id])) {
+            throw new HttpError(409, 'Un paiement est déjà en attente pour cet export.', 'export_payment_pending');
+          }
+          if (!enabledProviders(config).includes(body.provider)) throw new HttpError(503, 'Ce moyen de paiement n’est pas disponible.', 'payment_provider_unavailable');
+          if (exportPrice(commerce, body.export.product, CURRENCY[body.provider]) <= 0) throw new HttpError(503, 'Le tarif de cet export n’est pas configuré.', 'export_price_unavailable');
+          exportInput = { ...body.export, settings: commerce };
+        }
         const payment = await createPayment(
           db,
           config,
-          { user, plan: body.plan, packs: body.packs, provider: body.provider, months: body.months, baseUrl: baseUrl(req), clientIp: clientIp(req, config.env.VIDEO_AGENT_TRUST_PROXY) },
+          { user, plan: body.plan, packs: body.packs, export: exportInput, provider: body.provider, months: body.months, baseUrl: baseUrl(req), clientIp: clientIp(req, config.env.VIDEO_AGENT_TRUST_PROXY) },
           options.paymentFetch,
         );
         return json(res, 200, payment);
@@ -520,6 +1015,13 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     // ---- admin -------------------------------------------------------------------------
     if (resource === 'admin') {
       await requireAdmin(req);
+      if (id === 'commerce') {
+        if (method === 'GET') return json(res, 200, await getCommerceSettings(db));
+        if (method === 'PUT') {
+          const settings = await saveCommerceSettings(db, await readJson(req));
+          return json(res, 200, settings);
+        }
+      }
       if (id === 'settings') {
         if (!config.env.VIDEO_AGENT_SETTINGS_UI) throw new HttpError(403, 'Réglages désactivés (VIDEO_AGENT_SETTINGS_UI=false)');
         if (method === 'GET') return json(res, 200, { envFile, groups: settingsView(config), providers: (({ secrets: _s, ...rest }) => rest)(providerStatus(config)) });
@@ -543,6 +1045,11 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         return json(res, 200, { ok: true });
       }
       if (id === 'payments' && method === 'GET') return json(res, 200, (await listPayments(db, undefined, 200)).map(publicPayment));
+      if (id === 'costs' && method === 'GET') {
+        const days = Math.min(365, Math.max(1, Number(url.searchParams.get('days')) || 30));
+        const commerce = await getCommerceSettings(db);
+        return json(res, 200, await costReport(db, days, { XOF: commerce.usdRateXof, MAD: commerce.usdRateMad }));
+      }
       if (id === 'stats' && method === 'GET') {
         const row = await db.one<Record<string, string | number>>(
           `SELECT (SELECT count(*) FROM users) AS users,
@@ -567,7 +1074,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       // Staging gate (optional): HTTP Basic password in front of everything.
       const password = config.env.VIDEO_AGENT_WEB_PASSWORD;
       if (password && url.pathname !== '/api/health' && !isWebhook && !checkBasic(req.headers.authorization, password)) {
-        res.writeHead(401, { 'www-authenticate': 'Basic realm="Video Agent", charset="UTF-8"', 'content-type': 'text/plain; charset=utf-8' });
+        res.writeHead(401, { 'www-authenticate': 'Basic realm="SOVID AI", charset="UTF-8"', 'content-type': 'text/plain; charset=utf-8' });
         return void res.end('Authentification requise');
       }
       // CSRF: state-changing requests must come from our own pages (the webhook is server-to-server).
@@ -588,7 +1095,8 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       const page = pages[url.pathname] ?? decodeURIComponent(url.pathname.slice(1));
       const file = path.resolve(webRoot, page);
       if (!file.startsWith(webRoot + path.sep)) return json(res, 403, { error: 'forbidden' });
-      return sendFile(req, res, file, { cache: /\.(css|js|svg|woff2|png|jpg|webp)$/.test(file) ? 'public, max-age=300' : 'no-cache' });
+      const cache = /\.(css|js)$/.test(file) ? 'no-cache' : /\.(svg|woff2|png|jpg|webp)$/.test(file) ? 'public, max-age=300' : 'no-cache';
+      return sendFile(req, res, file, { cache });
     } catch (err) {
       if (res.headersSent) return void res.end();
       if (err instanceof HttpError) return json(res, err.status, { error: err.message, code: err.code, ...err.extra });
@@ -604,6 +1112,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     db,
     worker,
     close: async () => {
+      await Promise.allSettled([...songTasks]);
       for (const timer of reminderTimers) clearTimeout(timer);
       await worker?.stop();
       if (!options.db) await db.close();
