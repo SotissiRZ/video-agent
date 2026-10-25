@@ -32,6 +32,7 @@ const PLATFORM_TAGS: Partial<Record<PlatformId, string[]>> = {
 
 const TEMPLATE_TAGS: Record<string, { fr: string[]; en: string[] }> = {
   advertisement: { fr: ['#nouveau'], en: ['#new'] },
+  'local-business': { fr: ['#bonplan', '#local'], en: ['#local', '#smallbusiness'] },
   'product-presentation': { fr: ['#innovation'], en: ['#innovation'] },
   tutorial: { fr: ['#tuto', '#astuce'], en: ['#tutorial', '#howto'] },
   announcement: { fr: ['#annonce'], en: ['#announcement'] },

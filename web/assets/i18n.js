@@ -1601,8 +1601,8 @@ export const SETTINGS_EN = {
 
 /** Template names and style descriptions by id. */
 export const TEMPLATE_NAMES = {
-  fr: { advertisement: 'Publicité', 'product-presentation': 'Présentation produit', tutorial: 'Tutoriel', announcement: 'Annonce', 'social-media': 'Réseaux sociaux', 'app-demo': 'Démo d’application', storytelling: 'Storytelling' },
-  en: { advertisement: 'Advertisement', 'product-presentation': 'Product presentation', tutorial: 'Tutorial', announcement: 'Announcement', 'social-media': 'Social media', 'app-demo': 'App demo', storytelling: 'Storytelling' },
+  fr: { advertisement: 'Publicité', 'local-business': 'Commerce local', 'product-presentation': 'Présentation produit', tutorial: 'Tutoriel', announcement: 'Annonce', 'social-media': 'Réseaux sociaux', 'app-demo': 'Démo d’application', storytelling: 'Storytelling' },
+  en: { advertisement: 'Advertisement', 'local-business': 'Local business', 'product-presentation': 'Product presentation', tutorial: 'Tutorial', announcement: 'Announcement', 'social-media': 'Social media', 'app-demo': 'App demo', storytelling: 'Storytelling' },
 };
 export const STYLE_NAMES = {
   fr: { modern: 'Moderne', vibrant: 'Vibrant', minimal: 'Minimal', corporate: 'Corporate', elegant: 'Élégant', playful: 'Ludique', tech: 'Tech', futuristic: 'Futuriste', warm: 'Chaleureux' },
