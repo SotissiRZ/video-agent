@@ -405,6 +405,11 @@ dialog.viewer::backdrop { background: rgba(10, 14, 24, 0.55); }
 .auth-card h1 { font-size: 22px; }
 .auth-card .sub { color: var(--muted); margin: 6px 0 22px; }
 .auth-card .switch-link { text-align: center; margin-top: 18px; color: var(--muted); font-size: 13.5px; }
+.google-auth { display: grid; gap: 16px; }
+.google-btn { gap: 10px; font-weight: 600; }
+.google-btn .google-g { flex: none; }
+.auth-divider { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12.5px; }
+.auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 
 /* ---- Landing ------------------------------------------------------------------------- */
 .site-header { position: sticky; top: 0; z-index: 30; background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }

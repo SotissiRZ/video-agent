@@ -303,6 +303,11 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE users ADD COLUMN terms_version text;
   ALTER TABLE users ADD COLUMN terms_accepted_at timestamptz;
   `,
+  // 13 — "Continuer avec Google": the Google account (OpenID "sub") linked to the user
+  `
+  ALTER TABLE users ADD COLUMN google_sub text;
+  CREATE UNIQUE INDEX users_google_sub ON users(google_sub);
+  `,
 ];
 
 /** Apply pending migrations (serialized with an advisory lock: several containers may start together). */

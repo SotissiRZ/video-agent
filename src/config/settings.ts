@@ -143,6 +143,15 @@ export const SETTING_GROUPS: SettingGroup[] = [
     ],
   },
   {
+    id: 'google-login',
+    title: 'Connexion avec Google',
+    description: 'Bouton « Continuer avec Google » sur les pages de connexion et d’inscription. Google Cloud › API et services › Identifiants › ID client OAuth de type « Application Web », URI de redirection autorisée : <PUBLIC_URL>/api/auth/google/callback.',
+    fields: [
+      { key: 'GOOGLE_CLIENT_ID', label: 'Google : Client ID', credential: true, free: true, link: 'https://console.cloud.google.com/apis/credentials' },
+      { key: 'GOOGLE_CLIENT_SECRET', label: 'Google : Client secret', secret: true },
+    ],
+  },
+  {
     id: 'publish',
     title: 'Publication (applications développeur)',
     description: 'Vos applications développeur : chaque client connecte ensuite ses propres comptes dans « Comptes connectés ». URL de retour OAuth : <PUBLIC_URL>/api/connections/<youtube|tiktok|linkedin|meta>/callback.',

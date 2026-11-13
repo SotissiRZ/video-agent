@@ -148,6 +148,10 @@ const EnvSchema = z.object({
   /** Password protecting the web interface (HTTP Basic auth). Required when exposed on a network. */
   VIDEO_AGENT_WEB_PASSWORD: optionalString,
 
+  // --- "Continuer avec Google" (Google Cloud OAuth client of type "Web application") -------
+  GOOGLE_CLIENT_ID: optionalString,
+  GOOGLE_CLIENT_SECRET: optionalString,
+
   // --- Social publishing ---------------------------------------------------
   YOUTUBE_CLIENT_ID: optionalString,
   YOUTUBE_CLIENT_SECRET: optionalString,

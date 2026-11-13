@@ -28,7 +28,17 @@ const USER_COLUMNS = 'id, email, name, role, locale, plan, stripe_customer_id, s
 /** Error with a stable code the UI translates. */
 export class AuthError extends VideoAgentError {
   constructor(
-    readonly code: 'invalid_email' | 'weak_password' | 'email_taken' | 'invalid_credentials' | 'signup_closed' | 'too_many_attempts' | 'unauthorized' | 'invalid_token',
+    readonly code:
+      | 'invalid_email'
+      | 'weak_password'
+      | 'email_taken'
+      | 'invalid_credentials'
+      | 'signup_closed'
+      | 'too_many_attempts'
+      | 'unauthorized'
+      | 'invalid_token'
+      | 'terms_required'
+      | 'google_mismatch',
     message: string,
   ) {
     super(message);
@@ -64,6 +74,49 @@ export const signup = async (db: Db, config: AppConfig, input: { email: string; 
     return rows[0]!;
   });
 };
+
+/**
+ * Google sign-in: the account already linked to this Google identity, else the account with the same
+ * address (verified by Google: it is linked and its address marked verified), else a new account —
+ * which, like the sign-up form, requires the "18 or older, terms accepted" box.
+ * Accounts created this way have no password (empty hash: password login always fails) until
+ * "mot de passe oublié" or the account page sets one.
+ */
+export const signInWithGoogle = async (
+  db: Db,
+  config: AppConfig,
+  profile: { sub: string; email: string; name: string },
+  opts: { terms: boolean; locale?: string },
+): Promise<{ user: User; created: boolean }> => {
+  const email = normalizeEmail(profile.email);
+  if (!EMAIL.test(email) || email.length > 254) throw new AuthError('invalid_email', 'Adresse e-mail invalide');
+  return db.tx(async (t) => {
+    await t.query('SELECT pg_advisory_xact_lock(7270432)');
+    const linked = await t.one<User>(`SELECT ${USER_COLUMNS} FROM users WHERE google_sub = $1`, [profile.sub]);
+    if (linked) return { user: linked, created: false };
+    const existing = await t.one<User & { google_sub: string | null }>(`SELECT ${USER_COLUMNS}, google_sub FROM users WHERE email = $1`, [email]);
+    if (existing) {
+      // Same address, but another Google identity already linked: never re-link silently.
+      if (existing.google_sub) throw new AuthError('google_mismatch', 'Ce compte est déjà relié à un autre compte Google');
+      const rows = await t.query<User>(`UPDATE users SET google_sub = $2, email_verified_at = coalesce(email_verified_at, now()) WHERE id = $1 RETURNING ${USER_COLUMNS}`, [existing.id, profile.sub]);
+      return { user: rows[0]!, created: false };
+    }
+    const count = Number((await t.one<{ n: string | number }>('SELECT count(*) AS n FROM users'))?.n ?? 0);
+    if (count > 0 && config.env.SIGNUP_MODE === 'closed' && !isAdminEmail(config, email)) throw new AuthError('signup_closed', 'Les inscriptions sont fermées');
+    if (!opts.terms) throw new AuthError('terms_required', 'Acceptez les conditions pour créer votre compte');
+    const role = count === 0 || isAdminEmail(config, email) ? 'admin' : 'user';
+    const rows = await t.query<User>(
+      `INSERT INTO users (id, email, password_hash, name, role, locale, google_sub, email_verified_at, terms_version, terms_accepted_at)
+       VALUES ($1, $2, '', $3, $4, $5, $6, now(), $7, now()) RETURNING ${USER_COLUMNS}`,
+      [newId(), email, profile.name.trim().slice(0, 100), role, opts.locale === 'en' ? 'en' : 'fr', profile.sub, TERMS_VERSION],
+    );
+    return { user: rows[0]!, created: true };
+  });
+};
+
+/** True when the account can sign in with a password (accounts created with Google start without). */
+export const hasPassword = async (db: Db, userId: string): Promise<boolean> =>
+  Boolean((await db.one<{ password_hash: string }>('SELECT password_hash FROM users WHERE id = $1', [userId]))?.password_hash);
 
 // Compared against when the e-mail is unknown, so that response time does not reveal accounts.
 let dummyHash: Promise<string> | undefined;
@@ -102,7 +155,8 @@ export const destroySession = async (db: Db, token: string | undefined): Promise
 
 export const changePassword = async (db: Db, userId: string, current: string, next: string): Promise<void> => {
   const row = await db.one<{ password_hash: string }>('SELECT password_hash FROM users WHERE id = $1', [userId]);
-  if (!row || !(await verifyPassword(current, row.password_hash))) throw new AuthError('invalid_credentials', 'Mot de passe actuel incorrect');
+  // An account created with Google has no password yet: its first one needs no "current" password.
+  if (!row || (row.password_hash && !(await verifyPassword(current, row.password_hash)))) throw new AuthError('invalid_credentials', 'Mot de passe actuel incorrect');
   if (next.length < 8 || next.length > 200) throw new AuthError('weak_password', 'Le mot de passe doit contenir au moins 8 caractères');
   await db.query('UPDATE users SET password_hash = $1 WHERE id = $2', [await hashPassword(next), userId]);
   // Other devices are signed out.

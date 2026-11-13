@@ -22,7 +22,8 @@ import { PLATFORM_IDS, type Captions, type PlatformId } from '../publish/types';
 import { STYLES } from '../remotion/contract/styles';
 import { listTemplates } from '../templates/registry';
 import { TERMS_VERSION } from './auth';
-import { AuthError, changePassword, consumeEmailToken, createEmailToken, createSession, destroySession, findUserByEmail, getUser, login, markEmailVerified, parseCookies, RateLimiter, resetPassword, SESSION_COOKIE, sessionCookie, signup, userForSession, type User } from './auth';
+import { defaultGoogleExchange, flowCookie, GOOGLE_FLOW_COOKIE, GoogleAuthError, googleClient, googleRedirectUri, openFlow, sealFlow, startGoogleFlow, verifyIdToken, type GoogleTokenExchange } from './google-auth';
+import { AuthError, changePassword, consumeEmailToken, createEmailToken, createSession, destroySession, findUserByEmail, getUser, login, markEmailVerified, parseCookies, RateLimiter, resetPassword, SESSION_COOKIE, sessionCookie, signInWithGoogle, signup, userForSession, hasPassword, type User } from './auth';
 import { buildEmail, createMailer, type Mailer } from './mail';
 import { createPayment, CURRENCY, enabledProviders, handleGeniusPayWebhook, handleYouCanPayWebhook, listPayments, localPrices, PAYMENT_PROVIDERS, publicPayment, refreshPayment, creditPack } from './payments';
 import { billingEnabled, createCheckout, createPortal, handleStripeEvent, stripeClient, verifyStripeSignature, type StripeFetch } from './billing';
@@ -139,6 +140,8 @@ export interface SaasOptions {
   /** Test seams. */
   stripe?: StripeFetch;
   exchanger?: CodeExchanger;
+  /** Google sign-in: authorization code → ID token. */
+  googleExchange?: GoogleTokenExchange;
   mailer?: Mailer;
   /** Hourly pass expiry reminders (default: on). */
   reminders?: boolean;
@@ -170,13 +173,15 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
   let config = initialConfig;
   const logger = options.logger ?? createLogger(config.logLevel);
   const db = options.db ?? (await connectDatabase(config));
-  const vault = new Vault(resolveAppSecret(config));
+  const appSecret = resolveAppSecret(config);
+  const vault = new Vault(appSecret);
   const envFile = options.envFile ?? path.join(process.cwd(), '.env');
   const reloadConfig = options.reloadConfig ?? (() => loadConfig({ packageRoot: initialConfig.paths.root }));
   const webRoot = path.resolve(options.webRoot);
   const stripe = () => options.stripe ?? stripeClient(config);
   const exchanger = () => options.exchanger ?? defaultExchanger(config);
   const loginLimiter = new RateLimiter(10, 15 * 60_000);
+  const googleLimiter = new RateLimiter(30, 15 * 60_000);
   // Mobile carriers put many customers behind one IP (CGNAT): generous per-IP sign-up limit.
   const signupLimiter = new RateLimiter(60, 60 * 60_000);
   const mailLimiter = new RateLimiter(5, 60 * 60_000);
@@ -249,6 +254,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       songs: eleven.songs,
       aiImages: e.VIDEO_AGENT_IMAGE_PROVIDER !== 'none' && Boolean(e.CLOUDFLARE_API_TOKEN || e.HF_TOKEN || e.REPLICATE_API_TOKEN || e.STABILITY_API_KEY || e.OPENAI_API_KEY),
       stock: Boolean(e.PEXELS_API_KEY || e.PIXABAY_API_KEY || e.UNSPLASH_ACCESS_KEY),
+      googleLogin: Boolean(googleClient(config)),
     };
   };
 
@@ -273,6 +279,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     add(payments.includes('youcanpay'), 'YouCan Pay', 'payment');
     add(billingEnabled(config), 'Stripe', 'payment');
     add(config.env.SMTP_URL, 'SMTP', 'email');
+    add(googleClient(config), 'Google', 'auth');
     return list;
   };
 
@@ -311,11 +318,61 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     json(res, 200, { user: userView(user) }, { 'set-cookie': sessionCookie(token, maxAgeSec, baseUrl(req).startsWith('https://')) });
   };
 
+  const redirectWith = (res: http.ServerResponse, location: string, cookies: string[]) => {
+    res.writeHead(302, { ...SECURITY_HEADERS, location, 'cache-control': 'no-store', 'set-cookie': cookies });
+    res.end();
+  };
+
+  /** /api/auth/google?intent=login|signup&terms=1&lang=fr&plan=creator → Google's consent screen. */
+  const startGoogle = (req: http.IncomingMessage, res: http.ServerResponse, url: URL, ip: string) => {
+    const client = googleClient(config);
+    if (!client) throw new HttpError(404, 'Connexion avec Google non configurée', 'google_disabled');
+    if (!googleLimiter.take(ip)) return redirect(res, '/app#login?google=too_many_attempts');
+    const plan = url.searchParams.get('plan') ?? '';
+    const { flow, url: consent } = startGoogleFlow(client, googleRedirectUri(baseUrl(req)), {
+      intent: url.searchParams.get('intent') === 'signup' ? 'signup' : 'login',
+      terms: url.searchParams.get('terms') === '1',
+      locale: url.searchParams.get('lang') === 'en' ? 'en' : 'fr',
+      plan: (PLAN_IDS as readonly string[]).includes(plan) ? plan : undefined,
+    });
+    return redirectWith(res, consent, [flowCookie(sealFlow(flow, appSecret), baseUrl(req).startsWith('https://'))]);
+  };
+
+  /** Google's redirect back: check the flow, exchange the code, sign in (or link, or create) the account. */
+  const finishGoogle = async (req: http.IncomingMessage, res: http.ServerResponse, url: URL) => {
+    const secure = baseUrl(req).startsWith('https://');
+    const clear = flowCookie('', secure);
+    const flow = openFlow(parseCookies(req.headers.cookie)[GOOGLE_FLOW_COOKIE], appSecret);
+    const back = (code: string) =>
+      redirectWith(res, `/app#${flow?.intent === 'signup' || code === 'terms_required' ? 'signup' : 'login'}?google=${code}${flow?.plan ? `&plan=${flow.plan}` : ''}`, [clear]);
+    const client = googleClient(config);
+    if (!client) return back('failed');
+    if (url.searchParams.get('error')) return back('cancelled');
+    const code = url.searchParams.get('code');
+    if (!flow || !code || url.searchParams.get('state') !== flow.state) return back('expired');
+    try {
+      const tokens = await (options.googleExchange ?? defaultGoogleExchange)({ code, verifier: flow.verifier, redirectUri: googleRedirectUri(baseUrl(req)), client });
+      const profile = verifyIdToken(tokens.id_token, client.id, flow.nonce);
+      const { user } = await signInWithGoogle(db, config, profile, { terms: flow.terms, locale: flow.locale });
+      const { token, maxAgeSec } = await createSession(db, user.id, req.headers['user-agent']);
+      // Signed up from a paid plan on the pricing page: the app continues to checkout (startApp).
+      return redirectWith(res, flow.plan && flow.plan !== 'free' ? `/app#login?plan=${flow.plan}` : '/app#create', [clear, sessionCookie(token, maxAgeSec, secure)]);
+    } catch (err) {
+      if (err instanceof AuthError && ['terms_required', 'signup_closed', 'google_mismatch', 'invalid_email'].includes(err.code)) return back(err.code);
+      if (err instanceof GoogleAuthError) {
+        logger.warn(`Google sign-in: ${err.message}`);
+        return back(err.code);
+      }
+      logger.warn(`Google sign-in failed: ${errorMessage(err)}`);
+      return back('failed');
+    }
+  };
+
   const accountSummary = async (user: User) => {
     const commerce = await getCommerceSettings(db);
     const plan = applyCommerceLimits(planOfUser(config, user), commerce);
     const usage = await getUsage(db, user.id);
-    return { user: userView(user), plan, usage, commerce: publicCommerce(commerce), billing: billingEnabled(config), paymentProviders: enabledProviders(config).map((p) => ({ id: p, currency: CURRENCY[p] })), requireVerification: config.env.REQUIRE_EMAIL_VERIFICATION, mail: mailer.kind };
+    return { user: { ...userView(user), hasPassword: await hasPassword(db, user.id) }, plan, usage, commerce: publicCommerce(commerce), billing: billingEnabled(config), paymentProviders: enabledProviders(config).map((p) => ({ id: p, currency: CURRENCY[p] })), requireVerification: config.env.REQUIRE_EMAIL_VERIFICATION, mail: mailer.kind };
   };
 
   const capabilities = () => {
@@ -524,6 +581,9 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         loginLimiter.reset(key);
         return startSession(req, res, user);
       }
+      // "Continuer avec Google": top-level navigations, answered with redirects into the app.
+      if (id === 'google' && !sub && method === 'GET') return startGoogle(req, res, url, ip);
+      if (id === 'google' && sub === 'callback' && method === 'GET') return finishGoogle(req, res, url);
       if (id === 'logout' && method === 'POST') {
         await destroySession(db, parseCookies(req.headers.cookie)[SESSION_COOKIE]);
         return json(res, 200, { ok: true }, { 'set-cookie': sessionCookie('', 0, baseUrl(req).startsWith('https://')) });
@@ -582,7 +642,9 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       if (!id && method === 'DELETE') {
         const body = parse(z.object({ password: z.string().max(200) }), await readJson(req));
         const row = await db.one<{ password_hash: string }>('SELECT password_hash FROM users WHERE id = $1', [user.id]);
-        if (!row || !(await verifyPassword(body.password, row.password_hash))) throw new AuthError('invalid_credentials', 'Mot de passe incorrect');
+        // Accounts created with Google have no password: they confirm by typing their e-mail address.
+        const confirmed = row && (row.password_hash ? await verifyPassword(body.password, row.password_hash) : body.password.trim().toLowerCase() === user.email);
+        if (!confirmed) throw new AuthError('invalid_credentials', row?.password_hash ? 'Mot de passe incorrect' : 'Adresse e-mail incorrecte');
         if (user.role === 'admin' && Number((await db.one<{ n: string | number }>("SELECT count(*) AS n FROM users WHERE role = 'admin'"))?.n ?? 0) <= 1) {
           throw new HttpError(409, 'Le dernier administrateur ne peut pas supprimer son compte', 'last_admin');
         }

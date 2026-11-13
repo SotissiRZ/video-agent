@@ -83,6 +83,14 @@ const showAuth = (mode) => {
   $('firstUserNote').hidden = !cfg?.firstUser;
   $('signupClosed').hidden = cfg?.signupOpen !== false;
   $('signupForm').querySelector('button[type=submit]').disabled = cfg?.signupOpen === false;
+  document.querySelectorAll('[data-google]').forEach((el) => (el.hidden = !cfg?.features?.googleLogin));
+  // Back from Google with an error (see finishGoogle on the server).
+  const googleError = route().params.get('google');
+  if (googleError && $(`${mode}Form`)) {
+    const error = $(`${mode}Form`).querySelector('[data-error]');
+    error.textContent = t(`auth.google.${googleError}`);
+    error.hidden = false;
+  }
   document.title = `${t({ login: 'auth.login', signup: 'auth.signup', forgot: 'auth.forgot.title', reset: 'auth.reset.title' }[mode])} · SOVID AI`;
 };
 
@@ -120,6 +128,28 @@ const bindAuthForm = (form, path, extra = () => ({})) =>
     }
   });
 bindAuthForm($('loginForm'), '/api/auth/login');
+// "Continuer avec Google": a full-page navigation through the server (OpenID Connect).
+document.querySelectorAll('[data-google-intent]').forEach((link) =>
+  link.addEventListener('click', (e) => {
+    e.preventDefault();
+    const intent = link.dataset.googleIntent;
+    const form = link.closest('form');
+    const error = form.querySelector('[data-error]');
+    error.hidden = true;
+    const terms = form.elements.namedItem('acceptTerms');
+    if (intent === 'signup' && !terms?.checked) {
+      error.textContent = t('auth.acceptTermsRequired');
+      error.hidden = false;
+      terms?.focus();
+      return;
+    }
+    const params = new URLSearchParams({ intent, lang: getLang() });
+    if (intent === 'signup' || terms?.checked) params.set('terms', '1');
+    const plan = route().params.get('plan');
+    if (plan) params.set('plan', plan);
+    location.href = `/api/auth/google?${params}`;
+  }),
+);
 bindAuthForm($('signupForm'), '/api/auth/signup', () => ({ locale: getLang() }));
 bindAuthForm($('resetForm'), '/api/auth/reset', () => ({ token: route().params.get('token') ?? '' }));
 
@@ -1428,6 +1458,14 @@ const loadAccount = () => {
   f.email.value = state.me.user.email;
   f.locale.value = getLang();
   f.theme.value = getTheme();
+  // Accounts created with Google start without a password: the first one needs no current password.
+  const hasPassword = state.me.user.hasPassword !== false;
+  const pf = $('passwordForm');
+  $('noPasswordNote').hidden = hasPassword;
+  $('currentPasswordField').hidden = !hasPassword;
+  pf.current.required = hasPassword;
+  $('passwordSubmit').dataset.i18n = hasPassword ? 'account.change' : 'account.setPassword';
+  $('passwordSubmit').textContent = t($('passwordSubmit').dataset.i18n);
 };
 $('profileForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1448,13 +1486,15 @@ $('passwordForm').addEventListener('submit', async (e) => {
   try {
     await post('/api/me/password', { current: f.current.value, next: f.next.value });
     f.reset();
+    await refreshMe();
+    if (route().page === 'account') loadAccount();
     toast(t('account.changed'), 'success');
   } catch (err) {
     toast(errorText(err), 'error');
   }
 });
 $('deleteAccount').addEventListener('click', async () => {
-  const password = prompt(t('account.deleteConfirm'));
+  const password = prompt(t(state.me.user.hasPassword === false ? 'account.deleteConfirmEmail' : 'account.deleteConfirm'));
   if (!password) return;
   try {
     await api('/api/me', { method: 'DELETE', body: JSON.stringify({ password }) });
