@@ -15,7 +15,7 @@ ARG NODE_VERSION=22
 FROM node:${NODE_VERSION}-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
+RUN npm ci --no-audit --no-fund
 COPY tsconfig.json tsup.config.ts ./
 COPY src ./src
 RUN npm run build
@@ -42,7 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev --no-audit --no-fund
+RUN npm ci --omit=dev --no-audit --no-fund
 COPY --from=build /app/dist ./dist
 # Les compositions Remotion sont bundlées au moment du rendu depuis les sources.
 COPY src ./src
@@ -77,7 +77,7 @@ RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/ent
 
 USER node
 EXPOSE 3210 8765
-VOLUME ["/app/output", "/app/assets", "/app/.video-agent"]
+# Pas de VOLUME : Railway l'interdit ; docker compose monte ses volumes explicitement.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.VIDEO_AGENT_PORT||3210)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 ENTRYPOINT ["tini", "--", "entrypoint.sh"]

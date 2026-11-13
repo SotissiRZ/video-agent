@@ -1,0 +1,4 @@
+# Vercel ne publie que le site statique (web/). Le backend part sur Railway.
+/*
+!/web
+!/vercel.json
