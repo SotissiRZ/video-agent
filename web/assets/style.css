@@ -467,6 +467,8 @@ dialog.viewer::backdrop { background: rgba(10, 14, 24, 0.55); }
 /* ---- Responsive ------------------------------------------------------------------------ */
 @media (max-width: 1100px) {
   .create-layout { grid-template-columns: 1fr; }
+  /* One column: an open video comes before the form (opened from "Mes vidéos", or just generated). */
+  .create-layout:has(#jobCard:not([hidden])) > .sticky-col { order: -1; }
   .sticky-col { position: static; }
   .plans, .grid-3 { grid-template-columns: 1fr; }
 }

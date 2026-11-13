@@ -54,6 +54,9 @@ const go = (hash) => {
 
 const onRoute = () => {
   const { page, params } = route();
+  // A new page starts at the top (the previous page's scroll position is meaningless here).
+  if (page !== state.lastPage) window.scrollTo(0, 0);
+  state.lastPage = page;
   clearTimeout(state.songPoll);
   state.songPoll = null;
   if (!state.me) return showAuth(['login', 'signup', 'forgot', 'reset'].includes(page) ? page : 'login');
@@ -67,7 +70,7 @@ const onRoute = () => {
   document.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === `page-${name}`));
   document.querySelectorAll('.nav a[data-page]').forEach((a) => a.classList.toggle('active', a.dataset.page === name));
   $('topTitle').textContent = t(name === 'schedule' ? 'nav.schedule' : `nav.${name}`);
-  $('newVideoBtn').hidden = name === 'create' || name === 'songs';
+  $('newVideoBtn').hidden = name === 'songs' || (name === 'create' && !state.job);
   $('appView').classList.remove('menu-open');
   ({ create: () => openJobFromParams(params), songs: loadSongs, library: loadLibrary, schedule: loadSchedule, connections: () => loadConnections(params), brand: loadBrand, billing: () => loadBilling(params), account: loadAccount, admin: loadAdmin })[name]?.();
 };
@@ -641,6 +644,8 @@ $('createForm').addEventListener('submit', async (e) => {
     history.replaceState(null, '', `#create?job=${job.id}`);
     showJob(job);
     follow(job.id);
+    // One column (phone, tablet): the progress card is now above the form, bring it into view.
+    if (narrow()) $('jobCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
     refreshMe().catch(() => undefined);
   } catch (err) {
     $('createError').innerHTML = `${icon('alert', 16)}<span>${escapeHtml(errorText(err))}</span>${err instanceof ApiError && err.status === 402 ? ` <a href="#billing">${escapeHtml(t('common.upgrade'))}</a>` : ''}`;
@@ -652,6 +657,27 @@ $('createForm').addEventListener('submit', async (e) => {
 
 // ---- Job view ---------------------------------------------------------------------------------
 const STATUS_BADGE = { queued: 'info', running: 'primary', completed: 'success', failed: 'danger', cancelled: '' };
+
+const narrow = () => window.matchMedia('(max-width: 1100px)').matches;
+
+/** "Nouvelle vidéo": close the open video and go back to an empty form. */
+const closeJob = () => {
+  state.source?.close();
+  state.source = null;
+  state.job = null;
+  $('jobCard').hidden = true;
+  $('emptyJob').hidden = false;
+};
+$('newVideoBtn').addEventListener('click', (e) => {
+  e.preventDefault();
+  closeJob();
+  if (route().page === 'create') {
+    history.replaceState(null, '', '#create');
+    $('newVideoBtn').hidden = true;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } else go('create');
+  $('prompt')?.focus({ preventScroll: true });
+});
 
 const openJobFromParams = async (params) => {
   const id = params.get('job');
@@ -673,6 +699,7 @@ const showJob = (job) => {
   state.job = job;
   $('emptyJob').hidden = true;
   $('jobCard').hidden = false;
+  if (route().page === 'create') $('newVideoBtn').hidden = false;
   const running = job.status === 'queued' || job.status === 'running';
   $('jobBadge').innerHTML = `<span class="badge ${STATUS_BADGE[job.status] ?? ''}">${running ? '<span class="spinner" style="width:10px;height:10px;border-width:1.5px"></span>' : '<span class="dot"></span>'}${escapeHtml(t(`job.status.${job.status}`))}</span>`;
   $('jobQueue').textContent = job.status === 'queued' && job.queuePosition ? t('job.queue', { n: job.queuePosition }) : job.createdAt ? formatDate(job.createdAt) : '';
