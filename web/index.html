@@ -8,9 +8,8 @@
   <meta property="og:title" content="SOVID AI — Vos pubs vidéo en une phrase" />
   <meta property="og:description" content="Une phrase, vos photos produit, et votre pub vidéo est prête. Essai gratuit, vous payez seulement celles que vous gardez." />
   <meta property="og:type" content="website" />
-  <meta name="theme-color" content="#f3ebdd" />
+  <meta name="theme-color" content="#f6f7f9" />
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
-  <link rel="preload" href="/assets/fonts/bricolage.woff" as="font" type="font/woff" crossorigin />
   <script src="/assets/boot.js"></script>
   <link rel="stylesheet" href="/assets/style.css" />
   <link rel="stylesheet" href="/assets/landing.css" />
@@ -18,7 +17,7 @@
 <body class="lp">
   <header class="lp-header">
     <div class="container">
-      <a class="lp-wordmark" href="/">SOVID<small>AI</small></a>
+      <a class="brand" href="/"><i data-icon="logo" data-size="26"></i>SOVID AI</a>
       <nav class="lp-nav">
         <a href="#examples" data-i18n="landing.nav.examples"></a>
         <a href="#how" data-i18n="landing.nav.how"></a>
@@ -28,8 +27,8 @@
       <div class="actions">
         <div class="segmented" data-lang-switch></div>
         <button type="button" class="btn btn-ghost btn-icon" data-theme-toggle></button>
-        <a class="login" id="loginLink" href="/app#login" data-i18n="landing.login"></a>
-        <a class="btn-ink btn-sm" id="startLink" href="/app#signup" data-i18n="landing.start"></a>
+        <a class="btn btn-ghost login" id="loginLink" href="/app#login" data-i18n="landing.login"></a>
+        <a class="btn btn-primary" id="startLink" href="/app#signup" data-i18n="landing.start"></a>
       </div>
     </div>
   </header>
@@ -37,8 +36,8 @@
   <main>
     <section class="lp-hero">
       <div class="container">
-        <div>
-          <p class="lp-kicker" data-i18n="landing.hero.kicker"></p>
+        <div class="lp-hero-copy">
+          <p class="lp-kicker"><span class="dot"></span><span data-i18n="landing.hero.kicker"></span></p>
           <h1 class="lp-title">
             <span data-i18n="landing.hero.l1"></span>
             <span data-i18n="landing.hero.l2"></span>
@@ -46,20 +45,29 @@
           </h1>
           <p class="lp-lead" data-i18n="landing.hero.subtitle"></p>
           <div class="lp-cta">
-            <a class="btn-ink" href="/app#signup" data-start><span data-i18n="landing.start"></span><i data-icon="arrow"></i></a>
-            <a class="btn-line" href="#examples" data-i18n="landing.hero.cta2"></a>
+            <a class="btn btn-primary btn-lg" href="/app#signup" data-start><span data-i18n="landing.start"></span><i data-icon="arrow" data-size="18"></i></a>
+            <a class="btn btn-secondary btn-lg" href="#examples" data-i18n="landing.hero.cta2"></a>
           </div>
           <p class="lp-note"><i data-icon="check" data-size="16"></i><span id="heroNote"></span></p>
         </div>
-        <div class="lp-stage">
-          <div class="lp-chat">
-            <span data-i18n="landing.hero.prompt"></span>
-            <div class="meta">09:41 <b>✓✓</b></div>
+        <div class="lp-stage" aria-hidden="true">
+          <div class="card lp-mock">
+            <div class="lp-mock-bar"><span></span><span></span><span></span><b data-i18n="create.title"></b></div>
+            <div class="lp-mock-body">
+              <span class="label" data-i18n="create.prompt"></span>
+              <div class="lp-mock-prompt" data-i18n="landing.hero.prompt"></div>
+              <div class="lp-mock-chips">
+                <span class="chip"><i data-icon="layout" data-size="14"></i><span data-i18n="landing.hero.mock.format"></span></span>
+                <span class="chip"><i data-icon="mic" data-size="14"></i><span data-i18n="landing.hero.mock.voice"></span></span>
+                <span class="chip"><i data-icon="file" data-size="14"></i><span data-i18n="landing.hero.mock.subs"></span></span>
+              </div>
+              <div class="lp-mock-status"><span class="badge success"><span class="dot"></span><span data-i18n="landing.hero.mock.ready"></span></span><div class="progress"><span></span></div></div>
+            </div>
           </div>
           <div class="lp-reel">
             <video src="/assets/media/hero.mp4" poster="/assets/media/hero-poster.jpg" autoplay muted loop playsinline preload="metadata" aria-label="Vidéo publicitaire créée par SOVID AI"></video>
+            <span class="badge lp-stamp" data-i18n="landing.hero.stamp"></span>
           </div>
-          <div class="lp-stamp" data-i18n="landing.hero.stamp"></div>
         </div>
       </div>
     </section>
@@ -157,14 +165,14 @@
     <section class="lp-final">
       <div class="container">
         <h2 data-i18n="landing.cta.title"></h2>
-        <a class="btn-ink" href="/app#signup" data-start><span data-i18n="landing.start"></span><i data-icon="arrow"></i></a>
+        <a class="btn btn-lg lp-final-btn" href="/app#signup" data-start><span data-i18n="landing.start"></span><i data-icon="arrow" data-size="18"></i></a>
       </div>
     </section>
   </main>
 
   <footer class="lp-footer">
     <div class="container">
-      <a class="lp-wordmark" href="/">SOVID<small>AI</small></a>
+      <a class="brand" href="/"><i data-icon="logo" data-size="24"></i>SOVID AI</a>
       <nav>
         <a href="/legal#notice" data-i18n="legal.notice"></a>
         <a href="/legal#terms" data-i18n="legal.terms"></a>
