@@ -9,6 +9,7 @@ import { errorMessage, summarizeError } from '../core/errors';
 import { generateJson } from '../llm/json';
 import type { LLMProvider } from '../llm/types';
 import type { MediaCredit } from '../media/director';
+import type { ResearchSource } from '../planning/research';
 import { normalize } from '../prompt/parser';
 import { PLATFORM_CONSTRAINTS } from './constraints';
 import { PLATFORM_IDS, type Captions, type PlatformId, type PostContent } from './types';
@@ -50,13 +51,23 @@ export const formatCredits = (credits: MediaCredit[], language: string): string 
   return `${label} : ${unique.map((c) => `${c.author} (${c.provider})`).join(', ')}`;
 };
 
+/** Where the facts of a researched video come from: viewers can check them. */
+export const formatSources = (sources: ResearchSource[] = []): string =>
+  sources.length ? `Sources :\n${sources.slice(0, 10).map((s) => `- ${s.title} : ${s.url}`).join('\n')}` : '';
+
 export interface CaptionContext {
   brief: VideoBrief;
   concept: VideoConcept;
   durationSec: number;
   credits: MediaCredit[];
   includeCredits: boolean;
+  /** Web pages a researched video is based on (documentaries, news round-ups). */
+  sources?: ResearchSource[];
 }
+
+/** Long descriptions (YouTube, Facebook, LinkedIn) end with the sources, then the media credits. */
+const appendix = (ctx: CaptionContext): string =>
+  [formatSources(ctx.sources), ctx.includeCredits ? formatCredits(ctx.credits, ctx.brief.language) : ''].filter(Boolean).join('\n\n');
 
 /** Deterministic captions (no LLM). */
 export const proceduralCaptions = (ctx: CaptionContext, platforms: readonly PlatformId[] = PLATFORM_IDS): Captions => {
@@ -65,7 +76,7 @@ export const proceduralCaptions = (ctx: CaptionContext, platforms: readonly Plat
   const baseTags = [brief.brand, brief.location, brief.audience].filter(Boolean).map(toHashtag).filter(Boolean);
   const templateTags = TEMPLATE_TAGS[brief.templateId]?.[fr ? 'fr' : 'en'] ?? [];
   const isShort = brief.height > brief.width && ctx.durationSec <= 180;
-  const credits = ctx.includeCredits ? formatCredits(ctx.credits, brief.language) : '';
+  const credits = appendix(ctx);
   const out: Captions = {};
   for (const platform of platforms) {
     const limits = PLATFORM_CONSTRAINTS[platform];
@@ -133,7 +144,7 @@ Return {${platforms.map((p) => `"${p}": {"title","caption","hashtags"}`).join(',
       },
       schema,
     );
-    const credits = ctx.includeCredits ? formatCredits(ctx.credits, ctx.brief.language) : '';
+    const credits = appendix(ctx);
     const captions: Captions = {};
     for (const p of platforms) {
       const c = result[p];

@@ -8,6 +8,15 @@ interface Props {
   theme: Theme;
 }
 
+/** A dark outline around the glyphs (eight offset shadows) plus a soft drop shadow. */
+const outlineShadow = (width: number): string => {
+  const ring = Array.from({ length: 8 }, (_, i) => {
+    const a = (i * Math.PI) / 4;
+    return `${(Math.cos(a) * width).toFixed(2)}px ${(Math.sin(a) * width).toFixed(2)}px 0 rgba(0,0,0,0.9)`;
+  });
+  return [...ring, `0 ${(width * 1.5).toFixed(2)}px ${(width * 4).toFixed(2)}px rgba(0,0,0,0.7)`].join(', ');
+};
+
 /** Burned-in subtitles. Cues are expressed in absolute composition frames. */
 export const SubtitlesOverlay: React.FC<Props> = ({ subtitles, theme }) => {
   const frame = useCurrentFrame();
@@ -41,8 +50,9 @@ export const SubtitlesOverlay: React.FC<Props> = ({ subtitles, theme }) => {
     style = {
       ...base,
       color: '#FFFFFF',
-      textShadow: '0 0 4px rgba(0,0,0,0.9), 0 2px 8px rgba(0,0,0,0.8)',
-      WebkitTextStroke: `${Math.max(1, fontSize * 0.03)}px rgba(0,0,0,0.85)`,
+      // An outline drawn with shadows: -webkit-text-stroke traces every contour of variable fonts,
+      // leaving dark lines inside "z", "t" or "e" where the glyph's strokes overlap.
+      textShadow: outlineShadow(Math.max(1.5, fontSize * 0.045)),
     };
   } else {
     // Karaoke: words light up progressively across the cue.

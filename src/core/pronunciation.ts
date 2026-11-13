@@ -17,5 +17,18 @@ export const applyPronunciations = (text: string, entries: Pronunciation[] = [])
     .sort((a, b) => b.word.length - a.word.length)
     .reduce((out, entry) => out.replace(wordPattern(entry.word), entry.spoken.trim()), text);
 
+const AND: Record<string, string> = { fr: 'et', en: 'and', pt: 'e', ar: 'و', ary: 'و', sw: 'na' };
+
+/**
+ * Symbols voices read in English or aloud: "Sites web & applications" becomes "Sites web et
+ * applications", "Web • IA • Data" a list with pauses. On screen the text keeps its symbols.
+ */
+export const spokenText = (text: string, language: string): string =>
+  text
+    .replace(/\s*&\s*/g, ` ${AND[language] ?? AND[language.split('-')[0]!] ?? 'and'} `)
+    .replace(/\s*[•·|]\s*/g, ', ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
 /** Does this text contain one of the words (to know which scenes must be voiced again)? */
 export const mentionsAny = (text: string, entries: Pronunciation[]): boolean => entries.some((entry) => entry.word.trim() && wordPattern(entry.word).test(text));

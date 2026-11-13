@@ -8,7 +8,8 @@ import type { ImageProvider } from '../providers/image/types';
 import type { MusicProvider } from '../providers/music/types';
 import type { VoiceProvider } from '../providers/voice/types';
 
-export type UsageKind = 'llm' | 'voice' | 'music' | 'image';
+/** `search`: web searches made while researching a request (`calls` = number of searches). */
+export type UsageKind = 'llm' | 'voice' | 'music' | 'image' | 'search';
 
 /** One aggregated line: same kind, provider and model are summed together. */
 export interface UsageLine {

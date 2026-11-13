@@ -40,6 +40,19 @@ export const MediaSchema = z.object({
   alt: z.string().max(500).optional(),
   /** Attribution for stock media (photographer / videographer and source page). */
   credit: z.object({ author: z.string(), source: z.string(), url: z.string().optional() }).optional(),
+  /**
+   * A capture of a web page: shown inside a browser window (desktop) or a phone (mobile) that
+   * scrolls slowly down the page, instead of filling the frame.
+   */
+  screen: z
+    .object({
+      device: z.enum(['desktop', 'mobile']),
+      /** Address shown in the browser bar. */
+      url: z.string().max(300),
+      /** Height / width of the capture. */
+      aspect: z.number().positive(),
+    })
+    .optional(),
 });
 export type Media = z.infer<typeof MediaSchema>;
 

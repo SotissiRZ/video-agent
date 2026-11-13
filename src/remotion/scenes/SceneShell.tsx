@@ -33,7 +33,9 @@ export const SceneShell: React.FC<SceneProps & { children: React.ReactNode; just
           <MediaStack media={[scene.media, ...(scene.shots ?? [])]} kenBurns={scene.animation.kenBurns} />
           <AbsoluteFill
             style={{
-              background: `linear-gradient(180deg, ${withAlpha(theme.palette.background, 0.2)} 0%, ${withAlpha(theme.palette.background, 0.52)} 100%)`,
+              // Strong enough for white text over a bright photo (a white desk, a silver laptop),
+              // darkest behind the headline and the subtitles.
+              background: `linear-gradient(180deg, ${withAlpha(theme.palette.backgroundAlt, 0.38)} 0%, ${withAlpha(theme.palette.backgroundAlt, 0.64)} 35%, ${withAlpha(theme.palette.backgroundAlt, 0.64)} 65%, ${withAlpha(theme.palette.backgroundAlt, 0.82)} 100%)`,
             }}
           />
         </>
@@ -49,7 +51,11 @@ export const SceneShell: React.FC<SceneProps & { children: React.ReactNode; just
           alignItems: align,
           gap: layout.unit * 0.035,
           // Inherited by every text of the scene.
-          textShadow: theme.glow ? `0 0 ${layout.unit * 0.012}px ${withAlpha(theme.palette.primary, 0.75)}, 0 0 ${layout.unit * 0.035}px ${withAlpha(theme.palette.primary, 0.35)}` : undefined,
+          textShadow: theme.glow
+            ? `0 0 ${layout.unit * 0.012}px ${withAlpha(theme.palette.primary, 0.75)}, 0 0 ${layout.unit * 0.035}px ${withAlpha(theme.palette.primary, 0.35)}`
+            : mediaBackdrop
+              ? `0 ${layout.unit * 0.003}px ${layout.unit * 0.018}px ${withAlpha(theme.palette.backgroundAlt, 0.7)}`
+              : undefined,
         }}
       >
         {children}

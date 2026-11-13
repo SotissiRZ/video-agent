@@ -570,6 +570,32 @@ cp .env.example .env
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
+**Variante : hébergement sur Railway** (sans serveur à administrer)
+
+```
+navigateur ──HTTPS──► Railway « web » (site + API + rendu Remotion, volume /data) ──► PostgreSQL Railway
+```
+
+1. *New Project › Deploy from GitHub repo* (`railway.json` sélectionne le `Dockerfile`), puis *+ New › Database › PostgreSQL*.
+2. Dans le service, ajoutez un **Volume** monté sur `/data`, puis générez un domaine public (*Settings › Networking*) ou branchez le vôtre (certificat HTTPS automatique).
+3. Variables du service :
+   ```
+   DATABASE_URL=${{Postgres.DATABASE_URL}}
+   APP_SECRET=<openssl rand -hex 32>
+   PUBLIC_URL=https://<service>.up.railway.app        # ou votre domaine
+   VIDEO_AGENT_TRUST_PROXY=true
+   VIDEO_AGENT_EMBEDDED_WORKER=true                  # un seul service : il rend aussi les vidéos
+   VIDEO_AGENT_OUTPUT_DIR=/data/output
+   VIDEO_AGENT_ASSETS_DIR=/data/assets
+   VIDEO_AGENT_DATA_DIR=/data/state
+   RAILWAY_RUN_UID=0                                 # le volume appartient à root
+   + vos clés (Pexels, Groq, Stripe…)
+   ```
+   Le port est fourni par Railway (`$PORT`, repris par `docker/entrypoint.sh`). Prévoyez au moins 2 vCPU / 4 Go de RAM.
+4. Créez aussitôt le premier compte (il devient administrateur), puis déclarez webhooks et retours OAuth avec `PUBLIC_URL` (`<PUBLIC_URL>/api/stripe/webhook`, `<PUBLIC_URL>/api/connections/<réseau>/callback`…).
+
+Les réglages modifiés dans **Administration › Services** sont écrits dans le `.env` du conteneur et perdus au redéploiement : sur Railway, définissez les clés dans les variables du service.
+
 Ouvrez `https://app.example.com/app`, créez le premier compte (administrateur), puis complétez les clés dans **Administration › Services**. Pour le mode Chanson, configurez aussi un fournisseur LLM pour rédiger les paroles et `ELEVENLABS_API_KEY` pour générer l'audio (Music API payante, accès payant requis). Pour fermer les inscriptions publiques : `SIGNUP_MODE=closed`.
 
 **Offres et quotas** (remis à zéro le 1er du mois) :

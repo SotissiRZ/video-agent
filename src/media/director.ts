@@ -153,6 +153,29 @@ export const isSensitiveMedia = (description: string | undefined, prompt: string
 /** Readable words of a stock page URL ("…/photos/bottles-alcohol-wine-drinks-bar-8346642/" → "bottles alcohol wine drinks bar"). */
 export const describeFromUrl = (url: string | undefined): string =>
   (url ?? '').split('?')[0]!.split('/').filter(Boolean).pop()?.replace(/-?\d+$/, '').replace(/[-_]+/g, ' ').trim() ?? '';
+/**
+ * Tech words with an everyday meaning: the stock picture must not show the other one (a car
+ * dashboard for "analytics dashboard", a blue sky for "cloud computing", a snake for "Python").
+ * [query word, words of the wrong meaning in the picture's description, words that confirm the right one].
+ */
+const WRONG_SENSES: Array<[RegExp, RegExp, RegExp]> = [
+  [/\bdashboards?\b/, /\b(cars?|vehicles?|steering|speedometers?|odometers?|driv(?:e|er|ers|ing)|automobiles?|motorcycles?|trucks?|cockpit)\b/, /\b(analytics?|charts?|graphs?|data|kpi|screen|laptop|computer|monitor|software|app)\b/],
+  [/\bcloud\b/, /\b(sky|skies|weather|sunset|sunrise|storm|rain|mountains?)\b/, /\b(computing|server|data|network|technology|digital)\b/],
+  [/\bmouse\b/, /\b(rodents?|rats?|animals?|pets?|mice)\b/, /\b(computer|keyboard|desk|laptop)\b/],
+  [/\bpython\b/, /\b(snakes?|reptiles?|serpents?)\b/, /\b(code|coding|programming|laptop|screen)\b/],
+  [/\bbugs?\b/, /\b(insects?|beetles?|ladybugs?|ants?)\b/, /\b(code|software|screen|laptop)\b/],
+  [/\bweb\b/, /\b(spiders?|cobwebs?)\b/, /\b(website|browser|page|laptop|screen|design)\b/],
+  [/\bapple\b/, /\b(fruits?|orchards?|trees?|harvest)\b/, /\b(iphone|ipad|mac|macbook|laptop)\b/],
+  [/\bnetwork(?:ing)?\b/, /\b(fishing|nets?|fish)\b/, /\b(computer|server|cables?|data|people|business)\b/],
+  [/\btablets?\b/, /\b(pills?|medicine|drugs?|stone)\b/, /\b(screen|touch|digital|ipad|device)\b/],
+];
+
+const wrongSense = (description: string, query: string): boolean => {
+  const d = normalize(description);
+  const q = normalize(query);
+  return WRONG_SENSES.some(([word, wrong, right]) => word.test(q) && wrong.test(d) && !right.test(d));
+};
+
 const stem = (w: string) => w.slice(0, 4);
 const words = (text: string) => normalize(text).split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
 
@@ -165,6 +188,7 @@ const words = (text: string) => normalize(text).split(/[^a-z0-9]+/).filter((w) =
 export const isRelevant = (result: Pick<StockResult, 'description'>, query: string, avoid: string[] = []): boolean => {
   const described = words(result.description ?? '');
   if (!described.length) return true;
+  if (wrongSense(result.description ?? '', query)) return false;
   const stems = new Set(described.map(stem));
   if (avoid.some((term) => described.some((w) => w.startsWith(normalize(term))))) return false;
   return words(query).some((w) => stems.has(stem(w)));

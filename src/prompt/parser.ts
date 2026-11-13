@@ -214,6 +214,20 @@ export const parseStyleHints = (text: string): string[] => {
 const toggle = (t: string, positive: RegExp, negative: RegExp): boolean | undefined =>
   negative.test(t) ? false : positive.test(t) ? true : undefined;
 
+/**
+ * "sans sous-titres", "pas besoin de musique", "aucune voix off", "ne pas mettre de sous-titres",
+ * "Sous-titres : non" (text already normalized: lower case, no accents).
+ * `bare`: the word must stand alone, so "pas de voix robotique" or "pas de musique triste"
+ * reject a kind of voice or music, not the voice or the music itself.
+ */
+const refused = (words: string, bare = false): RegExp => {
+  const end = bare ? `(?=\\s*(?:[.,;:!?)]|$|(?:ni|et|ou|du tout|de fond|d['’]ambiance|off|svp)\\b))` : '';
+  return new RegExp(
+    `\\b(?:sans|ni|pas de|pas d['’]|aucune?s?|no|without|pas besoin de|ne pas (?:mettre|ajouter|afficher|inclure|utiliser)(?: de| les| des| d['’])?)\\s*(?:les |la |le |de |des |d['’])?(?:${words})${end}|\\b(?:${words})\\s*:\\s*(?:non|aucune?|desactivee?s?|no|none|off)\\b`,
+    'm',
+  );
+};
+
 const STOPWORDS = new Set(
   (
     'une un des les le la de du au aux et ou en a pour par sur avec dans qui que quoi est sont cree creer fais faire genere video videos secondes seconde ' +
@@ -275,9 +289,9 @@ export const parsePrompt = (raw: string): ParsedPrompt => {
     topic: parseTopic(text, brand),
     styleHints: parseStyleHints(text),
     platform,
-    wantsVoice: toggle(t, /\b(voix[- ]?off|voiceover|voice[- ]over|narration|narre|narree|narrated|commentaire audio)\b/, /\b(sans|no|without|pas de)\s+(voix|voice|narration)/),
-    wantsMusic: toggle(t, /\b(musique|music|soundtrack|bande[- ]son)\b/, /\b(sans|no|without|pas de)\s+(musique|music)/),
-    wantsSubtitles: toggle(t, /\b(sous[- ]titres?|sous[- ]titrees?|subtitles?|captions?)\b/, /\b(sans|no|without|pas de)\s+(sous[- ]titres?|subtitles?|captions?)/),
+    wantsVoice: toggle(t, /\b(voix[- ]?off|voiceover|voice[- ]over|narration|narre|narree|narrated|commentaire audio)\b/, refused('voix[- ]?off|voix|voice[- ]?over|voiceover|voice|narration', true)),
+    wantsMusic: toggle(t, /\b(musique|music|soundtrack|bande[- ]son)\b/, refused('musique|music|bande[- ]son', true)),
+    wantsSubtitles: toggle(t, /\b(sous[- ]titres?|sous[- ]titrees?|subtitles?|captions?)\b/, refused('sous[- ]?titres?|sous[- ]?titrage|subtitles?|captions?')),
     keywords: extractKeywords(text),
   };
 };

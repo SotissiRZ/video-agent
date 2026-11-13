@@ -5,6 +5,7 @@
  *  - a future date uses native scheduling (YouTube, Facebook) or the local scheduler (others);
  *  - every attempt is appended to publish.json in the job.
  */
+import type { ResearchSource } from '../planning/research';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AppConfig } from '../config/config';
@@ -27,6 +28,8 @@ export interface LoadedJob {
   brief: VideoBrief;
   concept: VideoConcept;
   credits: MediaCredit[];
+  /** Sources of a researched video (research.json). */
+  sources: ResearchSource[];
 }
 
 export const loadJob = (jobDir: string, videoFile?: string): LoadedJob => {
@@ -50,6 +53,7 @@ export const loadJob = (jobDir: string, videoFile?: string): LoadedJob => {
     brief: read<VideoBrief>('brief.json'),
     concept: read<VideoConcept>('concept.json'),
     credits,
+    sources: fs.existsSync(path.join(dir, 'research.json')) ? (read<{ sources?: ResearchSource[] }>('research.json').sources ?? []) : [],
   };
 };
 
@@ -62,7 +66,7 @@ export const ensureCaptions = async (config: AppConfig, job: LoadedJob, platform
   const missing = platforms.filter((p) => !existing[p]);
   if (missing.length) {
     const { captions } = await generateCaptions(
-      { brief: job.brief, concept: job.concept, durationSec: job.storyboard.format.durationInFrames / job.storyboard.format.fps, credits: job.credits, includeCredits: config.env.VIDEO_AGENT_CAPTION_CREDITS },
+      { brief: job.brief, concept: job.concept, durationSec: job.storyboard.format.durationInFrames / job.storyboard.format.fps, credits: job.credits, includeCredits: config.env.VIDEO_AGENT_CAPTION_CREDITS, sources: job.sources },
       missing,
       opts.llm,
       opts.warnings,

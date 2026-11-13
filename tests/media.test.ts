@@ -118,6 +118,12 @@ describe('media director', () => {
     expect(isRelevant({ description: 'black car steering wheel' }, 'analytics dashboard laptop')).toBe(false);
     expect(isRelevant({ description: 'person using laptop with analytics dashboards' }, 'analytics dashboard laptop')).toBe(true);
     expect(isRelevant({ description: 'robot on a laptop screen' }, 'laptop desk', ['robot'])).toBe(false);
+    // Tech words with an everyday meaning: the picture must show the tech one.
+    expect(isRelevant({ description: 'a car dashboard with a black steering wheel and a black dashboard' }, 'analytics dashboard')).toBe(false);
+    expect(isRelevant({ description: 'the dashboard of a car with a speedometer' }, 'business dashboard')).toBe(false);
+    expect(isRelevant({ description: 'white clouds in a blue sky' }, 'cloud computing')).toBe(false);
+    expect(isRelevant({ description: 'cloud computing server room' }, 'cloud computing')).toBe(true);
+    expect(isRelevant({ description: 'green python snake on a branch' }, 'python programming')).toBe(false);
     expect(isRelevant({}, 'laptop desk')).toBe(true);
     expect(parseAvoidTerms('Éviter les robots futuristes, les faux logos. Montrer des ordinateurs.')).toEqual(expect.arrayContaining(['robot', 'logo']));
     expect(parseAvoidTerms('Une vidéo sur le transport et les ordinateurs.')).toEqual([]);

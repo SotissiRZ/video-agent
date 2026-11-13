@@ -570,6 +570,10 @@ $('businessModel').addEventListener('change', (e) => {
   e.currentTarget.value = '';
 });
 
+/** Voice, subtitles and music switches the customer flipped: only these override the request. */
+const touchedSwitches = new Set();
+for (const id of ['voice', 'subtitles', 'music']) $(id).addEventListener('change', () => touchedSwitches.add(id));
+
 $('createForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('createError').hidden = true;
@@ -585,9 +589,8 @@ $('createForm').addEventListener('submit', async (e) => {
     fps: Number($('fps').value),
     outputFormat: $('outputFormat').value,
     language: $('language').value,
-    subtitles: $('subtitles').checked,
-    music: $('music').checked,
-    voice: $('voice').checked,
+    // A switch left as it is lets the request decide ("sans sous-titres", "pas de musique").
+    ...Object.fromEntries([...touchedSwitches].map((id) => [id, $(id).checked])),
     ...(() => {
       const choice = document.querySelector('input[name=voiceChoice]:checked')?.value ?? 'female';
       return choice === 'clone' ? { voiceClone: true } : { voiceGender: choice };
@@ -767,6 +770,10 @@ const renderVoiceCard = () => {
     ? `<div class="alert success">${icon('check', 16)}<span>${escapeHtml(t('voice.ready', { name: v.clone.name }))}</span><button type="button" class="btn btn-danger-ghost btn-sm" id="voiceDelete" style="margin-left: auto">${icon('trash', 14)}<span>${escapeHtml(t('common.delete'))}</span></button></div>`
     : '';
   $('voiceLocked').hidden = v.cloneAvailable || Boolean(v.clone);
+  // The real reason: the customer's plan, or the platform's ElevenLabs account (explained to admins).
+  const admin = state.me?.user?.role === 'admin';
+  const reason = v.cloneBlocked === 'plan' || !v.cloneBlocked ? 'voice.locked' : admin ? `voice.locked.${v.cloneBlocked}.admin` : 'voice.locked.service';
+  $('voiceLocked').querySelector('span').textContent = t(reason);
   $('voiceCloneForm').hidden = !v.cloneAvailable;
   renderPronunciations(v.pronunciations);
 };

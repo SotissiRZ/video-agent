@@ -1,3 +1,4 @@
+import { spokenText } from '../src/core/pronunciation';
 import { describe, expect, it } from 'vitest';
 import { parseBusinessDetails, parsePhone } from '../src/prompt/business';
 import { detectLanguage, extractKeywords, parseDuration, parseFormat, parsePrompt } from '../src/prompt/parser';
@@ -149,5 +150,31 @@ describe('local business details', () => {
   it('does not take durations or resolutions for a phone number', () => {
     expect(parsePhone('Vidéo de 30 secondes en 1080x1920 pour 2026')).toBeUndefined();
     expect(parsePhone('call +234 803 123 4567')).toBe('+234 803 123 4567');
+  });
+});
+
+describe('voice, music and subtitles asked for or refused in the request', () => {
+  it('understands the usual ways of refusing them', () => {
+    for (const text of ['Vidéo sans sous-titres', 'Pas besoin de sous-titres.', 'Aucun sous-titre', 'Ne pas mettre de sous-titres', 'Sous-titres : non', 'no subtitles please']) {
+      expect(parsePrompt(text).wantsSubtitles, text).toBe(false);
+    }
+    expect(parsePrompt('Pas de musique, juste la voix off.').wantsMusic).toBe(false);
+    expect(parsePrompt('Vidéo sans voix off ni musique').wantsVoice).toBe(false);
+    expect(parsePrompt('Vidéo sans voix off ni musique').wantsMusic).toBe(false);
+  });
+
+  it('keeps them when only a kind of voice or music is refused', () => {
+    const p = parsePrompt('Voix off naturelle, pas de voix robotique. Musique calme, pas de musique triste. Sous-titres synchronisés.');
+    expect(p.wantsVoice).toBe(true);
+    expect(p.wantsMusic).toBe(true);
+    expect(p.wantsSubtitles).toBe(true);
+  });
+});
+
+describe('text sent to the voice', () => {
+  it('reads symbols in the language of the video', () => {
+    expect(spokenText('Sites web & applications', 'fr')).toBe('Sites web et applications');
+    expect(spokenText('Web & mobile', 'en')).toBe('Web and mobile');
+    expect(spokenText('Machine Learning • Computer Vision • Data Science', 'fr')).toBe('Machine Learning, Computer Vision, Data Science');
   });
 });
