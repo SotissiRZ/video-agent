@@ -297,14 +297,32 @@ const showSong = (song) => {
   }
 };
 
-/** Live "24 / 30 lignes" under the lyrics: ElevenLabs counts every non-empty line, section labels included. */
+/**
+ * Live count under the lyrics. The music generator takes each section ([Couplet], [Refrain]… or, without
+ * labels, each stanza) separately, up to 30 lines of 200 characters: the longest section is what matters.
+ */
 const countLyrics = () => {
-  const text = $('songLyrics').value;
-  const all = text.split(/\r?\n/);
-  const lines = all.filter((line) => line.trim()).length;
+  const all = $('songLyrics').value.split(/\r?\n/).map((line) => line.trim());
+  const labelled = all.some((line) => /^\[[^\]]+\]$/.test(line));
+  const sections = [];
+  let current = null;
+  for (const line of all) {
+    if (/^\[[^\]]+\]$/.test(line)) {
+      current = sections.push(0) - 1;
+      continue;
+    }
+    if (!line) {
+      if (!labelled) current = null;
+      continue;
+    }
+    if (current === null) current = sections.push(0) - 1;
+    sections[current]++;
+  }
+  const lines = sections.reduce((a, b) => a + b, 0);
+  const longest = Math.max(0, ...sections);
   const longLine = all.some((line) => line.length > 200);
-  $('songLyricsCount').textContent = t(longLine ? 'songs.lyricsCountLong' : 'songs.lyricsCount', { n: lines, max: 30 });
-  $('songLyricsCount').classList.toggle('over', lines > 30 || longLine);
+  $('songLyricsCount').textContent = t(longLine ? 'songs.lyricsCountLong' : 'songs.lyricsCount', { n: lines, sections: sections.filter(Boolean).length, longest, max: 30 });
+  $('songLyricsCount').classList.toggle('over', longest > 30 || lines > 80 || longLine);
 };
 $('songLyrics').addEventListener('input', countLyrics);
 

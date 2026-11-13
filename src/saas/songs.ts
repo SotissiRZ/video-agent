@@ -5,6 +5,7 @@ import path from 'node:path';
 import type { AppConfig } from '../config/config';
 import type { Db } from './db';
 import { mergeUsage, type UsageLine } from '../core/usage';
+import { lyricSections, lyricsProblem, MAX_LINE_CHARS, MAX_SECTION_LINES, MAX_SONG_LINES } from '../providers/music/lyrics';
 
 export type SongStatus = 'draft' | 'queued' | 'running' | 'completed' | 'failed';
 
@@ -59,50 +60,39 @@ export const songErrorCode = (message: string): string => {
 
 export const SONG_ID = /^[a-f0-9-]{36}$/;
 
-/** ElevenLabs Music limits, counted on non-empty lines — section labels such as [Chorus] included. */
-export const MAX_LYRIC_LINES = 30;
-export const MAX_LYRIC_CHARS = 200;
+/** Limits of the music generator, per lyric section (see providers/music/lyrics). */
+export { MAX_LINE_CHARS, MAX_SECTION_LINES, MAX_SONG_LINES } from '../providers/music/lyrics';
 
-const nonEmptyLines = (lyrics: string) => lyrics.split(/\r?\n/).filter((line) => line.trim());
-export const lyricsTooLong = (lyrics: string): boolean => nonEmptyLines(lyrics).length > MAX_LYRIC_LINES || lyrics.split(/\r?\n/).some((line) => line.length > MAX_LYRIC_CHARS);
+export const lyricsTooLong = (lyrics: string): boolean => lyricsProblem(lyrics) !== null;
 
-/** About one sung line every 4 s; never more than what fits under the limit with its section labels. */
+/** About one sung line every 4 s, in more sections for longer songs (each section stays well under 30 lines). */
 export const lyricLineBudget = (durationSec: number): { sung: number; sections: number } => {
-  const sections = durationSec <= 45 ? 2 : durationSec <= 75 ? 3 : 4;
-  return { sung: Math.min(MAX_LYRIC_LINES - sections, Math.max(6, Math.round(durationSec / 4))), sections };
+  const sections = durationSec <= 45 ? 2 : durationSec <= 75 ? 3 : durationSec <= 100 ? 4 : 5;
+  return { sung: Math.min(MAX_SONG_LINES, Math.max(6, Math.round(durationSec / 4))), sections };
 };
 
 /**
- * Safety net for AI drafts: keeps whole sections from the start while they fit under the limit (never
- * a cut verse), and shortens over-long lines at a word boundary.
+ * Safety net for AI drafts: over-long lines are shortened at a word boundary, a section over 30 lines
+ * keeps its first 30, and a song over the total cap drops whole trailing sections (never a cut verse).
+ * Lyrics already within the limits are returned unchanged.
  */
 export const fitLyrics = (lyrics: string): string => {
+  if (!lyricsProblem(lyrics)) return lyrics.trim();
   const shorten = (line: string) => {
-    if (line.length <= MAX_LYRIC_CHARS) return line;
-    const cut = line.slice(0, MAX_LYRIC_CHARS);
-    return cut.slice(0, Math.max(cut.lastIndexOf(' '), MAX_LYRIC_CHARS * 0.6)).trimEnd();
+    if (line.length <= MAX_LINE_CHARS) return line;
+    const cut = line.slice(0, MAX_LINE_CHARS);
+    return cut.slice(0, Math.max(cut.lastIndexOf(' '), MAX_LINE_CHARS * 0.6)).trimEnd();
   };
-  const lines = lyrics.split(/\r?\n/).map(shorten);
-  if (nonEmptyLines(lines.join('\n')).length <= MAX_LYRIC_LINES) return lines.join('\n').trim();
-  // Sections start at a [label] line (or at the very top).
-  const sections: string[][] = [];
-  for (const line of lines) {
-    if (/^\s*\[[^\]]+\]\s*$/.test(line) || !sections.length) sections.push([]);
-    sections[sections.length - 1]!.push(line);
-  }
+  const labelled = /^\s*\[[^\]]+\]\s*$/m.test(lyrics);
   const kept: string[] = [];
-  let count = 0;
-  for (const section of sections) {
-    const n = section.filter((line) => line.trim()).length;
-    if (count + n > MAX_LYRIC_LINES) {
-      // The first section alone is too long: keep its first lines rather than nothing.
-      if (!kept.length) kept.push(...section.filter((line) => line.trim()).slice(0, MAX_LYRIC_LINES));
-      break;
-    }
-    kept.push(...section);
-    count += n;
+  let total = 0;
+  for (const section of lyricSections(lyrics)) {
+    const lines = section.lines.map(shorten).slice(0, MAX_SECTION_LINES);
+    if (total + lines.length > MAX_SONG_LINES) break;
+    total += lines.length;
+    kept.push([...(labelled ? [`[${section.name}]`] : []), ...lines].join('\n'));
   }
-  return kept.join('\n').trim();
+  return kept.join('\n\n');
 };
 
 export const songDirectory = (config: AppConfig, userId: string, songId: string): string =>

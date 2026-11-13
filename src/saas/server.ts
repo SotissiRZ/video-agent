@@ -53,7 +53,7 @@ import { deleteProductImage, describeProductImage, listProductImages, productIma
 import { ensureCleanVideoExport } from './export';
 import { cancelPublication, createPublication, listPublications, publicPublication } from './publications';
 import { Worker } from './worker';
-import { addSongUsage, createSongDraft, fitLyrics, lyricLineBudget, lyricsTooLong, MAX_LYRIC_CHARS, MAX_LYRIC_LINES, deleteSong, getSong, listSongs, publicSong, removeSongPreviews, SONG_ID, songDirectory, songPreviewFile, updateSongLyrics, type SongRow } from './songs';
+import { addSongUsage, createSongDraft, fitLyrics, lyricLineBudget, lyricsTooLong, MAX_LINE_CHARS, MAX_SECTION_LINES, deleteSong, getSong, listSongs, publicSong, removeSongPreviews, SONG_ID, songDirectory, songPreviewFile, updateSongLyrics, type SongRow } from './songs';
 import { makeAudioPreview } from '../audio/ffmpeg';
 import { UsageMeter } from '../core/usage';
 import { planConfig, planLLM } from './plan-providers';
@@ -698,7 +698,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
             generated = await lyricProvider!.generate({
               system:
                 'You are a professional songwriter. Write original, singable lyrics based only on the user brief. Return valid JSON with title and lyrics. Use clear section labels such as [Verse 1], [Chorus], [Verse 2], [Bridge]. Keep the lyrics in the language requested or used by the user. Do not mention that these are AI-generated. ' +
-                `Hard limit of the music generator: at most ${MAX_LYRIC_LINES} non-empty lines in total, section labels included, each under ${MAX_LYRIC_CHARS} characters. Fit the song length, never write more.`,
+                `Each section label goes on its own line. Hard limits of the music generator: at most ${MAX_SECTION_LINES} lines per section, each under ${MAX_LINE_CHARS} characters. Fit the song length: about one sung line every 4 seconds.`,
               messages: [
                 {
                   role: 'user',
@@ -747,7 +747,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         if (config.env.REQUIRE_EMAIL_VERIFICATION && !user.email_verified_at) throw new HttpError(403, 'Confirmez votre adresse e-mail pour générer des chansons', 'email_unverified');
         if (!options.songGenerator && !config.env.ELEVENLABS_API_KEY) throw new HttpError(503, 'La génération de chansons ElevenLabs n’est pas configurée.', 'song_provider_unavailable');
         if (lyricsTooLong(song.lyrics)) {
-          throw new HttpError(400, `ElevenLabs accepte au maximum ${MAX_LYRIC_LINES} lignes de ${MAX_LYRIC_CHARS} caractères par chanson (titres de sections compris).`, 'song_lyrics_too_long');
+          throw new HttpError(400, `Paroles trop longues : ${MAX_SECTION_LINES} lignes au maximum par section ([Couplet], [Refrain]…) et ${MAX_LINE_CHARS} caractères par ligne.`, 'song_lyrics_too_long');
         }
         const updated = await db.tx(async (tx) => {
           await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [user.id]);
