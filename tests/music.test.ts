@@ -42,9 +42,16 @@ describe('music providers', () => {
     expect(url).toBe('https://api.elevenlabs.io/v1/music');
     expect(body).toMatchObject({
       model_id: 'music_v2_5',
-      composition_plan: { chunks: [{ text: '[Verse 1]\nHere is the first line\n[Chorus]\nSing these words', duration_ms: 90_000 }] },
+      // One chunk per section, the 90 s shared by line count.
+      composition_plan: {
+        chunks: [
+          { text: 'Here is the first line', duration_ms: 45_000 },
+          { text: 'Sing these words', duration_ms: 45_000 },
+        ],
+      },
     });
     expect(body.composition_plan.chunks[0].positive_styles).toContain('song with vocals');
+    expect(body.composition_plan.chunks[1].positive_styles).toContain('Chorus of the song');
     expect(body).not.toHaveProperty('force_instrumental');
     expect((init.headers as Record<string, string>)['xi-api-key']).toBe('song-key');
     expect(audio).toEqual(Buffer.from([1, 2, 3]));
@@ -54,11 +61,12 @@ describe('music providers', () => {
     const fetchMock = vi.fn(async () => new Response(new Uint8Array([1])));
     vi.stubGlobal('fetch', fetchMock);
     await expect(new ElevenLabsSongProvider('song-key').generate({
-      lyrics: Array.from({ length: 31 }, (_, i) => `line ${i}`).join('\n'),
+      // A single 31-line section: over the 30 lines a chunk accepts.
+      lyrics: `[Verse]\n${Array.from({ length: 31 }, (_, i) => `line ${i}`).join('\n')}`,
       style: 'Pop',
       mood: 'Joyful',
       durationSec: 90,
-    })).rejects.toThrow(/1–30 lines/);
+    })).rejects.toThrow(/section_too_long/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
