@@ -281,6 +281,8 @@ const showSong = (song) => {
   $('songAudioResult').hidden = song.status !== 'completed' || !song.audioUrl;
   $('songDownload').hidden = state.me.plan.id === 'free' && !song.exportPaid;
   $('songPreviewNote').hidden = state.me.plan.id !== 'free' || song.exportPaid;
+  // Free plan: say plainly that the player holds an excerpt, and how long the real song is.
+  $('songPreviewNoteText').textContent = t('songs.previewNote', { n: Math.min(state.me.commerce?.songPreviewSec ?? 30, song.durationSec ?? 30), total: song.durationSec ?? 30 });
   renderExportActions($('songExportPay'), 'song', song.id, song.exportPaid);
   if (song.audioUrl) {
     // Reload when the excerpt becomes the full song (payment) or a corrected version is generated.
