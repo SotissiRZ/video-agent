@@ -570,22 +570,19 @@ cp .env.example .env
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-**Variante : backend sur Railway, frontend sur Vercel**
+**Variante : hébergement sur Railway** (sans serveur à administrer)
 
 ```
-navigateur ──► Vercel (web/ statique) ──/api/*──► Railway (API + worker + Remotion) ──► PostgreSQL Railway
-                    même origine : cookies, SSE, vidéos et webhooks passent par le domaine Vercel
+navigateur ──HTTPS──► Railway « web » (site + API + rendu Remotion, volume /data) ──► PostgreSQL Railway
 ```
 
-Vercel sert `web/` et relaie `/api/*` vers Railway (`vercel.json`). Le frontend n'est pas modifié : pas de CORS, cookie de session inchangé.
-
-1. **Railway** : *New Project › Deploy from GitHub repo* (le `railway.json` sélectionne le `Dockerfile`), puis *+ New › Database › PostgreSQL*.
-2. Dans le service, ajoutez un **Volume** monté sur `/data`, puis générez un domaine public (*Settings › Networking*).
+1. *New Project › Deploy from GitHub repo* (`railway.json` sélectionne le `Dockerfile`), puis *+ New › Database › PostgreSQL*.
+2. Dans le service, ajoutez un **Volume** monté sur `/data`, puis générez un domaine public (*Settings › Networking*) ou branchez le vôtre (certificat HTTPS automatique).
 3. Variables du service :
    ```
    DATABASE_URL=${{Postgres.DATABASE_URL}}
    APP_SECRET=<openssl rand -hex 32>
-   PUBLIC_URL=https://<votre-projet>.vercel.app      # domaine VERCEL, pas Railway
+   PUBLIC_URL=https://<service>.up.railway.app        # ou votre domaine
    VIDEO_AGENT_TRUST_PROXY=true
    VIDEO_AGENT_EMBEDDED_WORKER=true                  # un seul service : il rend aussi les vidéos
    VIDEO_AGENT_OUTPUT_DIR=/data/output
@@ -595,10 +592,9 @@ Vercel sert `web/` et relaie `/api/*` vers Railway (`vercel.json`). Le frontend 
    + vos clés (Pexels, Groq, Stripe…)
    ```
    Le port est fourni par Railway (`$PORT`, repris par `docker/entrypoint.sh`). Prévoyez au moins 2 vCPU / 4 Go de RAM.
-4. **Vercel** : dans `vercel.json`, vérifiez que la destination de `/api/*` est le domaine Railway, puis importez le dépôt (*Framework Preset : Other*, racine du dépôt). Seul `web/` est publié (`.vercelignore`).
-5. Déclarez les webhooks et retours OAuth avec le **domaine Vercel** (`<PUBLIC_URL>/api/stripe/webhook`, `<PUBLIC_URL>/api/connections/<réseau>/callback`…).
+4. Créez aussitôt le premier compte (il devient administrateur), puis déclarez webhooks et retours OAuth avec `PUBLIC_URL` (`<PUBLIC_URL>/api/stripe/webhook`, `<PUBLIC_URL>/api/connections/<réseau>/callback`…).
 
-Limites : Vercel coupe une requête relayée sans réponse au bout de 120 s (le flux SSE envoie un ping toutes les 15 s, donc il tient), et les vidéos téléchargées passent par la bande passante Vercel. Les réglages modifiés dans **Administration › Services** sont écrits dans le `.env` du conteneur et perdus au redéploiement : sur Railway, définissez les clés dans les variables du service.
+Les réglages modifiés dans **Administration › Services** sont écrits dans le `.env` du conteneur et perdus au redéploiement : sur Railway, définissez les clés dans les variables du service.
 
 Ouvrez `https://app.example.com/app`, créez le premier compte (administrateur), puis complétez les clés dans **Administration › Services**. Pour le mode Chanson, configurez aussi un fournisseur LLM pour rédiger les paroles et `ELEVENLABS_API_KEY` pour générer l'audio (Music API payante, accès payant requis). Pour fermer les inscriptions publiques : `SIGNUP_MODE=closed`.
 
