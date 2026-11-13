@@ -101,6 +101,9 @@ Follow the customer, not a template:
   "Éviter l'aspect science-fiction" → "science fiction", "futuristic", "hologram"; "plutôt qu'un robot" → "robot".
   Then never use those words in visualQueries.
 - Never invent prices, phone numbers, addresses, statistics, dates or claims the customer did not give. Keep brand names exactly.
+- When a research dossier follows the request, it is the only source of facts: every news item, date, figure and name in
+  the video comes from it, never from memory. A documentary or news video gives one or two scenes per important item,
+  says when it happened and, in the narration, who reported it ("selon The Verge…") when that adds trust.
 
 Each scene:
 - kind: title (opening), text (headline + one sentence), bullets (headline + 3 to 6 short items), steps (numbered actions),
@@ -134,6 +137,8 @@ export interface DirectionInput {
   languageLocked: boolean;
   /** Fewer scenes than this is an incomplete plan (the customer wrote that many, or the duration needs them). */
   minScenes: number;
+  /** Dated facts found on the web for this request (see planning/research.ts). */
+  research?: string;
 }
 
 export const directVideo = async (llm: LLMProvider, input: DirectionInput, signal?: AbortSignal): Promise<Direction> => {
@@ -153,7 +158,14 @@ export const directVideo = async (llm: LLMProvider, input: DirectionInput, signa
     signal,
     maxTokens: 16000,
     json: { name: 'video_direction', schema: DIRECTION_JSON_SCHEMA },
-    messages: [{ role: 'user' as const, content: `${settings}\n\nCustomer request (between the tags):\n<request>\n${input.prompt}\n</request>` }],
+    messages: [
+      {
+        role: 'user' as const,
+        content:
+          `${settings}\n\nCustomer request (between the tags):\n<request>\n${input.prompt}\n</request>` +
+          (input.research ? `\n\nResearch dossier, written today from web sources (between the tags):\n<research>\n${input.research}\n</research>` : ''),
+      },
+    ],
   };
   const first = await generateJson(llm, request, DirectionSchema);
   if (first.scenes.length >= input.minScenes) return first;

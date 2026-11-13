@@ -32,6 +32,15 @@ export interface PaceOptions {
   /** Shortest scene (time to read its text). */
   minSceneSec?: number;
   minFill?: number;
+  /**
+   * The scenes already have the durations the customer asked for ("SCÈNE 3 (12–20 s)"): they are
+   * kept as far as the voice allows without a silence longer than `maxSilenceSec` (default 0.6 s),
+   * and none when the sentence goes on in the next scene: a long silence in the middle of a sentence
+   * sounds like a glitch. Time still missing goes to the closing scene, where a pause on the logo
+   * with music is natural.
+   */
+  keepDurations?: boolean;
+  maxSilenceSec?: number;
 }
 
 /**
@@ -44,16 +53,26 @@ export const paceScenesToVoiceover = (storyboard: Storyboard, opts: PaceOptions 
   const pad = Math.round((opts.pauseSec ?? 0.3) * fps);
   const minFrames = Math.round((opts.minSceneSec ?? 2.2) * fps);
   const scenes = storyboard.scenes.map((s) => ({ ...s }));
+  const requested = scenes.map((s) => (opts.keepDurations ? s.durationInFrames : 0));
+  const maxSilence = Math.round((opts.maxSilenceSec ?? 0.6) * fps);
   // Transition lengths depend on scene lengths: two passes settle them.
   for (let pass = 0; pass < 2; pass++) {
     scenes.forEach((scene, i) => {
-      if (scene.voiceover) scene.durationInFrames = Math.max(minFrames, voicedLength(scenes, i, pad));
+      if (!scene.voiceover) return;
+      const voiced = voicedLength(scenes, i, pad);
+      // A sentence that goes on in the next scene ("Du web à l'IA," → "de l'automatisation…") gets no extra pause.
+      const continues = i < scenes.length - 1 && !/[.!?…»"”]\s*$/.test(scene.narration.replace(/\*/g, '').trim());
+      scene.durationInFrames = Math.max(minFrames, Math.min(requested[i]!, voiced + (continues ? 0 : maxSilence)), voiced);
     });
   }
   if (opts.targetFrames) {
     const floor = Math.round(opts.targetFrames * (opts.minFill ?? 0.85));
     const deficit = floor - computeTotalDuration(scenes);
-    if (deficit > 0) {
+    if (deficit > 0 && opts.keepDurations) {
+      // The closing scene holds a little longer on the logo and the music; beyond that the video is
+      // shorter than asked rather than full of silences: the customer's voice-over sets the length.
+      scenes[scenes.length - 1]!.durationInFrames += Math.min(deficit, 4 * fps);
+    } else if (deficit > 0) {
       const share = Math.floor(deficit / scenes.length);
       scenes.forEach((s, i) => (s.durationInFrames += share + (i < deficit % scenes.length ? 1 : 0)));
     }

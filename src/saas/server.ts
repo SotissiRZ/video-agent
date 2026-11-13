@@ -61,7 +61,7 @@ import { mentionsAny } from '../core/pronunciation';
 import { audioExtension, deleteVoiceClone, elevenLabsCloner, getVoiceClone, listPronunciations, MAX_PRONUNCIATIONS, PronunciationSchema, replacePronunciations, saveVoiceClone, upsertPronunciation, type VoiceClone, type VoiceCloner } from './voices';
 
 export const CreateJobSchema = z.object({
-  prompt: z.string().trim().min(3).max(4000),
+  prompt: z.string().trim().min(3).max(12000),
   format: z.string().max(20).optional(),
   width: z.number().int().min(16).max(3840).optional(),
   height: z.number().int().min(16).max(3840).optional(),
@@ -124,7 +124,7 @@ const parse = <T>(schema: z.ZodType<T>, data: unknown): T => {
   return r.data;
 };
 
-const JOB_FILES = ['storyboard.json', 'script.md', 'subtitles.srt', 'subtitles.vtt', 'credits.md', 'captions.json'];
+const JOB_FILES = ['storyboard.json', 'script.md', 'subtitles.srt', 'subtitles.vtt', 'credits.md', 'captions.json', 'research.md'];
 
 export interface SaasOptions {
   webRoot: string;
@@ -710,9 +710,13 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
 
     if (resource === 'voice') {
       if (!id && method === 'GET') {
+        // Why cloning is off: the customer's plan, or the platform's ElevenLabs key (missing, or a plan without cloning).
+        const cloneBlocked =
+          planOfUser(config, user).id === 'free' ? 'plan' : !cloner() ? 'not_configured' : !options.voiceCloner && !(await elevenLabsAccess()).voiceClone ? 'provider' : null;
         return json(res, 200, {
           clone: publicClone(await getVoiceClone(db, user.id)),
-          cloneAvailable: planOfUser(config, user).id !== 'free' && Boolean(cloner()) && (options.voiceCloner ? true : (await elevenLabsAccess()).voiceClone),
+          cloneAvailable: !cloneBlocked,
+          cloneBlocked,
           pronunciations: await listPronunciations(db, user.id),
         });
       }

@@ -1,6 +1,7 @@
 import React from 'react';
 import { AbsoluteFill, Img, interpolate, useCurrentFrame } from 'remotion';
 import type { Storyboard } from '../contract/storyboard';
+import { computeTimeline } from '../contract/timeline';
 import { resolveSrc, useLayout } from '../utils';
 
 /** Discreet brand mark (logo or name) shown in a corner during the whole video. */
@@ -9,8 +10,18 @@ export const Watermark: React.FC<{ storyboard: Storyboard }> = ({ storyboard }) 
   const layout = useLayout();
   const { brand, theme } = storyboard;
   if (!brand.showWatermark || (!brand.logo && !brand.name)) return null;
-  const opacity = interpolate(frame, [20, 40], [0, 0.9], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
-  const size = Math.round(layout.unit * 0.05);
+  // The opening title and the closing scene already show the logo large: the corner mark waits for
+  // the first one to end and leaves before the last one, so the logo is never on screen twice.
+  const scenes = storyboard.scenes;
+  const timeline = computeTimeline(scenes);
+  const first = brand.logo && scenes[0]?.kind === 'title' ? timeline[0] : undefined;
+  const last = brand.logo && scenes.length > 1 && scenes[scenes.length - 1]?.kind === 'cta' ? timeline[timeline.length - 1] : undefined;
+  const start = first ? first.soloTo : 20;
+  const end = last ? last.soloFrom : Number.POSITIVE_INFINITY;
+  const fadeIn = interpolate(frame, [start, start + 20], [0, 0.9], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+  const opacity = Number.isFinite(end) ? Math.min(fadeIn, interpolate(frame, [end - 15, end], [0.9, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' })) : fadeIn;
+  if (opacity <= 0) return null;
+  const size = Math.round(layout.unit * 0.075);
   const top = layout.isPortrait ? layout.height * 0.055 : layout.padY * 0.6;
   return (
     <AbsoluteFill style={{ pointerEvents: 'none' }}>
@@ -26,7 +37,7 @@ export const Watermark: React.FC<{ storyboard: Storyboard }> = ({ storyboard }) 
         }}
       >
         {brand.logo ? (
-          <Img src={resolveSrc(brand.logo)} style={{ height: size, width: 'auto', objectFit: 'contain' }} />
+          <Img src={resolveSrc(brand.logo)} style={{ height: size, width: 'auto', objectFit: 'contain', borderRadius: size * 0.12 }} />
         ) : (
           <span
             style={{

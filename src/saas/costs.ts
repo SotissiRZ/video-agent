@@ -19,7 +19,10 @@ const LLM_PRICES: Record<string, LlmPrice[]> = {
     { prefix: 'claude-sonnet-4', input: 3, output: 15 },
     { prefix: 'claude-haiku-4-5', input: 1, output: 5 },
   ],
-  groq: [{ prefix: 'llama-3.3-70b', input: 0.59, output: 0.79, estimate: true }],
+  groq: [
+    { prefix: 'llama-3.3-70b', input: 0.59, output: 0.79, estimate: true },
+    { prefix: 'openai/gpt-oss-120b', input: 0.15, output: 0.75, estimate: true },
+  ],
   openai: [
     { prefix: 'gpt-4.1-mini', input: 0.4, output: 1.6, estimate: true },
     { prefix: 'gpt-4.1', input: 2, output: 8, estimate: true },
@@ -41,6 +44,9 @@ const MUSIC_PER_SECOND: Record<string, { price: number; estimate?: boolean }> = 
   stability: { price: 0.002, estimate: true },
   replicate: { price: 0.0015, estimate: true },
 };
+
+/** Web searches, per search (Anthropic: $10 per 1,000; the pages read are billed as LLM input tokens). */
+const SEARCH_PRICES: Record<string, number> = { anthropic: 0.01 };
 
 /** Generated images, per image. Cloudflare and Hugging Face are counted within their free tiers. */
 const IMAGE_PRICES: Record<string, { price: number; estimate?: boolean }> = {
@@ -77,6 +83,10 @@ export const priceLine = (line: UsageLine): PricedLine => {
     const price = MUSIC_PER_SECOND[line.provider];
     if (!price) return { ...line, usd: 0, unpriced: true };
     return { ...line, usd: (line.seconds ?? 0) * price.price, estimate: price.estimate };
+  }
+  if (line.kind === 'search') {
+    const price = SEARCH_PRICES[line.provider];
+    return price === undefined ? { ...line, usd: 0, unpriced: true } : { ...line, usd: line.calls * price };
   }
   const price = IMAGE_PRICES[line.provider];
   if (!price) return { ...line, usd: 0, unpriced: true };

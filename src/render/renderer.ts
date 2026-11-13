@@ -92,11 +92,17 @@ export const renderStoryboard = async (opts: RenderOptions): Promise<RenderResul
     outputLocation: opts.outputFile,
     concurrency: opts.concurrency ?? null,
     cancelSignal,
-    ...(codec === 'h264' || codec === 'vp8' ? { crf: opts.crf ?? null } : {}),
+    // 17 (Remotion's default is 18): finer detail in photos and text edges for a slightly larger file.
+    ...(codec === 'h264' ? { crf: opts.crf ?? 17 } : codec === 'vp8' ? { crf: opts.crf ?? null } : {}),
     ...(codec === 'h264' ? { x264Preset: opts.x264Preset ?? 'veryfast' } : {}),
     ...(codec === 'prores' ? { proResProfile: 'hq' as const } : {}),
     ...(codec === 'gif' ? { everyNthFrame: 2, scale: Math.min(1, 540 / Math.min(composition.width, composition.height)) } : {}),
     imageFormat: codec === 'prores' ? 'png' : 'jpeg',
+    // Default JPEG quality (80) blurs the edges of text; 95 keeps them sharp for a small cost.
+    ...(codec === 'prores' ? {} : { jpegQuality: 95 }),
+    // BT.709, limited range, tagged as such: what players and social networks expect. Without it the
+    // JPEG frames give a full-range "yuvj420p" video that some players show washed out.
+    ...(codec === 'h264' ? { pixelFormat: 'yuv420p' as const, colorSpace: 'bt709' as const } : {}),
     onProgress: ({ progress, stitchStage }) => report({ stage: stitchStage === 'muxing' ? 'encode' : 'render', progress }),
   });
 

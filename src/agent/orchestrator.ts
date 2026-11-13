@@ -15,6 +15,8 @@ import { resolveMusicProvider } from '../providers/music/registry';
 import type { MusicProvider } from '../providers/music/types';
 import { AssetLibrary, importAsset } from '../assets/manager';
 import { placeProductPhotos, type ProductPhoto } from '../media/product-photos';
+import { captureScreen, chooseScreenScenes, deviceFor, findUrls, showScreen } from '../media/screenshots';
+import { researchWeb, sourcesMarkdown, wantsResearch, type Research } from '../planning/research';
 import type { AppConfig } from '../config/config';
 import { errorMessage, StoryboardValidationError, summarizeError, VideoAgentError } from '../core/errors';
 import { createLogger, type Logger } from '../core/logger';
@@ -41,7 +43,7 @@ import type { ImageProvider } from '../providers/image/types';
 import { resolveVideoProvider } from '../providers/video/registry';
 import type { VideoProvider } from '../providers/video/types';
 import { isPiperInstalled, resolveVoiceProvider } from '../providers/voice/registry';
-import { applyPronunciations, mentionsAny, type Pronunciation } from '../core/pronunciation';
+import { applyPronunciations, spokenText, mentionsAny, type Pronunciation } from '../core/pronunciation';
 import { resolveStockProviders } from '../providers/stock/registry';
 import type { StockProvider } from '../providers/stock/types';
 import { MediaDirector, wantsMedia, type MediaCredit } from '../media/director';
@@ -80,6 +82,10 @@ export interface AgentDependencies {
   direction?: boolean;
   /** Voice used when the chosen one fails. `undefined` = Piper or MMS when available. */
   voiceFallback?: VoiceProvider | null;
+  /** Web research for requests that ask for it ("fais le tour de la toile…"). `undefined` = Claude web search. */
+  research?: typeof researchWeb | null;
+  /** Captures of the web pages named in the request. `undefined` = headless Chrome; `null` = none. */
+  captureScreen?: typeof captureScreen | null;
 }
 
 export interface RevisionRequest {
@@ -146,6 +152,18 @@ const STEP_WEIGHTS: Record<StepId, number> = {
 };
 const TOTAL_WEIGHT = Object.values(STEP_WEIGHTS).reduce((a, b) => a + b, 0);
 
+/** Remember which provider and model answered each call (the first of a fallback chain may not). */
+const trackWriters = (llm: LLMProvider | null, writers: Set<string>): LLMProvider | null =>
+  llm && {
+    id: llm.id,
+    model: llm.model,
+    async generate(request) {
+      const response = await llm.generate(request);
+      writers.add(`${response.provider}:${response.model}`);
+      return response;
+    },
+  };
+
 export class VideoAgent {
   private readonly logger: Logger;
 
@@ -154,6 +172,42 @@ export class VideoAgent {
     private readonly deps: AgentDependencies = {},
   ) {
     this.logger = deps.logger ?? createLogger(config.logLevel);
+  }
+
+  /**
+   * The web pages named in the request ("notre plateforme https://…"), captured and shown in the
+   * scene that talks about them, inside a browser window or a phone. A page that cannot be opened
+   * is skipped with a warning: the scene keeps its picture.
+   */
+  private async placeScreens(sb: Storyboard, prompt: string, planned: PlannedScene[], brief: VideoBrief, paths: JobPaths, warnings: string[], signal?: AbortSignal): Promise<Storyboard> {
+    const capture = this.deps.captureScreen === undefined ? captureScreen : this.deps.captureScreen;
+    if (!capture || !this.config.env.VIDEO_AGENT_SCREENSHOTS) return sb;
+    const urls = findUrls(prompt);
+    if (!urls.length) return sb;
+    const targets = chooseScreenScenes(urls, sb.scenes, planned);
+    const scenes = [...sb.scenes];
+    for (const [k, href] of urls.entries()) {
+      const i = targets[k]!;
+      if (i < 0) continue;
+      const device = deviceFor(scenes[i]!, brief.height > brief.width);
+      const relative = path.posix.join('screens', `${String(k + 1).padStart(2, '0')}-${device}.png`);
+      try {
+        const shot = await capture(href, path.join(paths.publicDir, relative), { device, browser: this.config.browserExecutable, language: brief.language, signal });
+        const url = new URL(href);
+        scenes[i] = showScreen(scenes[i]!, {
+          type: 'image',
+          src: relative,
+          fit: 'cover',
+          origin: `screen:${device}`,
+          alt: `${device === 'mobile' ? 'Mobile' : 'Desktop'} capture of ${url.hostname}`,
+          screen: { device, url: `${url.hostname.replace(/^www\./, '')}${url.pathname === '/' ? '' : url.pathname}`.slice(0, 300), aspect: shot.height / shot.width },
+        });
+      } catch (err) {
+        if (signal?.aborted) throw err;
+        warnings.push(`capture of ${href} skipped: ${errorMessage(err)}`);
+      }
+    }
+    return { ...sb, scenes };
   }
 
   /** Progress bookkeeping shared by run() and revise(): weighted steps reported through onProgress. */
@@ -243,7 +297,9 @@ export class VideoAgent {
     // The script is written knowing what the customer's photos show.
     if (productPhotos.length) brief.productPhotos = productPhotos.map((photo) => photo.description || photo.name || path.basename(photo.file));
 
-    const llm = this.metered(options.offline ? null : this.deps.llm !== undefined ? this.deps.llm : resolveLLM(this.config, options.llmProvider));
+    // The models that really wrote the video: with a fallback chain, Groq may answer when Claude has no credit.
+    const writers = new Set<string>();
+    const llm = trackWriters(this.metered(options.offline ? null : this.deps.llm !== undefined ? this.deps.llm : resolveLLM(this.config, options.llmProvider)), writers);
     const planner = new Planner(llm, this.logger);
     const paths = jobPaths(options.outDir ?? path.join(this.config.paths.output, newJobId(brief.brand || brief.topic || template.id)));
     ensureJobDirs(paths);
@@ -251,11 +307,14 @@ export class VideoAgent {
 
     // ---- 2. Direction (the AI reads the whole request) or concept ----------------------
     let direction: Direction | undefined;
+    let research: Research | undefined;
     const concept = await step(
       'concept',
       llm ? `Direction artistique (${planner.source})` : `Concept (${planner.source})`,
       async () => {
         if (llm && this.deps.direction !== false) {
+          // "Fais le tour de la toile…": the facts come from today's web, not from the model's memory.
+          if (wantsResearch(request.prompt)) research = await this.researchWeb(request.prompt, brief, paths, signal);
           try {
             direction = await directVideo(
               llm,
@@ -267,6 +326,7 @@ export class VideoAgent {
                 styleLocked: Boolean(options.style && options.style !== 'auto'),
                 languageLocked: Boolean(options.language && options.language !== 'auto'),
                 minScenes: structured ? structured.scenes.length : Math.max(2, Math.ceil(brief.durationSec / 12)),
+                research: research?.dossier,
               },
               signal,
             );
@@ -400,6 +460,7 @@ export class VideoAgent {
           const preferred = sb.scenes.flatMap((scene, i) => (wantsMedia(scene, options.mediaCoverage ?? this.config.env.VIDEO_AGENT_MEDIA_COVERAGE) ? [i] : []));
           sb = { ...sb, scenes: placeProductPhotos(sb.scenes, srcs, planned.map((scene) => scene.productPhoto), preferred) };
         }
+        sb = await this.placeScreens(sb, request.prompt, planned, brief, paths, warnings, signal);
         // Brand kit logo (uploaded by the customer) wins over the shared assets library.
         if (options.brandLogo && fs.existsSync(options.brandLogo)) {
           return { ...sb, brand: { ...sb.brand, logo: importAsset(options.brandLogo, paths.publicDir, 'brand'), showWatermark: true } };
@@ -463,7 +524,8 @@ export class VideoAgent {
           // The narration sets the pace: no long silences between sentences.
           // A script with a range ("45 à 60 s") aims at its lower bound, filled exactly.
           const targetSec = script?.minSec && script.minSec <= brief.durationSec ? script.minSec : brief.durationSec;
-          if (sb.scenes.some((s) => s.voiceover)) sb = paceScenesToVoiceover(sb, { targetFrames: Math.round(targetSec * sb.format.fps), minFill: script ? 1 : undefined });
+          // Scene timings written by the customer ("SCÈNE 3 (12–20 s)") are kept: the voice only lengthens a scene.
+          if (sb.scenes.some((s) => s.voiceover)) sb = paceScenesToVoiceover(sb, { targetFrames: Math.round(targetSec * sb.format.fps), minFill: script ? 1 : undefined, keepDurations: script?.totalSec !== undefined });
         }
         if (brief.music) {
           const music = await this.prepareMusic(sb, brief, paths, style.theme.motion, style.id === 'elegant', warnings, progress, signal);
@@ -502,7 +564,7 @@ export class VideoAgent {
 
     // ---- 12. Output --------------------------------------------------------------------
     const providers = {
-      planner: planner.source,
+      planner: writers.size ? [...writers].join(' + ') : planner.source,
       voice: voiceProvider?.id ?? 'none',
       image: imageProvider?.id ?? 'none',
       stock: stockProviders.map((p) => p.id).join(',') || 'none',
@@ -770,6 +832,30 @@ export class VideoAgent {
     );
   }
 
+  /**
+   * Search the web for the request and keep the dossier and its sources in the job folder. A request
+   * that asks for recent news is never answered from memory: without research the job fails clearly.
+   */
+  private async researchWeb(prompt: string, brief: VideoBrief, paths: JobPaths, signal?: AbortSignal): Promise<Research> {
+    const run = this.deps.research === undefined ? researchWeb : this.deps.research;
+    const env = this.config.env;
+    if (!run || !env.ANTHROPIC_API_KEY) {
+      throw new VideoAgentError('Cette demande nécessite une recherche sur le web, faite avec Claude (ANTHROPIC_API_KEY).', 'Configurez une clé Anthropic, ou décrivez vous-même le contenu de la vidéo.');
+    }
+    let research: Research;
+    try {
+      research = await run(prompt, { apiKey: env.ANTHROPIC_API_KEY, model: env.ANTHROPIC_MODEL, effort: env.ANTHROPIC_EFFORT, timeoutMs: env.VIDEO_AGENT_LLM_TIMEOUT_MS, language: brief.locale }, signal);
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      throw new VideoAgentError(`La recherche sur le web a échoué : ${summarizeError(errorMessage(err))}`, 'Réessayez dans quelques minutes.', { cause: err });
+    }
+    this.deps.meter?.record({ kind: 'llm', provider: 'anthropic', model: research.model, inputTokens: research.inputTokens, outputTokens: research.outputTokens });
+    if (research.searches) this.deps.meter?.record({ kind: 'search', provider: 'anthropic', calls: research.searches });
+    writeJson(path.join(paths.dir, 'research.json'), research);
+    fs.writeFileSync(path.join(paths.dir, 'research.md'), `# Recherche web\n\n${research.dossier}\n\n${sourcesMarkdown(research)}`);
+    return research;
+  }
+
   private metered(llm: LLMProvider | null): LLMProvider | null {
     return llm && this.deps.meter ? this.deps.meter.llm(llm) : llm;
   }
@@ -849,7 +935,7 @@ export class VideoAgent {
     let attempted = 0;
     for (let i = 0; i < scenes.length; i++) {
       const scene = scenes[i]!;
-      const text = applyPronunciations(scene.narration.replace(/\*/g, ''), opts.pronunciations).trim();
+      const text = spokenText(applyPronunciations(scene.narration.replace(/\*/g, ''), opts.pronunciations), brief.locale);
       if (!text || (only && !only.has(scene.id))) continue;
       attempted++;
       progress(i / scenes.length, `Voix-off ${i + 1}/${scenes.length}`);

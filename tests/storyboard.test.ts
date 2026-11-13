@@ -125,6 +125,28 @@ describe('timing with voice-over', () => {
     sb.scenes[0] = { ...sb.scenes[0]!, voiceover: { src: 'voice/x.wav', durationInFrames: 8 * fps, volume: 1 } };
     expect(paceScenesToVoiceover(sb).scenes[0]!.durationInFrames).toBeGreaterThan(8 * fps);
   });
+
+  it('keeps the scene durations the customer wrote, without long silences in the middle of the voice-over', async () => {
+    const sb = await makeStoryboard('Vidéo de 30s pour promouvoir Sirago');
+    const fps = sb.format.fps;
+    const requested = sb.scenes.map((s) => s.durationInFrames);
+    const voice = (i: number) => (i === 0 ? 12 : i === 1 ? requested[1]! / fps - 1.4 : 1.2);
+    sb.scenes = sb.scenes.map((s, i) => ({ ...s, voiceover: { src: 'voice/x.wav', durationInFrames: Math.round(voice(i) * fps), volume: 1 } }));
+    const paced = paceScenesToVoiceover(sb, { keepDurations: true, targetFrames: 30 * fps, minFill: 1 });
+    const timeline = computeTimeline(paced.scenes);
+    // A long sentence lengthens its scene; a scene whose sentence almost fills it keeps its length.
+    expect(paced.scenes[0]!.durationInFrames).toBeGreaterThan(12 * fps);
+    expect(paced.scenes[1]!.durationInFrames).toBe(requested[1]!);
+    // Short sentences: a short pause before the next one, whatever the requested length.
+    for (let i = 2; i < paced.scenes.length - 1; i++) {
+      const end = voiceStartFrame(timeline[i]!) + paced.scenes[i]!.voiceover!.durationInFrames;
+      expect((voiceStartFrame(timeline[i + 1]!) - end) / fps).toBeLessThan(1.5);
+    }
+    // The missing time is a short hold on the closing scene, never more than 4 s.
+    const last = paced.scenes.length - 1;
+    const lastEnd = voiceStartFrame(timeline[last]!) + paced.scenes[last]!.voiceover!.durationInFrames;
+    expect((paced.format.durationInFrames - lastEnd) / fps).toBeLessThanOrEqual(4 + 0.6 + 0.4);
+  });
 });
 
 describe('subtitles', () => {

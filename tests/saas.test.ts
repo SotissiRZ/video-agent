@@ -335,7 +335,7 @@ describe('videos', () => {
     const audio = Buffer.alloc(40_000, 1);
     const upload = (query: string, type = 'audio/webm') => fetch(`${base}/api/voice/clone?${query}`, { method: 'POST', body: audio, headers: { cookie: owner.cookie, 'content-type': type } });
 
-    expect((await owner.json('GET', '/api/voice')).body).toEqual({ clone: null, cloneAvailable: false, pronunciations: [] });
+    expect((await owner.json('GET', '/api/voice')).body).toEqual({ clone: null, cloneAvailable: false, cloneBlocked: 'plan', pronunciations: [] });
     expect((await (await upload('consent=1')).json()).code).toBe('voice_clone_plan');
     expect((await owner.json('POST', '/api/jobs', { prompt: 'Une vidéo de 10 secondes pour un pressing', durationSec: 10, voiceClone: true })).body.code).toBe('voice_clone_plan');
 

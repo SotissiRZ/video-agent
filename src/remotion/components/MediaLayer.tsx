@@ -2,6 +2,7 @@ import React from 'react';
 import { AbsoluteFill, Img, interpolate, Loop, OffthreadVideo, Sequence, useCurrentFrame, useVideoConfig } from 'remotion';
 import type { Media } from '../contract/storyboard';
 import { resolveSrc, seeded } from '../utils';
+import { ScreenCapture } from './ScreenCapture';
 
 interface Props {
   media: Media;
@@ -31,7 +32,17 @@ export const kenBurnsMove = (src: string, kenBurns: number, progress: number) =>
 };
 
 /** Full-bleed image or video with an optional slow camera move (Ken Burns effect). */
-export const MediaLayer: React.FC<Props> = ({ media, kenBurns, style }) => {
+export const MediaLayer: React.FC<Props> = (props) => {
+  const { screen } = props.media;
+  if (!screen) return <PictureLayer {...props} />;
+  return (
+    <AbsoluteFill style={props.style}>
+      <ScreenCapture media={{ ...props.media, screen }} />
+    </AbsoluteFill>
+  );
+};
+
+const PictureLayer: React.FC<Props> = ({ media, kenBurns, style }) => {
   const frame = useCurrentFrame();
   const { durationInFrames } = useVideoConfig();
   const progress = interpolate(frame, [0, durationInFrames], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
