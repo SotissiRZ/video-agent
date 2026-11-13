@@ -266,6 +266,7 @@ const showSong = (song) => {
   $('songEditorCard').hidden = false;
   $('songTitle').value = song.title;
   $('songLyrics').value = song.lyrics;
+  countLyrics();
   const running = song.status === 'queued' || song.status === 'running';
   const correctionLimit = state.me.commerce?.correctionsPerSong ?? 1;
   const editable = !running && (song.status !== 'completed' || song.correctionsUsed < correctionLimit);
@@ -295,6 +296,17 @@ const showSong = (song) => {
     $('songDownload').setAttribute('download', `${song.title.replace(/[^\p{L}\p{N}-]+/gu, '-').replace(/^-|-$/g, '') || 'song'}.mp3`);
   }
 };
+
+/** Live "24 / 30 lignes" under the lyrics: ElevenLabs counts every non-empty line, section labels included. */
+const countLyrics = () => {
+  const text = $('songLyrics').value;
+  const all = text.split(/\r?\n/);
+  const lines = all.filter((line) => line.trim()).length;
+  const longLine = all.some((line) => line.length > 200);
+  $('songLyricsCount').textContent = t(longLine ? 'songs.lyricsCountLong' : 'songs.lyricsCount', { n: lines, max: 30 });
+  $('songLyricsCount').classList.toggle('over', lines > 30 || longLine);
+};
+$('songLyrics').addEventListener('input', countLyrics);
 
 /** Free plan: only the song lengths it allows (the server caps them anyway). */
 const applySongDurationLimit = () => {

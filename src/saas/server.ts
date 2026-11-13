@@ -53,7 +53,7 @@ import { deleteProductImage, describeProductImage, listProductImages, productIma
 import { ensureCleanVideoExport } from './export';
 import { cancelPublication, createPublication, listPublications, publicPublication } from './publications';
 import { Worker } from './worker';
-import { addSongUsage, createSongDraft, deleteSong, getSong, listSongs, publicSong, removeSongPreviews, SONG_ID, songDirectory, songPreviewFile, updateSongLyrics, type SongRow } from './songs';
+import { addSongUsage, createSongDraft, fitLyrics, lyricLineBudget, lyricsTooLong, MAX_LYRIC_CHARS, MAX_LYRIC_LINES, deleteSong, getSong, listSongs, publicSong, removeSongPreviews, SONG_ID, songDirectory, songPreviewFile, updateSongLyrics, type SongRow } from './songs';
 import { makeAudioPreview } from '../audio/ffmpeg';
 import { UsageMeter } from '../core/usage';
 import { planConfig, planLLM } from './plan-providers';
@@ -684,6 +684,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         if (!options.songLyricsGenerator && !lyricProvider) throw new HttpError(503, 'Configurez un fournisseur de rédaction IA pour créer les paroles.', 'song_lyrics_unavailable');
         if (!songDraftLimiter.take(user.id)) throw new HttpError(429, 'Trop de brouillons de chanson, réessayez plus tard', 'too_many_song_drafts');
         let lyrics: z.infer<typeof SongLyricsSchema>;
+        const budget = lyricLineBudget(body.durationSec ?? 90);
         if (options.songLyricsGenerator) {
           try {
             lyrics = SongLyricsSchema.parse(await options.songLyricsGenerator(body));
@@ -695,8 +696,15 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
           let generated: Awaited<ReturnType<NonNullable<typeof lyricProvider>['generate']>>;
           try {
             generated = await lyricProvider!.generate({
-              system: 'You are a professional songwriter. Write original, singable lyrics based only on the user brief. Return valid JSON with title and lyrics. Use clear section labels such as [Verse 1], [Chorus], [Verse 2], [Bridge]. Keep the lyrics in the language requested or used by the user. Do not mention that these are AI-generated.',
-              messages: [{ role: 'user', content: `Brief: ${body.prompt}\nMusical style: ${body.style}\nMood: ${body.mood}` }],
+              system:
+                'You are a professional songwriter. Write original, singable lyrics based only on the user brief. Return valid JSON with title and lyrics. Use clear section labels such as [Verse 1], [Chorus], [Verse 2], [Bridge]. Keep the lyrics in the language requested or used by the user. Do not mention that these are AI-generated. ' +
+                `Hard limit of the music generator: at most ${MAX_LYRIC_LINES} non-empty lines in total, section labels included, each under ${MAX_LYRIC_CHARS} characters. Fit the song length, never write more.`,
+              messages: [
+                {
+                  role: 'user',
+                  content: `Brief: ${body.prompt}\nMusical style: ${body.style}\nMood: ${body.mood}\nSong length: ${body.durationSec ?? 90} seconds. Write about ${budget.sung} sung lines in ${budget.sections} sections (for example a verse and a chorus), no more.`,
+                },
+              ],
               maxTokens: 1600,
               temperature: 0.8,
               json: { name: 'song_lyrics', schema: { type: 'object', properties: { title: { type: 'string' }, lyrics: { type: 'string' } }, required: ['title', 'lyrics'], additionalProperties: false } },
@@ -711,6 +719,8 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
             throw new HttpError(502, 'Le fournisseur IA a renvoyé des paroles invalides. Réessayez.', 'song_lyrics_invalid');
           }
         }
+        // Safety net: an over-long draft would only fail later, at generation time.
+        lyrics = { ...lyrics, lyrics: fitLyrics(lyrics.lyrics) };
         const song = await createSongDraft(db, config, user.id, { ...body, ...lyrics, durationSec: body.durationSec ?? 90 });
         await addSongUsage(db, song.id, lyricsMeter.lines, songPlan);
         return json(res, 201, publicSong(song));
@@ -736,8 +746,8 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       if (sub === 'generate' && method === 'POST') {
         if (config.env.REQUIRE_EMAIL_VERIFICATION && !user.email_verified_at) throw new HttpError(403, 'Confirmez votre adresse e-mail pour générer des chansons', 'email_unverified');
         if (!options.songGenerator && !config.env.ELEVENLABS_API_KEY) throw new HttpError(503, 'La génération de chansons ElevenLabs n’est pas configurée.', 'song_provider_unavailable');
-        if (song.lyrics.split(/\r?\n/).filter((line) => line.trim()).length > 30 || song.lyrics.split(/\r?\n/).some((line) => line.length > 200)) {
-          throw new HttpError(400, 'ElevenLabs accepte au maximum 30 lignes de 200 caractères par chanson.', 'song_lyrics_too_long');
+        if (lyricsTooLong(song.lyrics)) {
+          throw new HttpError(400, `ElevenLabs accepte au maximum ${MAX_LYRIC_LINES} lignes de ${MAX_LYRIC_CHARS} caractères par chanson (titres de sections compris).`, 'song_lyrics_too_long');
         }
         const updated = await db.tx(async (tx) => {
           await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [user.id]);

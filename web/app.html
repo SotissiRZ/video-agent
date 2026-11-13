@@ -346,7 +346,7 @@
               <div class="card-header"><div><h2 data-i18n="songs.reviewTitle"></h2><p data-i18n="songs.reviewSubtitle"></p></div></div>
               <div class="card-body form-stack">
                 <label class="field"><span class="label" data-i18n="songs.songTitle"></span><input class="input" id="songTitle" maxlength="120" /></label>
-                <label class="field"><span class="label" data-i18n="songs.lyrics"></span><textarea class="textarea" id="songLyrics" rows="12" maxlength="6000"></textarea><span class="hint" data-i18n="songs.lyricsHint"></span></label>
+                <label class="field"><span class="label" data-i18n="songs.lyrics"></span><textarea class="textarea" id="songLyrics" rows="12" maxlength="6000"></textarea><span class="hint" id="songLyricsCount"></span></label>
                 <div class="alert warning"><i data-icon="alert"></i><span data-i18n="songs.fidelityWarning"></span></div>
                 <div class="alert danger" id="songGenerateError" hidden></div>
                 <div id="songAudioResult" hidden class="form-stack"><audio controls id="songAudio" style="width: 100%"></audio><div class="alert info" id="songPreviewNote" hidden><i data-icon="info" data-size="16"></i><span id="songPreviewNoteText"></span></div><div class="input-group"><a class="btn btn-secondary" id="songDownload"><i data-icon="download"></i><span data-i18n="songs.download"></span></a><div class="input-group" id="songExportPay"></div></div></div>
