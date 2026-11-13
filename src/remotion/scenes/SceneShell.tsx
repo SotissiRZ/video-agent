@@ -3,7 +3,7 @@ import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } fr
 import type { Scene, Storyboard } from '../contract/storyboard';
 import { Background } from '../components/Background';
 import { MediaStack } from '../components/MediaLayer';
-import { springFor, useLayout, withAlpha } from '../utils';
+import { scrim, springFor, useLayout, withAlpha } from '../utils';
 
 export interface SceneProps {
   scene: Scene;
@@ -33,9 +33,12 @@ export const SceneShell: React.FC<SceneProps & { children: React.ReactNode; just
           <MediaStack media={[scene.media, ...(scene.shots ?? [])]} kenBurns={scene.animation.kenBurns} />
           <AbsoluteFill
             style={{
-              // Strong enough for white text over a bright photo (a white desk, a silver laptop),
-              // darkest behind the headline and the subtitles.
-              background: `linear-gradient(180deg, ${withAlpha(theme.palette.backgroundAlt, 0.38)} 0%, ${withAlpha(theme.palette.backgroundAlt, 0.64)} 35%, ${withAlpha(theme.palette.backgroundAlt, 0.64)} 65%, ${withAlpha(theme.palette.backgroundAlt, 0.82)} 100%)`,
+              // Neutral and local: darker only behind the centred text and the subtitles at the
+              // bottom, so the picture keeps its own colours and contrast everywhere else.
+              background: [
+                `radial-gradient(ellipse 90% 50% at 50% 50%, ${scrim(theme.palette.text, 0.42)} 0%, ${scrim(theme.palette.text, 0.2)} 65%, ${scrim(theme.palette.text, 0.08)} 100%)`,
+                `linear-gradient(180deg, ${scrim(theme.palette.text, 0.18)} 0%, transparent 22%, transparent 62%, ${scrim(theme.palette.text, 0.6)} 100%)`,
+              ].join(', '),
             }}
           />
         </>
@@ -54,7 +57,7 @@ export const SceneShell: React.FC<SceneProps & { children: React.ReactNode; just
           textShadow: theme.glow
             ? `0 0 ${layout.unit * 0.012}px ${withAlpha(theme.palette.primary, 0.75)}, 0 0 ${layout.unit * 0.035}px ${withAlpha(theme.palette.primary, 0.35)}`
             : mediaBackdrop
-              ? `0 ${layout.unit * 0.003}px ${layout.unit * 0.018}px ${withAlpha(theme.palette.backgroundAlt, 0.7)}`
+              ? `0 ${layout.unit * 0.003}px ${layout.unit * 0.02}px ${scrim(theme.palette.text, 0.65)}, 0 0 ${layout.unit * 0.006}px ${scrim(theme.palette.text, 0.5)}`
               : undefined,
         }}
       >

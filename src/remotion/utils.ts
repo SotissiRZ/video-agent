@@ -26,6 +26,17 @@ export const withAlpha = (color: string, alpha: number): string => {
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
 };
 
+/**
+ * Neutral veil that keeps text readable over a photo or a clip: black under light text, white under
+ * dark text. Never a theme colour: a saffron or pink veil tints the whole picture and flattens it.
+ */
+export const scrim = (textColor: string, alpha: number): string => {
+  const m = /^#([0-9a-f]{6})$/i.exec(textColor);
+  const n = m ? parseInt(m[1]!, 16) : 0xffffff;
+  const luminance = (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255;
+  return luminance > 0.5 ? `rgba(0, 0, 0, ${alpha})` : `rgba(255, 255, 255, ${alpha})`;
+};
+
 export interface Layout {
   width: number;
   height: number;
