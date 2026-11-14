@@ -85,7 +85,8 @@
       <a class="brand" href="/"><i data-icon="logo" data-size="26"></i>SOVID AI</a>
       <nav class="nav">
         <a href="#create" data-page="create"><i data-icon="film"></i><span data-i18n="nav.create"></span></a>
-        <a href="#songs" data-page="songs" id="songsLink"><i data-icon="music"></i><span data-i18n="nav.songs"></span></a>
+        <a href="#songs" data-page="songs" id="songsLink"><i data-icon="mic"></i><span data-i18n="nav.songs"></span></a>
+        <a href="#mysongs" data-page="mysongs" id="mySongsLink"><i data-icon="music"></i><span data-i18n="nav.mysongs"></span></a>
         <a href="#library" data-page="library"><i data-icon="film"></i><span data-i18n="nav.library"></span></a>
         <a href="#schedule" data-page="schedule" id="scheduleLink"><i data-icon="calendar"></i><span data-i18n="nav.schedule"></span><span class="count" id="pendingCount" hidden></span></a>
         <a href="#connections" data-page="connections" id="connectionsLink"><i data-icon="link"></i><span data-i18n="nav.connections"></span></a>
@@ -349,7 +350,7 @@
                 <label class="field"><span class="label" data-i18n="songs.lyrics"></span><textarea class="textarea" id="songLyrics" rows="12" maxlength="6000"></textarea><span class="hint" id="songLyricsCount"></span></label>
                 <div class="alert warning"><i data-icon="alert"></i><span data-i18n="songs.fidelityWarning"></span></div>
                 <div class="alert danger" id="songGenerateError" hidden></div>
-                <div id="songAudioResult" hidden class="form-stack"><audio controls id="songAudio" style="width: 100%"></audio><div class="alert info" id="songPreviewNote" hidden><i data-icon="info" data-size="16"></i><span id="songPreviewNoteText"></span></div><div class="input-group"><a class="btn btn-secondary" id="songDownload"><i data-icon="download"></i><span data-i18n="songs.download"></span></a><div class="input-group" id="songExportPay"></div></div></div>
+                <div id="songAudioResult" hidden class="form-stack"><audio controls id="songAudio" style="width: 100%"></audio><div class="alert info" id="songPreviewNote" hidden><i data-icon="info" data-size="16"></i><span id="songPreviewNoteText"></span></div><div class="input-group"><a class="btn btn-secondary" id="songDownload"><i data-icon="download"></i><span data-i18n="songs.download"></span></a><div class="input-group" id="songExportPay"></div></div><div class="song-versions" id="songVersions" hidden></div></div>
               </div>
               <div class="card-footer">
                 <button class="btn btn-secondary" type="button" id="songSaveLyrics"><i data-icon="check"></i><span data-i18n="songs.saveLyrics"></span></button>
@@ -358,7 +359,13 @@
               </div>
             </div>
           </div>
-          <div class="song-history"><h2 data-i18n="songs.history"></h2><div class="video-grid" id="songHistory"></div><div class="card" id="songsEmpty" hidden><div class="empty-state"><div class="icon-wrap"><i data-icon="mic"></i></div><h3 data-i18n="songs.empty"></h3></div></div></div>
+        </section>
+
+        <!-- ---------------- My songs ---------------- -->
+        <section class="page" id="page-mysongs">
+          <div class="page-header"><div><h1 data-i18n="nav.mysongs"></h1><p data-i18n="songs.mineSubtitle"></p></div><a class="btn btn-primary" href="#songs?new=1"><i data-icon="plus" data-size="16"></i><span data-i18n="songs.new"></span></a></div>
+          <div class="video-grid" id="songHistory"></div>
+          <div class="card" id="songsEmpty" hidden><div class="empty-state"><div class="icon-wrap"><i data-icon="music"></i></div><h3 data-i18n="songs.empty"></h3><a class="btn btn-primary" href="#songs?new=1"><i data-icon="plus" data-size="16"></i><span data-i18n="songs.new"></span></a></div></div>
         </section>
 
         <!-- ---------------- Library ---------------- -->

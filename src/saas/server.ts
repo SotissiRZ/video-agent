@@ -53,7 +53,7 @@ import { deleteProductImage, describeProductImage, listProductImages, productIma
 import { ensureCleanVideoExport } from './export';
 import { cancelPublication, createPublication, listPublications, publicPublication } from './publications';
 import { Worker } from './worker';
-import { addSongUsage, createSongDraft, fitLyrics, lyricLineBudget, lyricsTooLong, MAX_LINE_CHARS, MAX_SECTION_LINES, deleteSong, getSong, listSongs, publicSong, removeSongPreviews, SONG_ID, songDirectory, songPreviewFile, updateSongLyrics, type SongRow } from './songs';
+import { addSongUsage, createSongDraft, fitLyrics, songVersions, lyricLineBudget, lyricsTooLong, MAX_LINE_CHARS, MAX_SECTION_LINES, deleteSong, getSong, listSongs, publicSong, removeSongPreviews, SONG_ID, songDirectory, songPreviewFile, updateSongLyrics, type SongRow } from './songs';
 import { makeAudioPreview } from '../audio/ffmpeg';
 import { UsageMeter } from '../core/usage';
 import { planConfig, planLLM } from './plan-providers';
@@ -427,10 +427,18 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
 
   const generateSong = async (song: SongRow, plan: string): Promise<void> => {
     const currentConfig = config;
-    const generate = options.songGenerator ?? (currentConfig.env.ELEVENLABS_API_KEY
-      ? (input: { lyrics: string; style: string; mood: string; durationSec: number }) =>
-          new ElevenLabsSongProvider(currentConfig.env.ELEVENLABS_API_KEY!).generate(input)
-      : undefined);
+    // A correction keeps the sound of the previous version: same seed, conditioned on its audio.
+    const generate = options.songGenerator
+      ? async (input: { lyrics: string; style: string; mood: string; durationSec: number }) => ({ audio: await options.songGenerator!(input), songId: undefined as string | undefined })
+      : currentConfig.env.ELEVENLABS_API_KEY
+        ? (input: { lyrics: string; style: string; mood: string; durationSec: number }) =>
+            new ElevenLabsSongProvider(currentConfig.env.ELEVENLABS_API_KEY!).compose({
+              ...input,
+              seed: song.seed ?? undefined,
+              previousSongId: song.provider_song_id ?? undefined,
+              previousDurationSec: song.duration_sec,
+            })
+        : undefined;
     if (!generate) {
       await db.query("UPDATE songs SET status = 'failed', error = $2, finished_at = now(), updated_at = now() WHERE id = $1", [song.id, 'La clé ElevenLabs Music n’est pas configurée.']);
       return;
@@ -442,7 +450,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       void db.query("UPDATE songs SET heartbeat_at = now() WHERE id = $1 AND status = 'running'", [song.id]).catch((err) => logger.warn(`song ${song.id} heartbeat failed: ${errorMessage(err)}`));
     }, 30_000);
     try {
-      const audio = await generate({ lyrics: song.lyrics, style: song.style, mood: song.mood, durationSec: song.duration_sec });
+      const { audio, songId } = await generate({ lyrics: song.lyrics, style: song.style, mood: song.mood, durationSec: song.duration_sec });
       if (!audio.length) throw new Error('ElevenLabs a renvoyé un fichier audio vide.');
       await addSongUsage(db, song.id, [{ kind: 'music', provider: 'elevenlabs', model: 'music', calls: 1, seconds: song.duration_sec }], plan);
       fs.mkdirSync(dir, { recursive: true });
@@ -451,8 +459,8 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       fs.writeFileSync(temporaryFile, audio, { flag: 'wx' });
       fs.renameSync(temporaryFile, audioFile);
       const saved = await db.query<{ id: string }>(
-        "UPDATE songs SET status = 'completed', audio_file = $2, error = NULL, finished_at = now(), updated_at = now() WHERE id = $1 RETURNING id",
-        [song.id, audioFile],
+        "UPDATE songs SET status = 'completed', audio_file = $2, provider_song_id = coalesce($3, provider_song_id), error = NULL, finished_at = now(), updated_at = now() WHERE id = $1 RETURNING id",
+        [song.id, audioFile, songId ?? null],
       );
       if (!saved.length) fs.rmSync(dir, { recursive: true, force: true });
     } catch (err) {
@@ -467,13 +475,15 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
   };
 
   const songPreviews = new Map<string, Promise<string>>();
-  const ensureSongPreview = (song: SongRow, seconds: number): Promise<string> => {
-    const target = songPreviewFile(song, seconds);
+  /** Excerpt of the current audio, or of an earlier version (version: 1-based number). */
+  const ensureSongPreview = (song: SongRow, seconds: number, version?: { number: number; file: string }): Promise<string> => {
+    const source = version?.file ?? song.audio_file!;
+    const target = version ? path.join(path.dirname(source), `preview-v${version.number}-${seconds}s.mp3`) : songPreviewFile(song, seconds);
     if (fs.existsSync(target)) return Promise.resolve(target);
     const existing = songPreviews.get(target);
     if (existing) return existing;
     const temporary = `${target}.tmp`;
-    const task = (options.songPreviewer ?? makeAudioPreview)(song.audio_file!, temporary, seconds)
+    const task = (options.songPreviewer ?? makeAudioPreview)(source, temporary, seconds)
       .then(() => {
         fs.renameSync(temporary, target);
         return target;
@@ -738,9 +748,20 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       }
       if (sub === 'lyrics' && method === 'PUT') {
         const body = parse(SongUpdateSchema, await readJson(req));
+        // Saving unchanged lyrics is not a correction: nothing happens, nothing is used up.
+        if (body.title.trim() === song.title.trim() && body.lyrics.trim() === song.lyrics.trim()) return json(res, 200, publicSong(song));
         const settings = await getCommerceSettings(db);
-        const updated = await updateSongLyrics(db, user.id, song.id, body.title, body.lyrics, settings.correctionsPerSong);
-        if (!updated) throw new HttpError(409, 'Les paroles ne peuvent plus être modifiées pendant ou après la génération.', 'song_not_editable');
+        // A finished song is never lost: its audio becomes version N (song-vN.mp3) before the new draft.
+        let archived: string | null = null;
+        if (song.status === 'completed' && song.audio_file && fs.existsSync(song.audio_file)) {
+          archived = path.join(path.dirname(song.audio_file), `song-v${songVersions(song).length + 1}.mp3`);
+          fs.renameSync(song.audio_file, archived);
+        }
+        const updated = await updateSongLyrics(db, user.id, song.id, body.title, body.lyrics, settings.correctionsPerSong, archived);
+        if (!updated) {
+          if (archived) fs.renameSync(archived, song.audio_file!);
+          throw new HttpError(409, 'Les paroles ne peuvent plus être modifiées pendant ou après la génération.', 'song_not_editable');
+        }
         return json(res, 200, publicSong(updated));
       }
       if (sub === 'generate' && method === 'POST') {
@@ -758,9 +779,11 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
           // The free plan's songs are shorter: ElevenLabs Music is billed per minute.
           const maxSec = plan.id === 'free' ? commerce.freeSongMaxSec : 120;
           return tx.one<SongRow>(
-            `UPDATE songs SET status = 'running', error = NULL, finished_at = NULL, heartbeat_at = now(), updated_at = now(), duration_sec = LEAST(duration_sec, $3)
+            // The seed is drawn once per song and reused by every later version.
+            `UPDATE songs SET status = 'running', error = NULL, finished_at = NULL, heartbeat_at = now(), updated_at = now(), duration_sec = LEAST(duration_sec, $3),
+               seed = coalesce(seed, $4)
              WHERE id = $1 AND user_id = $2 AND status IN ('draft', 'failed') RETURNING *`,
-            [song.id, user.id, maxSec],
+            [song.id, user.id, maxSec, crypto.randomInt(0, 2_147_483_647)],
           );
         });
         if (!updated) throw new HttpError(409, 'Cette chanson est déjà en cours ou a déjà été générée.', 'song_not_ready');
@@ -768,13 +791,19 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         songTasks.add(task);
         return json(res, 202, publicSong(updated));
       }
-      if (sub === 'audio' && song.audio_file && method === 'GET') {
+      if (sub === 'audio' && method === 'GET') {
+        // ?version=N: an earlier version kept after a lyrics correction (same rights as the song).
+        const n = url.searchParams.get('version');
+        const kept = n ? songVersions(song)[Number(n) - 1] : undefined;
+        if (n && (!kept || !/^\d+$/.test(n))) throw new HttpError(404, 'not found', 'not_found');
+        const file = kept?.file ?? song.audio_file;
+        if (!file || !fs.existsSync(file)) throw new HttpError(404, 'not found', 'not_found');
         const download = url.searchParams.get('download') === '1';
         const entitled = planOfUser(config, user).id !== 'free' || song.export_paid;
         if (download && !entitled) throw new HttpError(402, 'Débloquez cet export pour télécharger la chanson.', 'export_payment_required', { product: 'song', targetId: song.id });
-        if (entitled) return sendFile(req, res, song.audio_file, { download, cache: 'private, no-cache' });
+        if (entitled) return sendFile(req, res, file, { download, cache: 'private, no-cache' });
         // Not unlocked: listening on the platform only gets a short excerpt, never the full master.
-        const preview = await ensureSongPreview(song, (await getCommerceSettings(db)).songPreviewSec);
+        const preview = await ensureSongPreview(song, (await getCommerceSettings(db)).songPreviewSec, kept ? { number: Number(n), file } : undefined);
         return sendFile(req, res, preview, { cache: 'no-store' });
       }
       throw new HttpError(404, 'not found', 'not_found');

@@ -45,6 +45,12 @@ export const httpJson = async <T>(url: string, opts: HttpOptions): Promise<T> =>
 export const httpBuffer = async (url: string, opts: HttpOptions): Promise<Buffer> =>
   Buffer.from(await (await request(url, opts)).arrayBuffer());
 
+/** Body and response headers (some providers return ids there). */
+export const httpBufferWithHeaders = async (url: string, opts: HttpOptions): Promise<{ body: Buffer; headers: Headers }> => {
+  const res = await request(url, opts);
+  return { body: Buffer.from(await res.arrayBuffer()), headers: res.headers };
+};
+
 export const sleep = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
     const t = setTimeout(resolve, ms);

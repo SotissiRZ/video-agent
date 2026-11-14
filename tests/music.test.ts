@@ -70,6 +70,40 @@ describe('music providers', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('a corrected song reuses the seed and is conditioned on the previous version; refused options are dropped', async () => {
+    const bodies: Array<Record<string, any>> = [];
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      bodies.push(body);
+      // ElevenLabs refusing the reference: the provider must retry without it, keeping the seed.
+      if (body.composition_plan.chunks[0].conditioning_ref) return new Response('{"detail":"conditioning not allowed"}', { status: 422 });
+      return new Response(new Uint8Array([7, 8]), { headers: { 'song-id': 'song_new_42' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await new ElevenLabsSongProvider('song-key').compose({
+      lyrics: '[Verse 1]\nPour toi encore\n[Chorus]\nJoyeux anniversaire',
+      style: 'Afropop',
+      mood: 'Joyful',
+      durationSec: 60,
+      seed: 1234,
+      previousSongId: 'song_old_1',
+      previousDurationSec: 60,
+    });
+    expect(result).toEqual({ audio: Buffer.from([7, 8]), songId: 'song_new_42' });
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toMatchObject({ seed: 1234, composition_plan: { chunks: [{ conditioning_ref: { song_id: 'song_old_1', range: { start_ms: 0, end_ms: 30_000 } }, condition_strength: 'high' }, {}] } });
+    expect(bodies[0]!.composition_plan.chunks[1].conditioning_ref).toBeUndefined();
+    expect(bodies[1]!.seed).toBe(1234);
+    expect(bodies[1]!.composition_plan.chunks[0].conditioning_ref).toBeUndefined();
+  });
+
+  it('does not retry a song on a quota or authentication error', async () => {
+    const fetchMock = vi.fn(async () => new Response('{"detail":"quota"}', { status: 401 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(new ElevenLabsSongProvider('song-key').compose({ lyrics: '[Verse]\nla la', style: 'Pop', mood: 'Joyful', durationSec: 30, seed: 1, previousSongId: 'x' })).rejects.toThrow(/HTTP 401/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('ElevenLabs sends the length in ms and forces instrumental', async () => {
     const fetchMock = vi.fn(async () => new Response(new Uint8Array([1, 2, 3])));
     vi.stubGlobal('fetch', fetchMock);

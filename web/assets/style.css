@@ -346,6 +346,14 @@ dialog.viewer::backdrop { background: rgba(10, 14, 24, 0.55); }
 .song-page-header, .song-workspace, .song-history { width: min(100%, 960px); margin-inline: auto; }
 .song-workspace { display: grid; gap: 20px; align-items: start; }
 .song-history { margin-top: 24px; }
+/* An open song (from "Mes chansons" or just drafted) comes before the brief form. */
+.song-workspace:has(#songEditorCard:not([hidden])) > #songEditorCard { order: -1; }
+.song-versions { display: grid; gap: 12px; padding-top: 14px; border-top: 1px solid var(--border); }
+.song-versions h3 { font-size: 14px; }
+.song-version { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.song-version-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.song-version-head .hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.song-version audio { width: 100%; }
 .song-history > h2 { margin-bottom: 12px; }
 
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; align-items: start; }

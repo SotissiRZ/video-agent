@@ -308,6 +308,12 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE users ADD COLUMN google_sub text;
   CREATE UNIQUE INDEX users_google_sub ON users(google_sub);
   `,
+  // 14 — song versions: a lyrics correction keeps the previous audio; same seed / reference for the same sound
+  `
+  ALTER TABLE songs ADD COLUMN seed integer;
+  ALTER TABLE songs ADD COLUMN provider_song_id text;
+  ALTER TABLE songs ADD COLUMN versions jsonb NOT NULL DEFAULT '[]'::jsonb;
+  `,
 ];
 
 /** Apply pending migrations (serialized with an advisory lock: several containers may start together). */

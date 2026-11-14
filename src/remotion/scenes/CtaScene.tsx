@@ -13,13 +13,16 @@ export const CtaScene: React.FC<SceneProps> = (props) => {
   const pop = useEntrance(18, theme.motion);
   const pulse = 1 + Math.sin(Math.max(0, frame - 30) / 6) * 0.035 * Math.min(1, Math.max(0, frame - 30) / 10);
   const buttonSize = Math.round(layout.unit * 0.052);
+  // "Sirago" above "SIRAGO, EN ROUTE !" says the name twice: the wordmark only when the headline lacks it.
+  const plain = (text: string) => text.normalize('NFD').replace(/[̀-ͯ*]/g, '').toLowerCase();
+  const nameInHeadline = Boolean(brand.name) && plain(scene.headline).includes(plain(brand.name!));
   return (
     <SceneShell {...props}>
       {brand.logo ? (
         <FadeUp>
           <Img src={resolveSrc(brand.logo)} style={{ height: layout.unit * 0.12, width: 'auto', objectFit: 'contain' }} />
         </FadeUp>
-      ) : brand.name ? (
+      ) : brand.name && !nameInHeadline ? (
         <FadeUp>
           <div style={{ fontFamily: theme.headingFont, fontWeight: 900, fontSize: layout.unit * 0.07, color: theme.palette.text, letterSpacing: '0.02em' }}>
             {brand.name}

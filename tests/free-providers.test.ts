@@ -6,7 +6,7 @@ import { loadConfig } from '../src/config/config';
 import { createLogger } from '../src/core/logger';
 import { resolveLLM } from '../src/llm/registry';
 import { OllamaProvider } from '../src/llm/providers/ollama';
-import { CloudflareImageProvider } from '../src/providers/image/cloudflare';
+import { cloudflareSize, CloudflareImageProvider } from '../src/providers/image/cloudflare';
 import { HuggingFaceImageProvider } from '../src/providers/image/huggingface';
 import { resolveImageProvider } from '../src/providers/image/registry';
 import { piperArchiveName, piperVoiceUrl } from '../src/providers/voice/piper';
@@ -76,6 +76,17 @@ describe('free AI images', () => {
     const { file } = await new CloudflareImageProvider({ accountId: 'acc', apiToken: 'tok', model: '@cf/black-forest-labs/flux-1-schnell' }).generate({ prompt: 'taxi', width: 1080, height: 1920, outFileBase: base });
     expect(fs.readFileSync(file, 'utf8')).toBe('jpeg-bytes');
     expect(m.calls[0]!.headers.authorization).toBe('Bearer tok');
+    // FLUX.1 schnell takes no size: its maximum steps for detail.
+    expect(JSON.parse(String(m.calls[0]!.body))).toEqual({ prompt: 'taxi', steps: 8 });
+  });
+
+  it('Cloudflare Lucid Origin (default model) generates at the video size, not a square', async () => {
+    const m = mockFetch([['POST', /ai\/run\/@cf\/leonardo\/lucid-origin/, () => json({ success: true, result: { image: Buffer.from('jpeg').toString('base64') } })]]);
+    restore = m.restore;
+    await new CloudflareImageProvider({ accountId: 'acc', apiToken: 'tok', model: '@cf/leonardo/lucid-origin' }).generate({ prompt: 'moto-taxi', width: 1080, height: 1920, outFileBase: path.join(tmpDir(), 'img') });
+    expect(JSON.parse(String(m.calls[0]!.body))).toEqual({ prompt: 'moto-taxi', width: 1080, height: 1920 });
+    expect(cloudflareSize('@cf/leonardo/phoenix-1.0', 1080, 3840)).toEqual({ width: 576, height: 2048 });
+    expect(cloudflareSize('@cf/black-forest-labs/flux-1-schnell', 1080, 1920)).toBeUndefined();
   });
 
   it('Hugging Face returns image bytes at a size multiple of 16', async () => {

@@ -63,7 +63,7 @@ const EnvSchema = z.object({
   VIDEO_AGENT_MAX_GENERATED_IMAGES: int(4, 0, 50),
   CLOUDFLARE_ACCOUNT_ID: optionalString,
   CLOUDFLARE_API_TOKEN: optionalString,
-  CLOUDFLARE_IMAGE_MODEL: z.preprocess(emptyToUndefined, z.string().default('@cf/black-forest-labs/flux-1-schnell')),
+  CLOUDFLARE_IMAGE_MODEL: z.preprocess(emptyToUndefined, z.string().default('@cf/leonardo/lucid-origin')),
   HF_TOKEN: optionalString,
   HF_IMAGE_MODEL: z.preprocess(emptyToUndefined, z.string().default('black-forest-labs/FLUX.1-schnell')),
   STABILITY_API_KEY: optionalString,

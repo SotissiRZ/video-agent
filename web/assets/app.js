@@ -12,7 +12,7 @@ const PROVIDER_INFO = {
   linkedin: { name: 'LinkedIn', icon: 'linkedin', setupUrl: 'https://www.linkedin.com/developers/apps' },
   meta: { name: 'Facebook + Instagram', icon: 'meta', setupUrl: 'https://developers.facebook.com/apps/' },
 };
-const PAGES = ['create', 'songs', 'library', 'schedule', 'connections', 'brand', 'billing', 'account', 'admin'];
+const PAGES = ['create', 'songs', 'mysongs', 'library', 'schedule', 'connections', 'brand', 'billing', 'account', 'admin'];
 
 const state = { voice: null, me: null, publicConfig: null, options: null, connections: null, job: null, source: null, publishJobId: null, brand: null, song: null, songPoll: null, productImages: [] };
 
@@ -70,9 +70,9 @@ const onRoute = () => {
   document.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === `page-${name}`));
   document.querySelectorAll('.nav a[data-page]').forEach((a) => a.classList.toggle('active', a.dataset.page === name));
   $('topTitle').textContent = t(name === 'schedule' ? 'nav.schedule' : `nav.${name}`);
-  $('newVideoBtn').hidden = name === 'songs' || (name === 'create' && !state.job);
+  $('newVideoBtn').hidden = name === 'songs' || name === 'mysongs' || (name === 'create' && !state.job);
   $('appView').classList.remove('menu-open');
-  ({ create: () => openJobFromParams(params), songs: loadSongs, library: loadLibrary, schedule: loadSchedule, connections: () => loadConnections(params), brand: loadBrand, billing: () => loadBilling(params), account: loadAccount, admin: loadAdmin })[name]?.();
+  ({ create: () => openJobFromParams(params), songs: () => openSongFromParams(params), mysongs: loadSongs, library: loadLibrary, schedule: loadSchedule, connections: () => loadConnections(params), brand: loadBrand, billing: () => loadBilling(params), account: loadAccount, admin: loadAdmin })[name]?.();
 };
 window.addEventListener('hashchange', onRoute);
 
@@ -212,6 +212,7 @@ const renderShell = () => {
     $('scheduleLink').hidden = !features.publish?.length && !admin;
     $('connectionsLink').hidden = !features.publish?.length && !admin;
     $('songsLink').hidden = !features.songs && !admin;
+    $('mySongsLink').hidden = $('songsLink').hidden;
   }
   $('userName').textContent = user.name || user.email.split('@')[0];
   $('userEmail').textContent = user.email;
@@ -285,6 +286,7 @@ const showSong = (song) => {
   // Free plan: say plainly that the player holds an excerpt, and how long the real song is.
   $('songPreviewNoteText').textContent = t('songs.previewNote', { n: Math.min(state.me.commerce?.songPreviewSec ?? 30, song.durationSec ?? 30), total: song.durationSec ?? 30 });
   renderExportActions($('songExportPay'), 'song', song.id, song.exportPaid);
+  renderSongVersions(song);
   if (song.audioUrl) {
     // Reload when the excerpt becomes the full song (payment) or a corrected version is generated.
     const audioKey = `${song.id}:${song.exportPaid}:${song.finishedAt ?? ''}`;
@@ -295,6 +297,30 @@ const showSong = (song) => {
     $('songDownload').href = song.downloadUrl;
     $('songDownload').setAttribute('download', `${song.title.replace(/[^\p{L}\p{N}-]+/gu, '-').replace(/^-|-$/g, '') || 'song'}.mp3`);
   }
+};
+
+/** Earlier versions kept after a lyrics correction: each one can still be played (and downloaded when unlocked). */
+const renderSongVersions = (song) => {
+  const versions = song.versions ?? [];
+  const canDownload = state.me.plan.id !== 'free' || song.exportPaid;
+  $('songVersions').hidden = !versions.length;
+  // Shown even while the new version is a draft: the previous audio is never lost.
+  if (versions.length) $('songAudioResult').hidden = false;
+  $('songAudio').hidden = !song.audioUrl;
+  // New version still a draft: the current player and its download/excerpt note have nothing to show yet.
+  if (!song.audioUrl) {
+    $('songDownload').hidden = true;
+    $('songPreviewNote').hidden = true;
+  }
+  $('songVersions').innerHTML = versions.length
+    ? `<h3>${escapeHtml(t('songs.versions'))}</h3>` +
+      versions
+        .map(
+          (v) =>
+            `<div class="song-version"><div class="song-version-head"><b>${escapeHtml(t('songs.version', { n: v.number }))}</b><span class="hint">${escapeHtml(v.title)}${v.finishedAt ? ` · ${escapeHtml(formatDate(v.finishedAt))}` : ''}</span>${canDownload ? `<a class="btn btn-ghost btn-sm" href="${escapeHtml(v.downloadUrl)}" download>${icon('download', 15)}<span>${escapeHtml(t('songs.download'))}</span></a>` : ''}</div><audio controls preload="none" src="${escapeHtml(`${v.audioUrl}&v=${song.exportPaid}`)}"></audio></div>`,
+        )
+        .join('')
+    : '';
 };
 
 /**
@@ -350,6 +376,29 @@ const loadSongs = async () => {
   if (state.song && ['queued', 'running'].includes(state.song.status)) pollSong(state.song.id);
 };
 
+/** #songs?song=ID opens a song from "Mes chansons"; #songs?new=1 starts a new one. */
+const openSongFromParams = async (params) => {
+  await loadSongs();
+  if (params.get('new')) {
+    clearTimeout(state.songPoll);
+    state.song = null;
+    $('songEditorCard').hidden = true;
+    $('songAudio').pause();
+    $('songAudio').removeAttribute('src');
+    history.replaceState(null, '', '#songs');
+    $('songPrompt').focus({ preventScroll: true });
+    return;
+  }
+  const id = params.get('song');
+  if (!id || state.song?.id === id) return;
+  try {
+    showSong(await api(`/api/songs/${encodeURIComponent(id)}`));
+    if (['queued', 'running'].includes(state.song.status)) pollSong(state.song.id);
+  } catch {
+    /* unknown song: stay on the form */
+  }
+};
+
 const pollSong = (id) => {
   clearTimeout(state.songPoll);
   state.songPoll = setTimeout(async () => {
@@ -390,6 +439,12 @@ $('songBriefForm').addEventListener('submit', async (e) => {
 $('songSaveLyrics').addEventListener('click', async () => {
   if (!state.song) return;
   $('songGenerateError').hidden = true;
+  if ($('songTitle').value.trim() === state.song.title.trim() && $('songLyrics').value.trim() === state.song.lyrics.trim()) {
+    toast(t('songs.noChange'), 'info');
+    return;
+  }
+  // On a finished song this is a correction: say it before, the current audio is kept as a version.
+  if (state.song.status === 'completed' && !confirm(t('songs.correctionConfirm'))) return;
   try {
     const song = await api(`/api/songs/${encodeURIComponent(state.song.id)}/lyrics`, {
       method: 'PUT',
@@ -446,12 +501,7 @@ $('songHistory').addEventListener('click', async (e) => {
   }
   const card = e.target.closest('[data-song-id]');
   if (!card) return;
-  try {
-    showSong(await api(`/api/songs/${encodeURIComponent(card.dataset.songId)}`));
-    if (['queued', 'running'].includes(state.song.status)) pollSong(state.song.id);
-  } catch (err) {
-    toast(errorText(err), 'error');
-  }
+  go(`songs?song=${encodeURIComponent(card.dataset.songId)}`);
 });
 $('songHistory').addEventListener('keydown', (e) => {
   if ((e.key === 'Enter' || e.key === ' ') && e.target.closest('[data-song-id]') && !e.target.closest('[data-song-delete]')) {
