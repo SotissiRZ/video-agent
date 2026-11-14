@@ -78,6 +78,8 @@ export const AudioClipSchema = z.object({
   src: z.string().min(1),
   durationInFrames: z.number().int().positive(),
   volume: z.number().min(0).max(1).default(1),
+  /** When each word is spoken, in frames from the start of the file (motion/sync: picture on the voice). */
+  words: z.array(z.object({ text: z.string(), from: z.number().int().min(0), to: z.number().int().min(0) })).optional(),
 });
 export type AudioClip = z.infer<typeof AudioClipSchema>;
 

@@ -2,6 +2,7 @@ import React from 'react';
 import { interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion';
 import { AnimatedText } from '../components/AnimatedText';
 import { bulletSpacing, fitFontSize, springFor, useLayout } from '../utils';
+import { itemRevealFrames, VoiceSyncContext } from '../motion/sync';
 import { Kicker, SceneShell, type SceneProps } from './SceneShell';
 
 /** Headline + list of benefits/features revealed one after the other. */
@@ -14,6 +15,9 @@ export const BulletsScene: React.FC<SceneProps> = (props) => {
   const items = scene.items.slice(0, 6);
   // Spread the reveals across the first 60% of the scene.
   const spacing = bulletSpacing(durationInFrames, items.length);
+  // Each bullet appears when the voice says it (regular spacing when it doesn't).
+  const sync = React.useContext(VoiceSyncContext);
+  const reveals = itemRevealFrames({ voiceover: scene.voiceover, durationInFrames }, sync.offset, items, spacing);
   const longest = items.reduce((m, i) => Math.max(m, i.length), 0);
   // A sixth line gets slightly smaller text so the list still fits a landscape frame.
   const itemSize = Math.round(layout.unit * Math.min(0.055, Math.max(0.034, 0.055 * Math.sqrt(20 / Math.max(20, longest)))) * (items.length > 5 ? 0.88 : 1));
@@ -32,7 +36,7 @@ export const BulletsScene: React.FC<SceneProps> = (props) => {
       />
       <div style={{ display: 'flex', flexDirection: 'column', gap: itemSize * 0.5, width: layout.isPortrait ? '100%' : '80%' }}>
         {items.map((item, i) => {
-          const p = spring({ frame: frame - 15 - i * spacing, fps, config: springFor(theme.motion) });
+          const p = spring({ frame: frame - reveals[i]!, fps, config: springFor(theme.motion) });
           return (
             <div
               key={i}

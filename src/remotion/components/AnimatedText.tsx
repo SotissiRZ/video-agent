@@ -2,6 +2,7 @@ import React from 'react';
 import { interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion';
 import type { Entrance, Theme } from '../contract/storyboard';
 import { parseEmphasis, springFor } from '../utils';
+import { findSpoken, VoiceSyncContext } from '../motion/sync';
 
 interface Props {
   text: string;
@@ -59,6 +60,7 @@ export const AnimatedText: React.FC<Props> = ({
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
   const config = springFor(theme.motion);
+  const sync = React.useContext(VoiceSyncContext);
   // The block never freezes: a slow push towards the viewer plus a gentle float, all scene long.
   const life = interpolate(frame, [0, durationInFrames], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
   const drift = `scale(${(1 + 0.04 * life).toFixed(4)}) translateY(${(Math.sin(frame / 24) * 0.035).toFixed(4)}em)`;
@@ -131,7 +133,10 @@ export const AnimatedText: React.FC<Props> = ({
           }
           if (exit > 0) transforms.push(`translateY(${(-exit * 0.45).toFixed(3)}em)`);
           // The highlighted word: a marker stroke draws under it once it has landed, and it breathes.
-          const marker = seg.emphasis ? spring({ frame: frame - start - 8, fps, config: { damping: 20, stiffness: 120 } }) : 0;
+          // ...drawn when the voice says it (else just after the word lands).
+          const said = seg.emphasis && sync.words.length ? findSpoken(sync.words, seg.text) : -1;
+          const markerAt = said >= 0 ? Math.max(start + 6, sync.offset + sync.words[said]!.from) : start + 8;
+          const marker = seg.emphasis ? spring({ frame: frame - markerAt, fps, config: { damping: 20, stiffness: 120 } }) : 0;
           if (seg.emphasis && progress > 0.95) transforms.push(`scale(${(1 + Math.sin((frame - start) / 9) * 0.025).toFixed(4)})`);
           const inner = (
             <span

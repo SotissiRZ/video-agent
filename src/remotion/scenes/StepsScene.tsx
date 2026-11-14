@@ -2,6 +2,7 @@ import React from 'react';
 import { interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion';
 import { AnimatedText } from '../components/AnimatedText';
 import { fitFontSize, springFor, stepSpacing, useLayout } from '../utils';
+import { itemRevealFrames, VoiceSyncContext } from '../motion/sync';
 import { SceneShell, type SceneProps } from './SceneShell';
 
 /** Numbered steps (tutorials, "how it works"). The current step is highlighted. */
@@ -13,8 +14,11 @@ export const StepsScene: React.FC<SceneProps> = (props) => {
   const { theme } = storyboard;
   const steps = scene.items.slice(0, 5);
   const spacing = stepSpacing(durationInFrames, steps.length);
+  // Each step lights up when the voice says it (regular spacing when it doesn't).
+  const sync = React.useContext(VoiceSyncContext);
+  const reveals = itemRevealFrames({ voiceover: scene.voiceover, durationInFrames }, sync.offset, steps, spacing);
   const size = Math.round(layout.unit * (steps.length > 3 ? 0.042 : 0.05));
-  const active = Math.min(steps.length - 1, Math.max(0, Math.floor((frame - 15) / spacing)));
+  const active = Math.max(0, reveals.filter((at) => frame >= at).length - 1);
   return (
     <SceneShell {...props}>
       <AnimatedText
@@ -29,7 +33,7 @@ export const StepsScene: React.FC<SceneProps> = (props) => {
       />
       <div style={{ display: 'flex', flexDirection: layout.isPortrait ? 'column' : 'row', gap: size * 0.6, width: '100%', justifyContent: 'center' }}>
         {steps.map((step, i) => {
-          const p = spring({ frame: frame - 15 - i * spacing, fps, config: springFor(theme.motion) });
+          const p = spring({ frame: frame - reveals[i]!, fps, config: springFor(theme.motion) });
           const isActive = i === active;
           return (
             <div

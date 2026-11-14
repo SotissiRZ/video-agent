@@ -96,6 +96,23 @@ const readPcmInfo = (buffer: Buffer): PcmInfo | undefined => {
  * Remove the silence TTS engines add before and after speech, keeping a short margin.
  * Returns the original buffer for anything other than 16-bit PCM.
  */
+/** Seconds trimWavSilence removes from the start (word timings of the voice must shift by as much). */
+export const leadingSilenceSec = (buffer: Buffer, opts: { threshold?: number; keepSec?: number } = {}): number => {
+  const before = readPcmInfo(buffer);
+  if (!before || before.bitsPerSample !== 16) return 0;
+  const frameBytes = 2 * before.channels;
+  const limit = Math.round((opts.threshold ?? 0.012) * 0x7fff);
+  const frames = Math.floor(before.dataSize / frameBytes);
+  let first = 0;
+  const loud = (f: number) => {
+    for (let c = 0; c < before.channels; c++) if (Math.abs(buffer.readInt16LE(before.dataOffset + f * frameBytes + c * 2)) > limit) return true;
+    return false;
+  };
+  while (first < frames && !loud(first)) first++;
+  if (first >= frames) return 0;
+  return Math.max(0, first - Math.round((opts.keepSec ?? 0.05) * before.sampleRate)) / before.sampleRate;
+};
+
 export const trimWavSilence = (buffer: Buffer, opts: { threshold?: number; keepSec?: number } = {}): Buffer => {
   const info = readPcmInfo(buffer);
   if (!info || info.bitsPerSample !== 16) return buffer;

@@ -6,7 +6,8 @@
 import type { Storyboard } from '../contract/storyboard';
 import { computeTimeline, transitionLength } from '../contract/timeline';
 import { visibleShots } from '../components/MediaLayer';
-import { bulletSpacing, REVEAL_START, stepSpacing } from '../utils';
+import { bulletSpacing, stepSpacing } from '../utils';
+import { itemRevealFrames, voiceOffsetInScene } from './sync';
 
 export type SfxCueKind = 'whoosh' | 'impact' | 'tick';
 
@@ -49,12 +50,13 @@ export const sfxCues = (storyboard: Storyboard): SfxCue[] => {
     if (scene.kind === 'bullets') {
       const count = Math.min(6, scene.items.length);
       const spacing = bulletSpacing(scene.durationInFrames, count);
-      for (let k = 0; k < count; k++) cues.push({ kind: 'tick', from: window.from + REVEAL_START + k * spacing + 3, volume: 0.85 * level });
+      // Same frames as the scene: on the voice when it says the bullet.
+      for (const at of itemRevealFrames(scene, voiceOffsetInScene(storyboard.scenes, i), scene.items.slice(0, count), spacing)) cues.push({ kind: 'tick', from: window.from + at + 3, volume: 0.85 * level });
     }
     if (scene.kind === 'steps') {
       const count = Math.min(5, scene.items.length);
       const spacing = stepSpacing(scene.durationInFrames, count);
-      for (let k = 0; k < count; k++) cues.push({ kind: 'tick', from: window.from + REVEAL_START + k * spacing + 3, volume: 0.85 * level });
+      for (const at of itemRevealFrames(scene, voiceOffsetInScene(storyboard.scenes, i), scene.items.slice(0, count), spacing)) cues.push({ kind: 'tick', from: window.from + at + 3, volume: 0.85 * level });
     }
   });
   return cues.sort((a, b) => a.from - b.from);

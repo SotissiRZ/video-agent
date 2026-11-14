@@ -25,12 +25,22 @@ export interface ComposedSong {
 const MIN_CHUNK_MS = 3000;
 const MAX_CHUNK_MS = 120_000;
 
+/** A real song has an instrumental intro and an outro that dies away (≈8 % of its length each, 3–8 s). */
+export const songEdgesSec = (durationSec: number): { intro: number; outro: number } => {
+  if (durationSec < 30) return { intro: 0, outro: 0 };
+  const edge = Math.min(8, Math.max(3, Math.round(durationSec * 0.08)));
+  return { intro: edge, outro: edge };
+};
+
 /**
  * One chunk per lyric section, the song's length shared by line count (each chunk 3–120 s).
  * Short songs with many small sections: neighbours are merged until every chunk gets its 3 s.
+ * The first chunk also carries the instrumental intro, the last one the outro (extra time and a
+ * style instruction for each), so the song neither starts on the first word nor stops dead.
  */
-export const compositionChunks = (sections: LyricSection[], durationSec: number, styles: string[]) => {
+export const compositionChunks = (sections: LyricSection[], durationSec: number, styles: string[], edges = songEdgesSec(durationSec)) => {
   const totalMs = Math.round(durationSec * 1000);
+  const edgeMs = Math.round((edges.intro + edges.outro) * 1000);
   const parts = sections.map((s) => ({ names: [s.name], lines: [...s.lines] }));
   while (parts.length > 1 && parts.length * MIN_CHUNK_MS > totalMs) {
     // Merge the lightest neighbouring pair that still fits in one chunk.
@@ -46,7 +56,11 @@ export const compositionChunks = (sections: LyricSection[], durationSec: number,
   if (parts.length * MAX_CHUNK_MS < totalMs) throw new ProviderError('elevenlabs-music', 'The song is too long for its lyric sections (120 s per section at most).');
   const weight = parts.reduce((n, p) => n + p.lines.length, 0);
   // Share by line count, then fix rounding so the chunks add up to the exact length.
-  const ms = parts.map((p) => Math.min(MAX_CHUNK_MS, Math.max(MIN_CHUNK_MS, Math.round((totalMs * p.lines.length) / weight))));
+  const sung = totalMs - edgeMs;
+  const ms = parts.map((p, i) => {
+    const extra = (i === 0 ? edges.intro * 1000 : 0) + (i === parts.length - 1 ? edges.outro * 1000 : 0);
+    return Math.min(MAX_CHUNK_MS, Math.max(MIN_CHUNK_MS, Math.round((sung * p.lines.length) / weight + extra)));
+  });
   let diff = totalMs - ms.reduce((a, b) => a + b, 0);
   for (let i = 0; diff !== 0 && i < ms.length * 4; i++) {
     const k = i % ms.length;
@@ -57,7 +71,12 @@ export const compositionChunks = (sections: LyricSection[], durationSec: number,
   return parts.map((p, i) => ({
     text: p.lines.join('\n'),
     duration_ms: ms[i]!,
-    positive_styles: [...styles, `${p.names.join(' and ')} of the song`],
+    positive_styles: [
+      ...styles,
+      `${p.names.join(' and ')} of the song`,
+      ...(i === 0 && edges.intro ? [`starts with a ${edges.intro}-second instrumental intro before the first vocals`] : []),
+      ...(i === parts.length - 1 && edges.outro ? [`ends with a ${edges.outro}-second instrumental outro that fades out gently, no abrupt ending`] : []),
+    ],
     negative_styles: [] as string[],
   }));
 };

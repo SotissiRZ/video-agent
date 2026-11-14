@@ -103,6 +103,9 @@ beforeAll(async () => {
         removedVoices.push(voiceId);
       },
     },
+    songMaster: async (input, output) => {
+      fs.copyFileSync(input, output);
+    },
     songPreviewer: async (input, output) => {
       fs.writeFileSync(output, `preview of ${fs.readFileSync(input, 'utf8')}`);
     },

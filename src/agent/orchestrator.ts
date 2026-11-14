@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { synthesizeMusic } from '../audio/music';
 import { synthesizeSfx } from '../audio/sfx';
+import { estimateWordTimings, wordsFromAlignment } from '../remotion/motion/sync';
 import { getLanguage, LANGUAGE_CODES } from '../core/languages';
 import { buildMusicPrompt } from '../providers/music/prompt';
 import { resolveMusicProvider } from '../providers/music/registry';
@@ -56,7 +57,7 @@ import { applyAnimations } from '../storyboard/animations';
 import { buildStoryboard } from '../storyboard/builder';
 import { refineScenes } from '../storyboard/scenes';
 import { matchTargetDuration, paceScenesToVoiceover, recomputeDuration } from '../storyboard/timing';
-import { trimWavSilence, wavDurationSec } from '../audio/wav';
+import { leadingSilenceSec, trimWavSilence, wavDurationSec } from '../audio/wav';
 import { parseStructuredPrompt, plannedFromStructured, type StructuredScript } from '../prompt/structured';
 import { applyBrandColors, parseHexColors } from '../storyboard/brand-colors';
 import { validateStoryboard } from '../storyboard/validator';
@@ -948,14 +949,20 @@ export class VideoAgent {
       progress(i / scenes.length, `Voix-off ${i + 1}/${scenes.length}`);
       const outFile = path.join(paths.publicDir, 'voice', `${scene.id}.wav`);
       try {
-        let { durationSec } = await voice.synthesize({ text, language: brief.locale, outFile, signal, gender: opts.gender, voiceId: voice === provider ? opts.voiceId : undefined });
+        const spoken = await voice.synthesize({ text, language: brief.locale, outFile, signal, gender: opts.gender, voiceId: voice === provider ? opts.voiceId : undefined });
+        let { durationSec } = spoken;
+        let shiftSec = 0;
         // TTS engines pad sentences with silence: trim it so the voice starts right on cue.
         if (fs.existsSync(outFile)) {
-          const trimmed = trimWavSilence(fs.readFileSync(outFile));
+          const raw = fs.readFileSync(outFile);
+          shiftSec = leadingSilenceSec(raw);
+          const trimmed = trimWavSilence(raw);
           fs.writeFileSync(outFile, trimmed);
           durationSec = wavDurationSec(trimmed);
         }
-        scenes[i] = { ...scene, voiceover: { src: `voice/${scene.id}.wav`, durationInFrames: Math.max(1, Math.ceil(durationSec * fps)), volume: 1 } };
+        // When each word is spoken: the provider's alignment, else an estimate from the syllables.
+        const words = spoken.alignment ? wordsFromAlignment(spoken.alignment, fps, shiftSec) : estimateWordTimings(text, durationSec, fps);
+        scenes[i] = { ...scene, voiceover: { src: `voice/${scene.id}.wav`, durationInFrames: Math.max(1, Math.ceil(durationSec * fps)), volume: 1, words } };
       } catch (err) {
         if (signal?.aborted) throw err;
         warnings.push(`voice-over failed for ${scene.id} (${voice.id}): ${errorMessage(err)}`);

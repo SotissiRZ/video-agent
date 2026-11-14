@@ -83,6 +83,24 @@ export const buildSubtitleCues = (storyboard: Storyboard, maxChars?: number): Su
     if (!chunks.length) return;
     let start = scene.voiceover ? voiceStartFrame(window) : window.soloFrom + Math.round(fps * 0.2);
     const end = scene.voiceover ? Math.min(window.soloTo, start + scene.voiceover.durationInFrames) : window.soloTo - Math.round(fps * 0.1);
+    // Word timings known: each line shows exactly while its words are spoken.
+    const spoken = scene.voiceover?.words ?? [];
+    const isWord = (w: string) => /[\p{L}\p{N}]/u.test(w);
+    const perChunk = chunks.map((c) => c.split(' ').filter(isWord).length);
+    if (spoken.length && perChunk.reduce((a, b) => a + b, 0) === spoken.length) {
+      const voiceAt = start;
+      let w = 0;
+      chunks.forEach((text, j) => {
+        const first = spoken[w]!;
+        w += perChunk[j]!;
+        const next = spoken[w];
+        const cueStart = Math.max(voiceAt + first.from, cues.length ? cues[cues.length - 1]!.endFrame : 0);
+        // Until the next line starts, the last line a little after its last word.
+        const cueEnd = Math.min(end, next ? voiceAt + next.from : voiceAt + spoken[w - 1]!.to + Math.round(fps * 0.4));
+        if (cueEnd > cueStart) cues.push({ startFrame: cueStart, endFrame: cueEnd, text });
+      });
+      return;
+    }
     const available = end - start;
     if (available < chunks.length * 6) return;
     const totalChars = chunks.reduce((s, c) => s + c.length, 0);

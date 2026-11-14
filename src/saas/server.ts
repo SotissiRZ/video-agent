@@ -54,7 +54,7 @@ import { ensureCleanVideoExport } from './export';
 import { cancelPublication, createPublication, listPublications, publicPublication } from './publications';
 import { Worker } from './worker';
 import { addSongUsage, createSongDraft, fitLyrics, songVersions, lyricLineBudget, lyricsTooLong, MAX_LINE_CHARS, MAX_SECTION_LINES, deleteSong, getSong, listSongs, publicSong, removeSongPreviews, SONG_ID, songDirectory, songPreviewFile, updateSongLyrics, type SongRow } from './songs';
-import { makeAudioPreview } from '../audio/ffmpeg';
+import { makeAudioPreview, softenSongEdges } from '../audio/ffmpeg';
 import { UsageMeter } from '../core/usage';
 import { planConfig, planLLM } from './plan-providers';
 import { costReport } from './costs';
@@ -156,6 +156,8 @@ export interface SaasOptions {
   elevenLabsAccess?: () => Promise<{ songs: boolean; voiceClone: boolean }>;
   /** Test seam: builds the free-listening excerpt of a song (ffmpeg by default). */
   songPreviewer?: (input: string, output: string, seconds: number) => Promise<void>;
+  /** Song mastering (fade in/out); default: ffmpeg. */
+  songMaster?: (input: string, output: string) => Promise<void>;
   songLyricsGenerator?: (request: { prompt: string; style: string; mood: string }) => Promise<{ title: string; lyrics: string }>;
   workerOptions?: Partial<ConstructorParameters<typeof Worker>[0]>;
 }
@@ -457,7 +459,18 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       removeSongPreviews(dir);
       fs.rmSync(temporaryFile, { force: true });
       fs.writeFileSync(temporaryFile, audio, { flag: 'wx' });
-      fs.renameSync(temporaryFile, audioFile);
+      // Mastering: a short fade-in and a smooth fade-out, so the song never stops dead.
+      // If it fails, the song is kept as delivered rather than lost.
+      const mastered = `${audioFile}.master.tmp`;
+      try {
+        await (options.songMaster ?? softenSongEdges)(temporaryFile, mastered);
+        fs.renameSync(mastered, audioFile);
+        fs.rmSync(temporaryFile, { force: true });
+      } catch (err) {
+        fs.rmSync(mastered, { force: true });
+        logger.warn(`song ${song.id} mastering skipped: ${errorMessage(err)}`);
+        fs.renameSync(temporaryFile, audioFile);
+      }
       const saved = await db.query<{ id: string }>(
         "UPDATE songs SET status = 'completed', audio_file = $2, provider_song_id = coalesce($3, provider_song_id), error = NULL, finished_at = now(), updated_at = now() WHERE id = $1 RETURNING id",
         [song.id, audioFile, songId ?? null],
