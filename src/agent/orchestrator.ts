@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { synthesizeMusic } from '../audio/music';
+import { synthesizeSfx } from '../audio/sfx';
 import { getLanguage, LANGUAGE_CODES } from '../core/languages';
 import { buildMusicPrompt } from '../providers/music/prompt';
 import { resolveMusicProvider } from '../providers/music/registry';
@@ -533,6 +534,12 @@ export class VideoAgent {
             musicSource = music.source;
             sb = { ...sb, audio: { music: { src: music.src, volume: voiceProvider ? 0.3 : 0.45, duckedVolume: 0.1 } } };
           }
+        }
+        if (this.config.env.VIDEO_AGENT_SFX) {
+          // Sound design files next to the music; the composition places them on cuts, titles and bullets.
+          fs.mkdirSync(path.join(paths.publicDir, 'sfx'), { recursive: true });
+          for (const [kind, wav] of Object.entries(synthesizeSfx())) fs.writeFileSync(path.join(paths.publicDir, 'sfx', `${kind}.wav`), wav);
+          sb = { ...sb, audio: { ...sb.audio, sfx: { whoosh: 'sfx/whoosh.wav', impact: 'sfx/impact.wav', tick: 'sfx/tick.wav', volume: voiceProvider ? 0.6 : 0.75 } } };
         }
         sb = recomputeDuration(sb);
         if (brief.subtitles) sb = { ...sb, subtitles: { ...sb.subtitles, cues: buildSubtitleCues(sb) } };

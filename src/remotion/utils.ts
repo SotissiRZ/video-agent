@@ -37,6 +37,13 @@ export const scrim = (textColor: string, alpha: number): string => {
   return luminance > 0.5 ? `rgba(0, 0, 0, ${alpha})` : `rgba(255, 255, 255, ${alpha})`;
 };
 
+/** Frame of the first list item (bullets, steps): the headline lands first. */
+export const REVEAL_START = 15;
+/** Bullets appear across the first 60 % of the scene. */
+export const bulletSpacing = (durationInFrames: number, count: number): number => Math.max(6, Math.floor((durationInFrames * 0.6 - REVEAL_START) / Math.max(1, count)));
+/** Steps light up one by one across the first 75 % of the scene. */
+export const stepSpacing = (durationInFrames: number, count: number): number => Math.max(8, Math.floor((durationInFrames * 0.75 - REVEAL_START) / Math.max(1, count)));
+
 export interface Layout {
   width: number;
   height: number;

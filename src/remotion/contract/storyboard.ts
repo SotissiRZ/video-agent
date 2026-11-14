@@ -188,6 +188,15 @@ export const StoryboardSchema = z.object({
           duckedVolume: z.number().min(0).max(1).default(0.12),
         })
         .optional(),
+      /** Sound design (whooshes on cuts, impacts on titles, ticks on bullets); placed by motion/sfx. */
+      sfx: z
+        .object({
+          whoosh: z.string().min(1),
+          impact: z.string().min(1),
+          tick: z.string().min(1),
+          volume: z.number().min(0).max(1).default(0.7),
+        })
+        .optional(),
     })
     .default({}),
 });

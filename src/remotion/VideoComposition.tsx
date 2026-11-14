@@ -10,6 +10,7 @@ import { iris } from '@remotion/transitions/iris';
 import { clockWipe } from '@remotion/transitions/clock-wipe';
 import { pushCut } from '@remotion/transitions/push-cut';
 import { whip, zoomThrough } from './motion/transitions';
+import { sfxCues } from './motion/sfx';
 import { StoryboardSchema, type CompositionProps, type Transition } from './contract/storyboard';
 import { computeTimeline, transitionLength, voiceStartFrame } from './contract/timeline';
 import { SubtitlesOverlay } from './components/SubtitlesOverlay';
@@ -64,6 +65,7 @@ export const VideoComposition: React.FC<CompositionProps> = (props) => {
   );
 
   const music = storyboard.audio.music;
+  const sfx = storyboard.audio.sfx;
   const musicVolume = (frame: number): number => {
     if (!music) return 0;
     const fadeIn = interpolate(frame, [0, 20], [0, 1], { extrapolateRight: 'clamp' });
@@ -119,6 +121,14 @@ export const VideoComposition: React.FC<CompositionProps> = (props) => {
           </Sequence>
         ) : null,
       )}
+      {/* Sound design: each cue plays its short file (≤ 1 s) from its frame. */}
+      {sfx
+        ? sfxCues(storyboard).map((cue, i) => (
+            <Sequence key={`sfx-${i}`} from={cue.from} durationInFrames={Math.round(storyboard.format.fps * 1.2)} name={`sfx ${cue.kind}`}>
+              <Audio src={resolveSrc(sfx[cue.kind])} volume={cue.volume} />
+            </Sequence>
+          ))
+        : null}
     </AbsoluteFill>
   );
 };

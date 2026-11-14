@@ -1,7 +1,7 @@
 import React from 'react';
 import { interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion';
 import { AnimatedText } from '../components/AnimatedText';
-import { fitFontSize, springFor, useLayout } from '../utils';
+import { fitFontSize, springFor, stepSpacing, useLayout } from '../utils';
 import { SceneShell, type SceneProps } from './SceneShell';
 
 /** Numbered steps (tutorials, "how it works"). The current step is highlighted. */
@@ -12,7 +12,7 @@ export const StepsScene: React.FC<SceneProps> = (props) => {
   const layout = useLayout();
   const { theme } = storyboard;
   const steps = scene.items.slice(0, 5);
-  const spacing = Math.max(8, Math.floor((durationInFrames * 0.75 - 15) / Math.max(1, steps.length)));
+  const spacing = stepSpacing(durationInFrames, steps.length);
   const size = Math.round(layout.unit * (steps.length > 3 ? 0.042 : 0.05));
   const active = Math.min(steps.length - 1, Math.max(0, Math.floor((frame - 15) / spacing)));
   return (

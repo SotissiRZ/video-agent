@@ -128,6 +128,8 @@ const EnvSchema = z.object({
   VIDEO_AGENT_DEFAULT_OUTPUT_FORMAT: enumWithDefault(OUTPUT_FORMATS, 'mp4'),
   VIDEO_AGENT_LANGUAGE: z.preprocess(emptyToUndefined, z.string().default('auto')),
   VIDEO_AGENT_SUBTITLES: bool(true),
+  /** Sound design: whooshes on cuts, impacts on titles, ticks on bullets (synthesised, free). */
+  VIDEO_AGENT_SFX: bool(true),
 
   // --- Rendering ---------------------------------------------------------
   VIDEO_AGENT_BROWSER_EXECUTABLE: optionalString,

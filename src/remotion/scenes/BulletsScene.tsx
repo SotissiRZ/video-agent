@@ -1,7 +1,7 @@
 import React from 'react';
 import { interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion';
 import { AnimatedText } from '../components/AnimatedText';
-import { fitFontSize, springFor, useLayout } from '../utils';
+import { bulletSpacing, fitFontSize, springFor, useLayout } from '../utils';
 import { Kicker, SceneShell, type SceneProps } from './SceneShell';
 
 /** Headline + list of benefits/features revealed one after the other. */
@@ -13,7 +13,7 @@ export const BulletsScene: React.FC<SceneProps> = (props) => {
   const { theme } = storyboard;
   const items = scene.items.slice(0, 6);
   // Spread the reveals across the first 60% of the scene.
-  const spacing = Math.max(6, Math.floor((durationInFrames * 0.6 - 15) / Math.max(1, items.length)));
+  const spacing = bulletSpacing(durationInFrames, items.length);
   const longest = items.reduce((m, i) => Math.max(m, i.length), 0);
   // A sixth line gets slightly smaller text so the list still fits a landscape frame.
   const itemSize = Math.round(layout.unit * Math.min(0.055, Math.max(0.034, 0.055 * Math.sqrt(20 / Math.max(20, longest)))) * (items.length > 5 ? 0.88 : 1));
