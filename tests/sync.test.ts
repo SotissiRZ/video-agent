@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ElevenLabsVoiceProvider } from '../src/providers/voice/elevenlabs';
 import { StoryboardSchema, type StoryboardInput } from '../src/remotion/contract/storyboard';
 import { getStyle } from '../src/remotion/contract/styles';
-import { estimateWordTimings, findSpoken, itemRevealFrames, voiceOffsetInScene, wordsFromAlignment } from '../src/remotion/motion/sync';
+import { estimateWordTimings, findSpoken, itemRevealFrames, shotStarts, voiceOffsetInScene, wordsFromAlignment } from '../src/remotion/motion/sync';
 import { buildSubtitleCues } from '../src/subtitles/subtitles';
 import { tmpDir } from './helpers';
 
@@ -110,5 +110,35 @@ describe('ElevenLabs voice with timestamps', () => {
     expect(result.durationSec).toBeCloseTo(1, 2);
     expect(result.alignment).toEqual(alignment);
     expect(fs.readFileSync(outFile).toString('ascii', 0, 4)).toBe('RIFF');
+  });
+});
+
+describe('cuts on the voice', () => {
+  // "Réservez en quelques clics. Partez quand vous voulez, payez simplement." over 180 frames.
+  const words = [
+    { text: 'Réservez', from: 0, to: 15 },
+    { text: 'en', from: 16, to: 20 },
+    { text: 'quelques', from: 21, to: 35 },
+    { text: 'clics.', from: 36, to: 50 },
+    { text: 'Partez', from: 66, to: 80 },
+    { text: 'quand', from: 81, to: 90 },
+    { text: 'vous', from: 91, to: 96 },
+    { text: 'voulez,', from: 97, to: 110 },
+    { text: 'payez', from: 118, to: 130 },
+    { text: 'simplement.', from: 131, to: 160 },
+  ];
+
+  it('moves each cut to the nearest sentence or clause start', () => {
+    // Even split 0 / 60 / 120; phrase starts (voice 9 frames in): "Partez" at 75, "payez" at 127.
+    expect(shotStarts(180, 3, 48, words, 9)).toEqual([0, 75, 127]);
+    // Without word timings: the even split.
+    expect(shotStarts(180, 3, 48)).toEqual([0, 60, 120]);
+  });
+
+  it('keeps the even cut when snapping would make a shot too short', () => {
+    // With 55-frame shots at least: 75 then 127 would leave 52 and 53 frames, so both cuts stay even.
+    expect(shotStarts(180, 3, 55, words, 9)).toEqual([0, 60, 120]);
+    // With 50, the voice-aligned cuts fit (75, 52 and 53 frames).
+    expect(shotStarts(180, 3, 50, words, 9)).toEqual([0, 75, 127]);
   });
 });

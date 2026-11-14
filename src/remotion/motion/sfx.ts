@@ -5,9 +5,9 @@
  */
 import type { Storyboard } from '../contract/storyboard';
 import { computeTimeline, transitionLength } from '../contract/timeline';
-import { visibleShots } from '../components/MediaLayer';
+import { MIN_SHOT_SECONDS, visibleShots } from '../components/MediaLayer';
 import { bulletSpacing, stepSpacing } from '../utils';
-import { itemRevealFrames, voiceOffsetInScene } from './sync';
+import { itemRevealFrames, shotStarts, voiceOffsetInScene } from './sync';
 
 export type SfxCueKind = 'whoosh' | 'impact' | 'tick';
 
@@ -42,8 +42,9 @@ export const sfxCues = (storyboard: Storyboard): SfxCue[] => {
     const media = scene.media ? [scene.media, ...(scene.shots ?? [])] : [];
     const shots = visibleShots(media, scene.durationInFrames, fps);
     if (shots.length > 1) {
-      const shotLength = Math.ceil(scene.durationInFrames / shots.length);
-      for (let s = 1; s < shots.length; s++) cues.push({ kind: 'whoosh', from: Math.max(0, window.from + s * shotLength + 6 - peak), volume: 0.45 * level });
+      // Same cut points as MediaStack (on the voice).
+      const starts = shotStarts(scene.durationInFrames, shots.length, Math.round(MIN_SHOT_SECONDS * fps), scene.voiceover?.words, voiceOffsetInScene(storyboard.scenes, i));
+      for (let s = 1; s < shots.length; s++) cues.push({ kind: 'whoosh', from: Math.max(0, window.from + starts[s]! + 6 - peak), volume: 0.45 * level });
     }
     // Titles, key figures and calls to action land with a hit.
     if (scene.kind === 'title' || scene.kind === 'cta' || scene.kind === 'stat') cues.push({ kind: 'impact', from: window.from + TITLE_LANDS, volume: 0.6 * level });

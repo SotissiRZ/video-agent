@@ -120,5 +120,32 @@ export const itemRevealFrames = (
   });
 };
 
+/**
+ * Where each shot of a scene starts. An editor cuts on the voice, at the start of a new sentence or
+ * clause, not mid-phrase: each even split point snaps to the nearest phrase start (a word following
+ * , ; : . ! ?) within 40 % of a shot's length, and no shot gets shorter than `minFrames`.
+ */
+export const shotStarts = (durationInFrames: number, count: number, minFrames: number, words: SpokenWord[] = [], offset = 0): number[] => {
+  const even = Math.ceil(durationInFrames / Math.max(1, count));
+  const starts = Array.from({ length: count }, (_, k) => k * even);
+  if (count < 2 || !words.length) return starts;
+  const phraseStarts = words.flatMap((w, i) => (i > 0 && /[,;:.!?…]$/.test(words[i - 1]!.text) ? [offset + w.from] : []));
+  // Where every cut would like to go, first; then accepted in order, so a cut is checked against
+  // where the next one will really land, not its even position.
+  const wanted = starts.map((target, k) => {
+    if (k === 0) return 0;
+    const nearest = phraseStarts.reduce<number | undefined>((best, at) => (best === undefined || Math.abs(at - target) < Math.abs(best - target) ? at : best), undefined);
+    return nearest !== undefined && Math.abs(nearest - target) <= even * 0.4 ? nearest : target;
+  });
+  for (let k = 1; k < count; k++) {
+    const next = k + 1 < count ? wanted[k + 1]! : durationInFrames;
+    // Never squeeze the previous shot nor the next one.
+    const fits = (at: number) => at - starts[k - 1]! >= minFrames && next - at >= minFrames;
+    starts[k] = fits(wanted[k]!) ? wanted[k]! : starts[k]!;
+    if (starts[k] !== wanted[k]) wanted[k] = starts[k]!;
+  }
+  return starts;
+};
+
 /** The current scene's spoken words and where its voice starts (provided by SceneRenderer). */
 export const VoiceSyncContext = createContext<{ words: SpokenWord[]; offset: number }>({ words: [], offset: 0 });

@@ -3,6 +3,7 @@ import { AbsoluteFill, Easing, Img, interpolate, Loop, OffthreadVideo, Sequence,
 import type { Media } from '../contract/storyboard';
 import { resolveSrc, seeded } from '../utils';
 import { ScreenCapture } from './ScreenCapture';
+import { shotStarts, VoiceSyncContext } from '../motion/sync';
 
 interface Props {
   media: Media;
@@ -103,15 +104,17 @@ export const visibleShots = (media: Media[], durationInFrames: number, fps: numb
 export const MediaStack: React.FC<{ media: Media[]; kenBurns: number; style?: React.CSSProperties }> = ({ media, kenBurns, style }) => {
   const { durationInFrames, fps } = useVideoConfig();
   const frame = useCurrentFrame();
+  const sync = React.useContext(VoiceSyncContext);
   const shots = visibleShots(media, durationInFrames, fps);
   if (shots.length === 1) return <MediaLayer media={shots[0]!} kenBurns={kenBurns} style={style} />;
-  const length = Math.ceil(durationInFrames / shots.length);
+  // Cuts land on the voice: at the start of a sentence or clause near each even split.
+  const starts = shotStarts(durationInFrames, shots.length, Math.round(MIN_SHOT_SECONDS * fps), sync.words, sync.offset);
   return (
     <AbsoluteFill style={style}>
       {shots.map((shot, i) => {
-        const from = i * length;
+        const from = starts[i]!;
         // Each shot stays until the next one has fully faded in.
-        const until = i === shots.length - 1 ? durationInFrames - from : length + CROSSFADE;
+        const until = i === shots.length - 1 ? durationInFrames - from : starts[i + 1]! - from + CROSSFADE;
         const cut = SHOT_CUTS[(hash(shot.src) + i) % SHOT_CUTS.length]!;
         const enter = i === 0 ? {} : shotCutStyle(cut, (frame - from) / CROSSFADE);
         return (
