@@ -180,6 +180,16 @@ const stem = (w: string) => w.slice(0, 4);
 const words = (text: string) => normalize(text).split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
 
 /**
+ * Words that place or people a picture without saying what it shows: sharing only "africa" made a
+ * Namibian dune fit "smiling passenger on motorbike taxi africa", and only "person" made a field
+ * seen from a car fit "person booking ride on phone africa". They never prove relevance on their own
+ * (a query made only of them still works). Compared on 4-letter stems, like the rest.
+ */
+const GENERIC_STEMS = new Set(
+  ['africa', 'african', 'afrique', 'city', 'cities', 'urban', 'town', 'people', 'person', 'persons', 'man', 'men', 'woman', 'women', 'young', 'old', 'smiling', 'happy', 'nature', 'natural', 'background', 'outdoor', 'outdoors', 'day', 'life', 'lifestyle', 'aerial', 'drone', 'view', 'beautiful', 'modern', 'the', 'and', 'with'].map(stem),
+);
+
+/**
  * Whether a stock result fits its search, judged on the provider's description (alt text, tags,
  * page slug): it must share a word with the query and contain no avoided term. Search engines
  * return loosely related pictures (a car dashboard for "analytics dashboard laptop").
@@ -191,7 +201,9 @@ export const isRelevant = (result: Pick<StockResult, 'description'>, query: stri
   if (wrongSense(result.description ?? '', query)) return false;
   const stems = new Set(described.map(stem));
   if (avoid.some((term) => described.some((w) => w.startsWith(normalize(term))))) return false;
-  return words(query).some((w) => stems.has(stem(w)));
+  const asked = words(query);
+  const subject = asked.filter((w) => !GENERIC_STEMS.has(stem(w)));
+  return (subject.length ? subject : asked).some((w) => stems.has(stem(w)));
 };
 
 export const wantsMedia = (scene: Scene, coverage: MediaCoverage): boolean =>

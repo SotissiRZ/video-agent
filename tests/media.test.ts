@@ -125,6 +125,12 @@ describe('media director', () => {
     expect(isRelevant({ description: 'cloud computing server room' }, 'cloud computing')).toBe(true);
     expect(isRelevant({ description: 'green python snake on a branch' }, 'python programming')).toBe(false);
     expect(isRelevant({}, 'laptop desk')).toBe(true);
+    // A place or a person alone never proves relevance (seen in a Sirago moto-taxi ad).
+    expect(isRelevant({ description: 'namibia, nature, africa, drone, desert, sand, dune' }, 'smiling passenger on motorbike taxi africa')).toBe(false);
+    expect(isRelevant({ description: 'a person taking a picture of a field through a car' }, 'person booking ride on phone africa')).toBe(false);
+    expect(isRelevant({ description: 'a man and a woman riding a motorcycle' }, 'motorcycle taxi driver and passenger road')).toBe(true);
+    expect(isRelevant({ description: 'cars, street, traffic, city, entertainment' }, 'ouagadougou street motorbike traffic')).toBe(true);
+    expect(isRelevant({ description: 'busy african city at night' }, 'african city')).toBe(true); // only generic words asked
     expect(parseAvoidTerms('Éviter les robots futuristes, les faux logos. Montrer des ordinateurs.')).toEqual(expect.arrayContaining(['robot', 'logo']));
     expect(parseAvoidTerms('Une vidéo sur le transport et les ordinateurs.')).toEqual([]);
   });

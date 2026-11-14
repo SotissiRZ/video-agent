@@ -21,9 +21,26 @@ interface Props {
   maxWidth?: number;
 }
 
+/**
+ * A word never breaks, so the longest one must fit on a line: "OUAGADOUGOU" in bold capitals is far
+ * wider than the 0.72 em per character fitFontSize assumes (O, G, D, U run ~0.8 em, plus the 0.02 em
+ * letter spacing of uppercase headlines). Shrinks the size only when needed.
+ */
+export const fitLongestWord = (text: string, fontSize: number, maxWidth: number | undefined, uppercase: boolean): number => {
+  if (!maxWidth) return fontSize;
+  // Breakable spaces only: a word and its no-break-spaced punctuation ("Ouagadougou ?") stay on one line.
+  const longest = Math.max(1, ...text.replace(/\*/g, '').split(/[ \t\r\n]+/).map((word) => word.length));
+  const emPerChar = uppercase ? 0.88 : 0.72;
+  return Math.max(1, Math.min(fontSize, Math.floor(maxWidth / (longest * emPerChar))));
+};
+
+/** French typography: a no-break space before ? ! : ; and inside « », so the mark never starts a line alone. */
+export const keepPunctuation = (text: string): string =>
+  text.replace(/(\S)[ \t]+([?!:;»])/g, '$1\u00A0$2').replace(/«[ \t]+/g, '«\u00A0');
+
 /** Word-by-word animated text, with `*emphasis*` markup rendered in the accent colour. */
 export const AnimatedText: React.FC<Props> = ({
-  text,
+  text: rawText,
   theme,
   entrance,
   delay = 0,
@@ -38,12 +55,13 @@ export const AnimatedText: React.FC<Props> = ({
   uppercase = false,
   maxWidth,
 }) => {
+  const text = keepPunctuation(rawText);
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const config = springFor(theme.motion);
 
   const style: React.CSSProperties = {
-    fontSize,
+    fontSize: fitLongestWord(text, fontSize, maxWidth, uppercase),
     fontFamily,
     fontWeight,
     color,
