@@ -63,7 +63,7 @@ export const ImageScene: React.FC<SceneProps> = ({ scene, storyboard, index }) =
           opacity: interpolate(frame, [0, durationInFrames * 0.2], [0.6, 1], { extrapolateRight: 'clamp' }),
         }}
       />
-      <MotionAccents theme={theme} index={index} />
+      {scene.staging.accent === 'none' ? null : <MotionAccents theme={theme} index={index} variant={scene.staging.accent === 'auto' ? undefined : scene.staging.accent} />}
       <AbsoluteFill
         style={{
           justifyContent: 'flex-end',

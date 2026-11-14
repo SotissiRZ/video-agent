@@ -5,11 +5,8 @@
  */
 import React from 'react';
 import { AbsoluteFill, Easing, interpolate, useCurrentFrame, useVideoConfig } from 'remotion';
-import type { Theme } from '../contract/storyboard';
+import { ACCENTS, type Accent, type Theme } from '../contract/storyboard';
 import { seeded, useLayout, withAlpha } from '../utils';
-
-export const ACCENTS = ['brackets', 'sweep', 'orbs', 'lines', 'ring'] as const;
-export type Accent = (typeof ACCENTS)[number];
 
 export const accentFor = (index: number): Accent => ACCENTS[index % ACCENTS.length]!;
 

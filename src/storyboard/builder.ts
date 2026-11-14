@@ -76,7 +76,8 @@ export const buildStoryboard = ({ brief, concept, scenes, style }: BuildStoryboa
     background: { variant: 'gradient' },
     layout: 'center',
     animation: { entrance: 'rise', stagger: 4, kenBurns: 0.06 },
-    transitionOut: { type: 'fade', durationInFrames: transitionFrames, direction: 'from-right' },
+    transitionOut: { type: s.staging?.cut ?? 'fade', durationInFrames: transitionFrames, direction: 'from-right' },
+    staging: { layout: s.staging?.framing ?? 'auto', accent: s.staging?.accent ?? 'auto', ...(s.staging?.cut ? { cut: s.staging.cut } : {}) },
   }));
 
   return StoryboardSchema.parse({

@@ -15,6 +15,19 @@ export const TRANSITION_TYPES = ['none', 'fade', 'slide', 'wipe', 'flip', 'zoom'
 export const TransitionTypeSchema = z.enum(TRANSITION_TYPES);
 export type TransitionType = z.infer<typeof TransitionTypeSchema>;
 
+/** Motion-graphics layers drawn over the picture (components/MotionAccents). */
+export const ACCENTS = ['brackets', 'sweep', 'orbs', 'lines', 'ring'] as const;
+export type Accent = (typeof ACCENTS)[number];
+
+/** The AI director's staging of a scene; "auto" keeps the engine's own rotation. */
+export const StagingSchema = z.object({
+  layout: z.enum(['auto', 'full', 'card']).default('auto'),
+  accent: z.enum(['auto', 'none', ...ACCENTS]).default('auto'),
+  /** Cut to the next scene chosen by the director (else the style rotation). */
+  cut: TransitionTypeSchema.optional(),
+});
+export type Staging = z.infer<typeof StagingSchema>;
+
 export const ENTRANCES = ['rise', 'pop', 'slide', 'blur', 'typewriter'] as const;
 export const EntranceSchema = z.enum(ENTRANCES);
 export type Entrance = z.infer<typeof EntranceSchema>;
@@ -105,6 +118,7 @@ export const SceneSchema = z.object({
   /** Transition played between this scene and the next one (ignored on the last scene). */
   transitionOut: TransitionSchema.default({}),
   voiceover: AudioClipSchema.optional(),
+  staging: StagingSchema.default({}),
 });
 export type Scene = z.infer<typeof SceneSchema>;
 export type SceneInput = z.input<typeof SceneSchema>;

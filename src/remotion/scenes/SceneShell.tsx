@@ -30,7 +30,8 @@ export const SceneShell: React.FC<SceneProps & { children: React.ReactNode; just
   const align = scene.layout === 'left' ? 'flex-start' : 'center';
   const mediaBackdrop = scene.media && scene.kind !== 'image';
   // Not every scene is a full-bleed photo: every third one shows it as a floating 3D card.
-  const card = mediaBackdrop && index % 3 === 1;
+  // The AI director decides; otherwise every third media scene.
+  const card = Boolean(mediaBackdrop) && (scene.staging.layout === 'card' || (scene.staging.layout === 'auto' && index % 3 === 1));
   const cardIn = spring({ frame: frame - 2, fps, config: { damping: 14, stiffness: 90 } });
   const media = scene.media ? [scene.media, ...(scene.shots ?? [])] : [];
   return (
@@ -74,7 +75,7 @@ export const SceneShell: React.FC<SceneProps & { children: React.ReactNode; just
       ) : (
         <Background spec={scene.background} theme={theme} seed={index + 1} />
       )}
-      <MotionAccents theme={theme} index={index} />
+      {scene.staging.accent === 'none' ? null : <MotionAccents theme={theme} index={index} variant={scene.staging.accent === 'auto' ? undefined : scene.staging.accent} />}
       <AbsoluteFill
         style={{
           padding: `${layout.padY}px ${layout.padX}px`,

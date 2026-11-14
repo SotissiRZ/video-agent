@@ -166,6 +166,39 @@ describe('AI director', () => {
   });
 });
 
+describe('AI director staging', () => {
+  it('follows the framing, motion graphics and cuts the director chose for each scene', async () => {
+    restore = mockFetch([['GET', /cdn\.test/, () => new Response('bytes')]]).restore;
+    const staged = {
+      ...DIRECTION,
+      scenes: [
+        { ...DIRECTION.scenes[0], framing: 'full', accent: 'brackets', cut: 'zoom' },
+        { ...DIRECTION.scenes[1], framing: 'card', accent: 'sweep', cut: 'iris' },
+        // Nothing chosen: the engine's rotation decides.
+        { ...DIRECTION.scenes[2], framing: '', accent: '', cut: '' },
+      ],
+    };
+    const { stock } = recordingStock();
+    const result = await new VideoAgent(testConfig({ VIDEO_AGENT_MUSIC: 'none', VIDEO_AGENT_MEDIA_COVERAGE: 'all' }), { renderer: fakeRenderer, logger, llm: new FakeLLM([JSON.stringify(staged)]), voice: null, stock: [stock], image: null }).run({
+      prompt: FREE_PROMPT,
+      options: { outDir: path.join(tmpDir(), 'staging') },
+    });
+    const sb = readStoryboard(result.jobDir);
+    expect(sb.scenes.map((s) => s.staging)).toEqual([
+      { layout: 'full', accent: 'brackets', cut: 'zoom' },
+      { layout: 'card', accent: 'sweep', cut: 'iris' },
+      { layout: 'auto', accent: 'auto' },
+    ]);
+    expect(sb.scenes.map((s) => s.transitionOut.type)).toEqual(['zoom', 'iris', 'none']);
+  });
+
+  it('tolerates a staging value the engine does not know', async () => {
+    const { DirectionSchema } = await import('../src/planning/direction');
+    const parsed = DirectionSchema.parse({ ...DIRECTION, scenes: [{ ...DIRECTION.scenes[0], framing: 'split-screen', accent: 'confetti', cut: 'morph' }] });
+    expect(parsed.scenes[0]).toMatchObject({ framing: '', accent: '', cut: '' });
+  });
+});
+
 describe('AI director answers', () => {
   it('tolerates small format slips instead of dropping the whole plan', async () => {
     const { DirectionSchema } = await import('../src/planning/direction');
