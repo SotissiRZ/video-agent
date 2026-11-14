@@ -6,10 +6,11 @@
 import type { LLMProvider } from '../llm/types';
 import type { ImageProvider } from '../providers/image/types';
 import type { MusicProvider } from '../providers/music/types';
+import type { VideoProvider } from '../providers/video/types';
 import type { VoiceProvider } from '../providers/voice/types';
 
 /** `search`: web searches made while researching a request (`calls` = number of searches). */
-export type UsageKind = 'llm' | 'voice' | 'music' | 'image' | 'search';
+export type UsageKind = 'llm' | 'voice' | 'music' | 'image' | 'search' | 'video';
 
 /** One aggregated line: same kind, provider and model are summed together. */
 export interface UsageLine {
@@ -96,6 +97,24 @@ export class UsageMeter {
       async generate(request) {
         const result = await provider.generate(request);
         meter.record({ kind: 'image', provider: provider.id, model: provider.id === 'huggingface' || provider.id === 'cloudflare' ? undefined : model, images: 1 });
+        return result;
+      },
+    };
+  }
+
+  /** AI video clips, billed per second of generated footage. */
+  video(provider: VideoProvider): VideoProvider {
+    const meter = this;
+    return {
+      get id() {
+        return provider.id;
+      },
+      get model() {
+        return provider.model;
+      },
+      async generate(request) {
+        const result = await provider.generate(request);
+        meter.record({ kind: 'video', provider: provider.id, model: provider.model, seconds: result.seconds ?? request.durationSec });
         return result;
       },
     };

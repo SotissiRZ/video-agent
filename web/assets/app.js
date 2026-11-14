@@ -1762,7 +1762,7 @@ const renderAdminProviders = (result) => {
     <div class="card-header"><div><h2>${escapeHtml(t('admin.providers.title'))}</h2><p>${escapeHtml(t('admin.providers.subtitle'))}</p></div></div>
     <div class="card-body" style="padding: 8px 6px 6px"><div class="table-wrap"><table class="table">
       <thead><tr><th></th>${PLAN_COLUMNS.map((plan) => `<th>${escapeHtml(t(`plan.${plan}`))}</th>`).join('')}</tr></thead>
-      <tbody>${PROVIDER_FIELDS.map(([field, values]) => `<tr><td><b>${escapeHtml(t(`admin.providers.${field}`))}</b></td>${PLAN_COLUMNS.map((plan) => `<td><select class="select" name="${plan}.${field}">${values.map((v) => `<option value="${escapeHtml(v)}" ${providers[plan][field] === v ? 'selected' : ''}>${escapeHtml(optionLabel(v))}</option>`).join('')}</select></td>`).join('')}</tr>`).join('')}</tbody>
+      <tbody>${PROVIDER_FIELDS.map(([field, values]) => `<tr><td><b>${escapeHtml(t(`admin.providers.${field}`))}</b></td>${PLAN_COLUMNS.map((plan) => `<td><select class="select" name="${plan}.${field}">${values.map((v) => `<option value="${escapeHtml(v)}" ${String(providers[plan][field]) === v ? 'selected' : ''}>${escapeHtml(optionLabel(v))}</option>`).join('')}</select></td>`).join('')}</tr>`).join('')}</tbody>
     </table></div></div>
     <div class="card-footer"><button class="btn btn-primary" type="submit">${escapeHtml(t('common.save'))}</button></div>
   </form>`;

@@ -48,6 +48,13 @@ const MUSIC_PER_SECOND: Record<string, { price: number; estimate?: boolean }> = 
 /** Web searches, per search (Anthropic: $10 per 1,000; the pages read are billed as LLM input tokens). */
 const SEARCH_PRICES: Record<string, number> = { anthropic: 0.01 };
 
+/** Per second of AI footage, by model prefix (Replicate price pages, without audio). */
+const VIDEO_PER_SECOND: Array<{ prefix: string; price: number; estimate?: boolean }> = [
+  { prefix: 'google/veo-3.1-fast', price: 0.1 },
+  { prefix: 'google/veo-3.1', price: 0.2, estimate: true },
+  { prefix: 'google/veo-3', price: 0.2, estimate: true },
+];
+
 /** Generated images, per image. Cloudflare and Hugging Face are counted within their free tiers. */
 const IMAGE_PRICES: Record<string, { price: number; estimate?: boolean }> = {
   cloudflare: { price: 0 },
@@ -81,6 +88,11 @@ export const priceLine = (line: UsageLine): PricedLine => {
   }
   if (line.kind === 'music') {
     const price = MUSIC_PER_SECOND[line.provider];
+    if (!price) return { ...line, usd: 0, unpriced: true };
+    return { ...line, usd: (line.seconds ?? 0) * price.price, estimate: price.estimate };
+  }
+  if (line.kind === 'video') {
+    const price = VIDEO_PER_SECOND.filter((p) => (line.model ?? '').startsWith(p.prefix)).sort((a, b) => b.prefix.length - a.prefix.length)[0];
     if (!price) return { ...line, usd: 0, unpriced: true };
     return { ...line, usd: (line.seconds ?? 0) * price.price, estimate: price.estimate };
   }

@@ -13,7 +13,7 @@ import type { LogLevel } from '../core/logger';
 export const LLM_PROVIDER_IDS = ['auto', 'anthropic', 'openai', 'groq', 'openai-compatible', 'ollama', 'local'] as const;
 export const IMAGE_PROVIDER_IDS = ['auto', 'none', 'cloudflare', 'huggingface', 'openai', 'replicate', 'stability'] as const;
 export const VOICE_PROVIDER_IDS = ['auto', 'none', 'openai', 'elevenlabs', 'piper', 'system'] as const;
-export const VIDEO_PROVIDER_IDS = ['none', 'replicate'] as const;
+export const VIDEO_PROVIDER_IDS = ['none', 'auto', 'replicate'] as const;
 export const MUSIC_MODES = ['auto', 'procedural', 'assets', 'none'] as const;
 export const MUSIC_PROVIDER_IDS = ['none', 'auto', 'elevenlabs', 'stability', 'replicate'] as const;
 
@@ -110,8 +110,9 @@ const EnvSchema = z.object({
   PIPER_AUTO_DOWNLOAD: bool(true),
 
   // --- Video generation ------------------------------------------------
-  VIDEO_AGENT_VIDEO_PROVIDER: enumWithDefault(VIDEO_PROVIDER_IDS, 'none'),
-  REPLICATE_VIDEO_MODEL: z.preprocess(emptyToUndefined, z.string().default('minimax/video-01')),
+  /** AI video clips for scenes no real footage fits; how many per video is set per plan (Commerce). */
+  VIDEO_AGENT_VIDEO_PROVIDER: enumWithDefault(VIDEO_PROVIDER_IDS, 'auto'),
+  REPLICATE_VIDEO_MODEL: z.preprocess(emptyToUndefined, z.string().default('google/veo-3.1-fast')),
   VIDEO_AGENT_MAX_GENERATED_CLIPS: int(2, 0, 20),
 
   // --- Music -----------------------------------------------------------

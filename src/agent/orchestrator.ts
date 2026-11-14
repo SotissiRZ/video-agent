@@ -427,7 +427,8 @@ export class VideoAgent {
 
     // ---- 6. Assets (local library → stock photos/videos → AI generation) -------------
     const imageProvider = this.meteredImage(options.generateImages === false ? null : this.deps.image !== undefined ? this.deps.image : safeResolve(() => resolveImageProvider(this.config), warnings));
-    const videoProvider = options.generateVideo ? (this.deps.video !== undefined ? this.deps.video : safeResolve(() => resolveVideoProvider(this.config), warnings)) : null;
+    const rawVideo = options.generateVideo ? (this.deps.video !== undefined ? this.deps.video : safeResolve(() => resolveVideoProvider(this.config), warnings)) : null;
+    const videoProvider = rawVideo && this.deps.meter ? this.deps.meter.video(rawVideo) : rawVideo;
     const stockProviders = options.stock === false ? [] : this.deps.stock ?? safeResolve(() => resolveStockProviders(this.config), warnings) ?? [];
     let library: AssetLibrary | undefined;
     try {

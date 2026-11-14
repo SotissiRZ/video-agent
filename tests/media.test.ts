@@ -157,7 +157,7 @@ describe('media director', () => {
         return [1, 2, 3, 4, 5].map((i) => ({ provider: 'fake', id: `${q.kind}-${i}`, kind: q.kind, downloadUrl: `https://cdn.test/${q.kind}-${i}`, width: 1080, height: 1920, durationSec: q.kind === 'video' ? 10 : undefined, author: `A${i}`, pageUrl: `https://fake/${i}`, extension: q.kind === 'video' ? 'mp4' : 'jpg' }));
       },
     };
-    const broken: StockProvider = { id: 'broken', supports: ['photo'], search: async () => { throw new Error('boom'); } };
+    const broken: StockProvider = { id: 'broken', supports: ['photo', 'video'], search: async () => { throw new Error('boom'); } };
     const m = mockFetch([['GET', /cdn\.test/, () => new Response('bytes')]]);
     restore = m.restore;
     const paths = jobPaths(path.join(tmpDir(), 'job'));
@@ -172,12 +172,48 @@ describe('media director', () => {
     expect(media.every(Boolean)).toBe(true);
     expect(new Set(media.map((m) => m.src)).size).toBe(4);
     expect(media[0]).toMatchObject({ type: 'video', origin: 'stock:fake', durationInFrames: 299, credit: { author: 'A1', source: 'fake' } });
-    expect(media[1]!.type).toBe('image');
+    // Filmed footage everywhere: every scene gets a clip when one exists, not a photo every other scene.
+    expect(media.map((m) => m.type)).toEqual(['video', 'video', 'video', 'video']);
     expect(fs.existsSync(path.join(paths.publicDir, media[0]!.src))).toBe(true);
     expect(fs.readFileSync(path.join(paths.dir, 'credits.md'), 'utf8')).toContain('A1');
     expect(director.credits).toHaveLength(4);
     expect(warnings.some((w) => w.includes('broken'))).toBe(true);
     expect(n).toBeGreaterThan(0);
+  });
+
+  it('films what stock cannot: an AI clip before a still photo, within the clip budget', async () => {
+    // Stock has photos only: no real footage for these scenes.
+    const photosOnly: StockProvider = {
+      id: 'photos',
+      supports: ['photo', 'video'],
+      async search(q): Promise<StockResult[]> {
+        return q.kind === 'photo' ? [1, 2, 3, 4, 5].map((i) => ({ provider: 'photos', id: `p-${q.query}-${i}`, kind: 'photo', downloadUrl: `https://cdn.test/p-${i}`, width: 1080, height: 1920, author: `A${i}`, pageUrl: `https://photos/${q.query}/${i}`, extension: 'jpg' })) : [];
+      },
+    };
+    const prompts: string[] = [];
+    const video = {
+      id: 'veo',
+      async generate(req: { prompt: string; outFileBase: string }) {
+        prompts.push(req.prompt);
+        fs.writeFileSync(`${req.outFileBase}.mp4`, 'clip');
+        return { file: `${req.outFileBase}.mp4`, seconds: 4 };
+      },
+    };
+    restore = mockFetch([['GET', /cdn\.test/, () => new Response('bytes')]]).restore;
+    const paths = jobPaths(path.join(tmpDir(), 'job'));
+    ensureJobDirs(paths);
+    const warnings: string[] = [];
+    const director = new MediaDirector(
+      { stock: [photosOnly], image: null, video, logger: createLogger('silent') },
+      { sources: ['assets', 'stock', 'ai'], coverage: 'all', stockVideos: true, maxGeneratedImages: 0, maxGeneratedClips: 2, keywordLanguage: 'en' },
+    );
+    const sb = await director.run(makeStoryboard(), [], brief, paths, warnings, () => undefined);
+    const origins = sb.scenes.map((s) => s.media!.origin);
+    // Two clips filmed to order (the budget), then photos for the rest.
+    expect(origins.filter((o) => o === 'ai:veo')).toHaveLength(2);
+    expect(origins.slice(0, 2)).toEqual(['ai:veo', 'ai:veo']);
+    expect(origins.slice(2).every((o) => o.startsWith('stock:'))).toBe(true);
+    expect(prompts[0]).toMatch(/Realistic documentary footage.*no text/);
   });
 
   it('prefers sharp pictures, leaves out alcohol nobody asked for, and finds replacements', async () => {

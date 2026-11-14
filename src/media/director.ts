@@ -252,16 +252,16 @@ export class MediaDirector {
       this.sceneIndex = i;
       if (!wantsMedia(scene, this.options.coverage)) continue;
       progress(i / sb.scenes.length, `Visuel ${i + 1}/${sb.scenes.length}`);
-      // Alternate clips and photos: lively but lighter to download and render.
-      const preferVideo = this.options.stockVideos && (scene.kind === 'image' || i % 2 === 0);
-      const media = await this.findMedia(scene, planned[i], brief, paths, preferVideo, warnings, signal);
+      // Filmed footage first for every scene (real clips, then an AI clip), a still photo only as a last resort.
+      const media = await this.findMedia(scene, planned[i], brief, paths, warnings, signal);
       if (media) scene.media = media;
       // Long scenes: several shots in a row (2–4 s each), from the same searches.
       const wanted = shotsFor(scene.durationInFrames / sb.format.fps, this.options.shotsPerScene ?? 1);
       if (media && wanted > 1 && /^(stock|asset)/.test(media.origin)) {
         const shots: Media[] = [];
         for (let k = 1; k < wanted; k++) {
-          const extra = media.origin === 'asset' ? this.fromAssets(scene, planned[i], brief, paths) : await this.fromStock(scene, planned[i], brief, paths, false, warnings, signal);
+          // Further shots are clips too: a scene must look filmed, not like a slideshow.
+          const extra = media.origin === 'asset' ? this.fromAssets(scene, planned[i], brief, paths) : await this.fromStock(scene, planned[i], brief, paths, this.options.stockVideos ? ['video'] : ['photo'], warnings, signal);
           if (!extra) break;
           shots.push(extra);
         }
@@ -283,19 +283,34 @@ export class MediaDirector {
   async findReplacement(scene: Scene, keywords: string[], brief: VideoBrief, paths: JobPaths, usedPages: string[], warnings: string[], signal?: AbortSignal): Promise<Media | undefined> {
     for (const page of usedPages) this.usedPages.add(page);
     const plan = { visualKeywords: keywords, visualPrompt: keywords.join(', ') } as PlannedScene;
-    return this.findMedia(scene, plan, brief, paths, false, warnings, signal);
+    return this.findMedia(scene, plan, brief, paths, warnings, signal);
   }
 
-  private async findMedia(scene: Scene, plan: PlannedScene | undefined, brief: VideoBrief, paths: JobPaths, preferVideo: boolean, warnings: string[], signal?: AbortSignal): Promise<Media | undefined> {
-    for (const source of this.options.sources) {
+  /**
+   * Customer files first; then filmed footage: a real stock clip for any of the searches, else an AI
+   * clip (within the plan's budget); a still photo only when no clip exists; an AI image last.
+   */
+  private async findMedia(scene: Scene, plan: PlannedScene | undefined, brief: VideoBrief, paths: JobPaths, warnings: string[], signal?: AbortSignal): Promise<Media | undefined> {
+    const sources = this.options.sources;
+    let triedAiClip = false;
+    for (const source of sources) {
       if (source === 'assets') {
         const media = this.fromAssets(scene, plan, brief, paths);
         if (media) return media;
       } else if (source === 'stock') {
-        const media = await this.fromStock(scene, plan, brief, paths, preferVideo, warnings, signal);
-        if (media) return media;
+        if (this.options.stockVideos) {
+          const clip = await this.fromStock(scene, plan, brief, paths, ['video'], warnings, signal);
+          if (clip) return clip;
+          if (sources.includes('ai')) {
+            triedAiClip = true;
+            const generated = await this.fromAIVideo(scene, plan, brief, paths, warnings, signal);
+            if (generated) return generated;
+          }
+        }
+        const photo = await this.fromStock(scene, plan, brief, paths, ['photo'], warnings, signal);
+        if (photo) return photo;
       } else if (source === 'ai') {
-        const media = await this.fromAI(scene, plan, brief, paths, warnings, signal);
+        const media = (triedAiClip ? undefined : await this.fromAIVideo(scene, plan, brief, paths, warnings, signal)) ?? (await this.fromAIImage(scene, plan, brief, paths, warnings, signal));
         if (media) return media;
       }
     }
@@ -312,10 +327,9 @@ export class MediaDirector {
     return { type: match.type === 'video' ? 'video' : 'image', src: importAsset(match.file, paths.publicDir, 'media'), fit: 'cover', origin: 'asset' };
   }
 
-  private async fromStock(scene: Scene, plan: PlannedScene | undefined, brief: VideoBrief, paths: JobPaths, preferVideo: boolean, warnings: string[], signal?: AbortSignal): Promise<Media | undefined> {
+  private async fromStock(scene: Scene, plan: PlannedScene | undefined, brief: VideoBrief, paths: JobPaths, kinds: StockKind[], warnings: string[], signal?: AbortSignal): Promise<Media | undefined> {
     const providers = this.deps.stock.filter((p) => !this.disabledProviders.has(p.id));
     if (!providers.length) return undefined;
-    const kinds: StockKind[] = preferVideo ? ['video', 'photo'] : ['photo', 'video'];
     const orientation = orientationFor(brief.width, brief.height);
     const minShortSide = Math.min(brief.width, brief.height);
     // Two industry searches per scene, rotating so that scenes get different pictures.
@@ -374,22 +388,36 @@ export class MediaDirector {
     return undefined;
   }
 
-  private async fromAI(scene: Scene, plan: PlannedScene | undefined, brief: VideoBrief, paths: JobPaths, warnings: string[], signal?: AbortSignal): Promise<Media | undefined> {
+  private aiSubject(scene: Scene, plan: PlannedScene | undefined, brief: VideoBrief): { subject: string; prompt: string } {
     const direction = this.options.imageDirection;
     const subject = plan?.visualPrompt || [scene.headline.replace(/\*/g, ''), brief.audience, brief.location, direction ? '' : 'photorealistic, natural light, no text'].filter(Boolean).join(', ');
     const prompt = direction ? `${subject}. Style: ${direction}` : subject;
+    return { subject, prompt };
+  }
+
+  /** A clip filmed to order by a text-to-video model, for a scene no real footage fits (budget per video). */
+  private async fromAIVideo(scene: Scene, plan: PlannedScene | undefined, brief: VideoBrief, paths: JobPaths, warnings: string[], signal?: AbortSignal): Promise<Media | undefined> {
+    const { video } = this.deps;
+    if (!video || this.generatedClips >= this.options.maxGeneratedClips || this.disabledProviders.has(`ai:${video.id}`)) return undefined;
+    const { subject } = this.aiSubject(scene, plan, brief);
+    // Written like a shot list: real footage, natural motion, nothing that betrays a generator.
+    const prompt = `${subject}. Realistic documentary footage, natural light, natural motion of people and objects, smooth handheld camera movement, ${brief.height > brief.width ? 'vertical 9:16 framing' : 'cinematic framing'}, no text, no subtitles, no logos.`;
     const base = path.join(paths.publicDir, 'media', `${scene.id}-generated`);
-    const { video, image } = this.deps;
-    if (video && scene.kind === 'image' && this.generatedClips < this.options.maxGeneratedClips) {
-      try {
-        const { file } = await video.generate({ prompt, width: brief.width, height: brief.height, durationSec: scene.durationInFrames / brief.fps, outFileBase: base, signal });
-        this.generatedClips++;
-        return { type: 'video', src: path.relative(paths.publicDir, file).split(path.sep).join('/'), fit: 'cover', origin: `ai:${video.id}` };
-      } catch (err) {
-        if (signal?.aborted) throw err;
-        warnings.push(`video generation failed for ${scene.id}: ${errorMessage(err)}`);
-      }
+    try {
+      const { file } = await video.generate({ prompt, width: brief.width, height: brief.height, durationSec: scene.durationInFrames / brief.fps, outFileBase: base, signal });
+      this.generatedClips++;
+      return { type: 'video', src: path.relative(paths.publicDir, file).split(path.sep).join('/'), fit: 'cover', origin: `ai:${video.id}`, alt: subject.slice(0, 500) };
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      this.handleProviderError(`ai:${video.id}`, err, warnings);
+      return undefined;
     }
+  }
+
+  private async fromAIImage(scene: Scene, plan: PlannedScene | undefined, brief: VideoBrief, paths: JobPaths, warnings: string[], signal?: AbortSignal): Promise<Media | undefined> {
+    const { subject, prompt } = this.aiSubject(scene, plan, brief);
+    const base = path.join(paths.publicDir, 'media', `${scene.id}-generated`);
+    const { image } = this.deps;
     if (image && this.generatedImages < this.options.maxGeneratedImages && !this.disabledProviders.has(`ai:${image.id}`)) {
       try {
         const { file } = await image.generate({ prompt, width: brief.width, height: brief.height, outFileBase: base, signal });

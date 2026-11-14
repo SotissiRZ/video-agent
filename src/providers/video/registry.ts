@@ -14,6 +14,14 @@ registerVideoProvider('replicate', ({ env }) =>
 export const resolveVideoProvider = (config: AppConfig, requested?: string): VideoProvider | null => {
   const id = requested ?? config.env.VIDEO_AGENT_VIDEO_PROVIDER;
   if (id === 'none') return null;
+  // auto: the first configured provider, none when no key is set (never an error).
+  if (id === 'auto') {
+    for (const factory of factories.values()) {
+      const provider = factory(config);
+      if (provider) return provider;
+    }
+    return null;
+  }
   const factory = factories.get(id);
   if (!factory) throw new ConfigError(`Unknown video provider "${id}"`, `Available: none, ${[...factories.keys()].join(', ')}`);
   const provider = factory(config);

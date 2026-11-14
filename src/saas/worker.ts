@@ -167,6 +167,8 @@ export class Worker {
       maxDurationSec: plan.maxDurationSec,
       badge: plan.badge ? BADGE_TEXT : undefined,
       skipRender: false,
+      // AI clips only when the plan has a budget for them.
+      generateVideo: runConfig.env.VIDEO_AGENT_MAX_GENERATED_CLIPS > 0,
     };
     // Narrator: the cloned voice (ElevenLabs) when asked for, else a female or male voice.
     // The customer's pronunciation dictionary applies to every sentence.
