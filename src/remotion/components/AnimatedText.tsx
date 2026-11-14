@@ -57,8 +57,14 @@ export const AnimatedText: React.FC<Props> = ({
 }) => {
   const text = keepPunctuation(rawText);
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, durationInFrames } = useVideoConfig();
   const config = springFor(theme.motion);
+  // The block never freezes: a slow push towards the viewer plus a gentle float, all scene long.
+  const life = interpolate(frame, [0, durationInFrames], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+  const drift = `scale(${(1 + 0.04 * life).toFixed(4)}) translateY(${(Math.sin(frame / 24) * 0.035).toFixed(4)}em)`;
+  // Words leave one after the other (last first) just before the scene ends.
+  const exitFrames = Math.max(6, Math.min(14, Math.round(durationInFrames * 0.15)));
+  const exitStart = durationInFrames - exitFrames - 2;
 
   const style: React.CSSProperties = {
     fontSize: fitLongestWord(text, fontSize, maxWidth, uppercase),
@@ -100,34 +106,73 @@ export const AnimatedText: React.FC<Props> = ({
     );
   }
 
+  const total = text.replace(/\*/g, '').split(/\s+/).filter(Boolean).length;
+  // Bouncier springs: motion design overshoots a little, then lands.
+  const pop = { damping: 9, stiffness: 170, mass: 0.8 };
   let wordIndex = 0;
   return (
-    <p style={style}>
+    <p style={{ ...style, transform: drift }}>
       {parseEmphasis(text).map((seg, si) =>
         seg.text.split(/(\s+)/).map((word, wi) => {
           if (word.trim() === '') return <span key={`${si}-${wi}`}>{word}</span>;
           const index = wordIndex++;
-          const progress = spring({ frame: frame - delay - index * stagger, fps, config });
-          const opacity = interpolate(progress, [0, 0.6], [0, 1], { extrapolateRight: 'clamp' });
-          let transform = 'none';
-          let filter = 'none';
-          if (entrance === 'rise') transform = `translateY(${(1 - progress) * 0.7}em)`;
-          if (entrance === 'pop') transform = `scale(${interpolate(progress, [0, 1], [0.4, 1])})`;
-          if (entrance === 'slide') transform = `translateX(${(1 - progress) * -1.2}em)`;
-          if (entrance === 'blur') filter = `blur(${(1 - progress) * 0.35}em)`;
-          return (
+          const start = delay + index * stagger;
+          const progress = spring({ frame: frame - start, fps, config: entrance === 'pop' ? pop : config });
+          const exitAt = exitStart + (total - 1 - index) * 1.5;
+          const exit = interpolate(frame, [exitAt, exitAt + 8], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+          const opacity = interpolate(progress, [0, 0.5], [0, 1], { extrapolateRight: 'clamp' }) * (1 - exit);
+          const transforms: string[] = [];
+          let filter = exit > 0 ? `blur(${(exit * 0.12).toFixed(3)}em)` : 'none';
+          if (entrance === 'pop') transforms.push(`scale(${interpolate(progress, [0, 1], [0.3, 1])})`, `rotate(${((1 - progress) * -10).toFixed(2)}deg)`);
+          if (entrance === 'slide') transforms.push(`translateX(${((1 - progress) * -1.4).toFixed(3)}em)`, `skewX(${((1 - progress) * -14).toFixed(2)}deg)`);
+          if (entrance === 'blur') {
+            transforms.push(`scale(${interpolate(progress, [0, 1], [1.25, 1])})`);
+            if (progress < 1) filter = `blur(${((1 - progress) * 0.35 + exit * 0.12).toFixed(3)}em)`;
+          }
+          if (exit > 0) transforms.push(`translateY(${(-exit * 0.45).toFixed(3)}em)`);
+          // The highlighted word: a marker stroke draws under it once it has landed, and it breathes.
+          const marker = seg.emphasis ? spring({ frame: frame - start - 8, fps, config: { damping: 20, stiffness: 120 } }) : 0;
+          if (seg.emphasis && progress > 0.95) transforms.push(`scale(${(1 + Math.sin((frame - start) / 9) * 0.025).toFixed(4)})`);
+          const inner = (
             <span
-              key={`${si}-${wi}`}
               style={{
                 display: 'inline-block',
+                position: 'relative',
+                // Rise: the word comes up from behind an invisible edge (mask reveal).
+                transform: [entrance === 'rise' ? `translateY(${((1 - progress) * 110).toFixed(2)}%)` : '', ...transforms].join(' ').trim() || 'none',
                 opacity,
-                transform,
                 filter,
                 color: seg.emphasis ? emphasisColor : color,
               }}
             >
               {word}
+              {seg.emphasis ? (
+                <span
+                  aria-hidden
+                  style={{
+                    position: 'absolute',
+                    left: '-0.04em',
+                    right: '-0.04em',
+                    bottom: '0.02em',
+                    height: '0.13em',
+                    borderRadius: '0.07em',
+                    background: emphasisColor,
+                    opacity: 0.55 * (1 - exit),
+                    transform: `scaleX(${marker.toFixed(4)})`,
+                    transformOrigin: 'left center',
+                    zIndex: -1,
+                  }}
+                />
+              ) : null}
             </span>
+          );
+          return entrance === 'rise' ? (
+            // The mask: room for accents above and descenders below, clipped while the word rises.
+            <span key={`${si}-${wi}`} style={{ display: 'inline-block', overflow: 'hidden', padding: '0.12em 0.04em 0.14em', margin: '-0.12em -0.04em -0.14em', verticalAlign: 'bottom' }}>
+              {inner}
+            </span>
+          ) : (
+            <React.Fragment key={`${si}-${wi}`}>{inner}</React.Fragment>
           );
         }),
       )}

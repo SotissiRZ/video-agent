@@ -3,6 +3,7 @@ import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } fr
 import type { Scene, Storyboard } from '../contract/storyboard';
 import { Background } from '../components/Background';
 import { MediaStack } from '../components/MediaLayer';
+import { MotionAccents } from '../components/MotionAccents';
 import { scrim, springFor, useLayout, withAlpha } from '../utils';
 
 export interface SceneProps {
@@ -23,14 +24,42 @@ export const SceneShell: React.FC<SceneProps & { children: React.ReactNode; just
   justify = 'center',
 }) => {
   const layout = useLayout();
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
   const { theme } = storyboard;
   const align = scene.layout === 'left' ? 'flex-start' : 'center';
   const mediaBackdrop = scene.media && scene.kind !== 'image';
+  // Not every scene is a full-bleed photo: every third one shows it as a floating 3D card.
+  const card = mediaBackdrop && index % 3 === 1;
+  const cardIn = spring({ frame: frame - 2, fps, config: { damping: 14, stiffness: 90 } });
+  const media = scene.media ? [scene.media, ...(scene.shots ?? [])] : [];
   return (
     <AbsoluteFill style={{ backgroundColor: theme.palette.background }}>
+      {card ? (
+        <>
+          <Background spec={{ variant: 'gradient' }} theme={theme} seed={index + 1} />
+          <AbsoluteFill style={{ alignItems: 'center', justifyContent: 'center', perspective: layout.unit * 2.4 }}>
+            <div
+              style={{
+                position: 'relative',
+                width: '86%',
+                height: layout.isPortrait ? '74%' : '80%',
+                borderRadius: layout.unit * 0.04,
+                overflow: 'hidden',
+                boxShadow: `0 ${layout.unit * 0.04}px ${layout.unit * 0.12}px rgba(0, 0, 0, 0.45)`,
+                // Swings in from the side, then keeps rocking gently.
+                transform: `translateY(${((1 - cardIn) * 12).toFixed(2)}%) rotateY(${(interpolate(cardIn, [0, 1], [-28, -5]) + Math.sin(frame / 30) * 3).toFixed(2)}deg) rotateX(${(Math.cos(frame / 34) * 2.5).toFixed(2)}deg) scale(${interpolate(cardIn, [0, 1], [0.8, 1]).toFixed(4)})`,
+                opacity: interpolate(cardIn, [0, 0.4], [0, 1], { extrapolateRight: 'clamp' }),
+              }}
+            >
+              <MediaStack media={media} kenBurns={scene.animation.kenBurns} />
+            </div>
+          </AbsoluteFill>
+        </>
+      ) : null}
       {mediaBackdrop && scene.media ? (
         <>
-          <MediaStack media={[scene.media, ...(scene.shots ?? [])]} kenBurns={scene.animation.kenBurns} />
+          {card ? null : <MediaStack media={media} kenBurns={scene.animation.kenBurns} />}
           <AbsoluteFill
             style={{
               // Neutral and local: darker only behind the centred text and the subtitles at the
@@ -45,6 +74,7 @@ export const SceneShell: React.FC<SceneProps & { children: React.ReactNode; just
       ) : (
         <Background spec={scene.background} theme={theme} seed={index + 1} />
       )}
+      <MotionAccents theme={theme} index={index} />
       <AbsoluteFill
         style={{
           padding: `${layout.padY}px ${layout.padX}px`,

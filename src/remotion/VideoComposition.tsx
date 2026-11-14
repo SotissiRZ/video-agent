@@ -6,6 +6,10 @@ import { fade } from '@remotion/transitions/fade';
 import { flip } from '@remotion/transitions/flip';
 import { slide } from '@remotion/transitions/slide';
 import { wipe } from '@remotion/transitions/wipe';
+import { iris } from '@remotion/transitions/iris';
+import { clockWipe } from '@remotion/transitions/clock-wipe';
+import { pushCut } from '@remotion/transitions/push-cut';
+import { whip, zoomThrough } from './motion/transitions';
 import { StoryboardSchema, type CompositionProps, type Transition } from './contract/storyboard';
 import { computeTimeline, transitionLength, voiceStartFrame } from './contract/timeline';
 import { SubtitlesOverlay } from './components/SubtitlesOverlay';
@@ -18,8 +22,18 @@ import { resolveSrc } from './utils';
 ensureFonts();
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const presentationFor = (t: Transition): TransitionPresentation<any> => {
+const presentationFor = (t: Transition, size: { width: number; height: number }): TransitionPresentation<any> => {
   switch (t.type) {
+    case 'zoom':
+      return zoomThrough();
+    case 'whip':
+      return whip(t.direction);
+    case 'iris':
+      return iris(size);
+    case 'clock':
+      return clockWipe(size);
+    case 'push':
+      return pushCut({ flashColor: '#ffffff', flashOpacity: 0.35 });
     case 'slide':
       return slide({ direction: t.direction });
     case 'wipe':
@@ -36,7 +50,7 @@ const presentationFor = (t: Transition): TransitionPresentation<any> => {
 export const VideoComposition: React.FC<CompositionProps> = (props) => {
   // Parsing fills defaults so hand-written storyboards (Studio, JSON edits) also work.
   const storyboard = useMemo(() => StoryboardSchema.parse(props.storyboard), [props.storyboard]);
-  const { durationInFrames } = useVideoConfig();
+  const { durationInFrames, width, height } = useVideoConfig();
   const timeline = useMemo(() => computeTimeline(storyboard.scenes), [storyboard.scenes]);
 
   const voiceWindows = useMemo(
@@ -79,7 +93,7 @@ export const VideoComposition: React.FC<CompositionProps> = (props) => {
       children.push(
         <TransitionSeries.Transition
           key={`t-${scene.id}`}
-          presentation={presentationFor(scene.transitionOut)}
+          presentation={presentationFor(scene.transitionOut, { width, height })}
           timing={linearTiming({ durationInFrames: length })}
         />,
       );

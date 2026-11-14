@@ -22,7 +22,8 @@ export const applyAnimations = (storyboard: Storyboard, style: StyleDefinition):
       animation: {
         entrance: scene.kind === 'quote' ? 'blur' : style.entrances[i % style.entrances.length]!,
         stagger,
-        kenBurns: scene.media ? 0.025 : 0.04,
+        // Real camera moves: a 3 % zoom over a scene read as a still picture.
+        kenBurns: scene.media ? 0.12 : 0.08,
       },
       transitionOut: {
         type,

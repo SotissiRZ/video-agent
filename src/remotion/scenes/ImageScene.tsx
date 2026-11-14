@@ -3,6 +3,7 @@ import { AbsoluteFill, interpolate, useCurrentFrame, useVideoConfig } from 'remo
 import { AnimatedText } from '../components/AnimatedText';
 import { Background } from '../components/Background';
 import { MediaStack } from '../components/MediaLayer';
+import { MotionAccents } from '../components/MotionAccents';
 import { bodyFontSize, fitFontSize, scrim, useLayout, withAlpha } from '../utils';
 import { FadeUp, type SceneProps } from './SceneShell';
 
@@ -62,6 +63,7 @@ export const ImageScene: React.FC<SceneProps> = ({ scene, storyboard, index }) =
           opacity: interpolate(frame, [0, durationInFrames * 0.2], [0.6, 1], { extrapolateRight: 'clamp' }),
         }}
       />
+      <MotionAccents theme={theme} index={index} />
       <AbsoluteFill
         style={{
           justifyContent: 'flex-end',

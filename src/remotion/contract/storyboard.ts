@@ -10,7 +10,8 @@ export const SCENE_KINDS = ['title', 'text', 'bullets', 'stat', 'image', 'quote'
 export const SceneKindSchema = z.enum(SCENE_KINDS);
 export type SceneKind = z.infer<typeof SceneKindSchema>;
 
-export const TRANSITION_TYPES = ['none', 'fade', 'slide', 'wipe', 'flip'] as const;
+/** zoom, whip, iris, clock and push are motion-design cuts (CSS only, safe on a headless render server). */
+export const TRANSITION_TYPES = ['none', 'fade', 'slide', 'wipe', 'flip', 'zoom', 'whip', 'iris', 'clock', 'push'] as const;
 export const TransitionTypeSchema = z.enum(TRANSITION_TYPES);
 export type TransitionType = z.infer<typeof TransitionTypeSchema>;
 
