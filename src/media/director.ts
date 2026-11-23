@@ -102,6 +102,8 @@ export const buildStockQueries = (
   domainQueries: string[] = [],
   /** Keywords are complete searches ("analytics dashboard laptop"): one query each. */
   phrases = false,
+  /** false: only the scene's own searches, without the generic hint of its role. */
+  generic = true,
 ): Array<{ query: string; language: string }> => {
   const brandWords = new Set(normalize(brief.brand).split(/\s+/).filter(Boolean));
   const clean = (words: string[]) => {
@@ -134,8 +136,9 @@ export const buildStockQueries = (
     domainQueries.forEach((q) => push(q.split(' '), 'en'));
     push(planned.slice(0, 2), keywordLanguage);
   }
-  push(context, keywordLanguage);
-  const hint = ROLE_VISUAL_HINTS[scene.role];
+  // The audience and place are the same for every scene: a broad search, like the role hint.
+  if (generic) push(context, keywordLanguage);
+  const hint = generic ? ROLE_VISUAL_HINTS[scene.role] : undefined;
   if (hint) push(hint.split(' '), 'en');
   return queries.slice(0, 6);
 };
@@ -299,13 +302,17 @@ export class MediaDirector {
         if (media) return media;
       } else if (source === 'stock') {
         if (this.options.stockVideos) {
-          const clip = await this.fromStock(scene, plan, brief, paths, ['video'], warnings, signal);
+          // A real clip of what the scene is about; else a clip filmed to order by the AI (within the
+          // budget) rather than a generic industry clip ("team office") that says nothing of the scene.
+          const clip = await this.fromStock(scene, plan, brief, paths, ['video'], warnings, signal, 'scene');
           if (clip) return clip;
           if (sources.includes('ai')) {
             triedAiClip = true;
             const generated = await this.fromAIVideo(scene, plan, brief, paths, warnings, signal);
             if (generated) return generated;
           }
+          const generic = await this.fromStock(scene, plan, brief, paths, ['video'], warnings, signal);
+          if (generic) return generic;
         }
         const photo = await this.fromStock(scene, plan, brief, paths, ['photo'], warnings, signal);
         if (photo) return photo;
@@ -327,15 +334,16 @@ export class MediaDirector {
     return { type: match.type === 'video' ? 'video' : 'image', src: importAsset(match.file, paths.publicDir, 'media'), fit: 'cover', origin: 'asset' };
   }
 
-  private async fromStock(scene: Scene, plan: PlannedScene | undefined, brief: VideoBrief, paths: JobPaths, kinds: StockKind[], warnings: string[], signal?: AbortSignal): Promise<Media | undefined> {
+  /** `scope`: 'scene' searches only the scene's own keywords, 'all' adds the industry searches. */
+  private async fromStock(scene: Scene, plan: PlannedScene | undefined, brief: VideoBrief, paths: JobPaths, kinds: StockKind[], warnings: string[], signal?: AbortSignal, scope: 'scene' | 'all' = 'all'): Promise<Media | undefined> {
     const providers = this.deps.stock.filter((p) => !this.disabledProviders.has(p.id));
     if (!providers.length) return undefined;
     const orientation = orientationFor(brief.width, brief.height);
     const minShortSide = Math.min(brief.width, brief.height);
     // Two industry searches per scene, rotating so that scenes get different pictures.
     const n = this.domain.queries.length;
-    const domainQueries = [this.domain.queries[(this.sceneIndex * 2) % n]!, this.domain.queries[(this.sceneIndex * 2 + 1) % n]!];
-    const queries = buildStockQueries(scene, plan, brief, this.options.keywordLanguage, domainQueries, this.options.phraseKeywords);
+    const domainQueries = scope === 'scene' ? [] : [this.domain.queries[(this.sceneIndex * 2) % n]!, this.domain.queries[(this.sceneIndex * 2 + 1) % n]!];
+    const queries = buildStockQueries(scene, plan, brief, this.options.keywordLanguage, domainQueries, this.options.phraseKeywords, scope === 'all');
 
     // Sharp first: a picture scaled up more than 15 % looks soft on a phone; larger upscales only as a last resort.
     for (const maxUpscale of [1.15, 1.5])

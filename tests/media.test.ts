@@ -216,6 +216,39 @@ describe('media director', () => {
     expect(prompts[0]).toMatch(/Realistic documentary footage.*no text/);
   });
 
+  it('films the scene with AI rather than use a generic industry clip, and keeps generic clips once the budget is spent', async () => {
+    const scenePlans = ['students campus morocco', 'students graduation morocco', 'students library morocco', 'students debate morocco'];
+    // Stock has clips, but only for broad industry searches: none shows what the scenes are about.
+    const genericOnly: StockProvider = {
+      id: 'generic',
+      supports: ['photo', 'video'],
+      async search(q): Promise<StockResult[]> {
+        if (scenePlans.includes(q.query)) return [];
+        return [1, 2, 3, 4, 5].map((i) => ({ provider: 'generic', id: `${q.kind}-${q.query}-${i}`, kind: q.kind, downloadUrl: `https://cdn.test/g-${i}`, width: 1080, height: 1920, durationSec: 10, author: `A${i}`, pageUrl: `https://generic/${q.query}/${i}`, extension: q.kind === 'video' ? 'mp4' : 'jpg', description: q.query }));
+      },
+    };
+    const video = {
+      id: 'veo',
+      async generate(req: { outFileBase: string }) {
+        fs.writeFileSync(`${req.outFileBase}.mp4`, 'clip');
+        return { file: `${req.outFileBase}.mp4`, seconds: 4 };
+      },
+    };
+    restore = mockFetch([['GET', /cdn\.test/, () => new Response('bytes')]]).restore;
+    const paths = jobPaths(path.join(tmpDir(), 'job'));
+    ensureJobDirs(paths);
+    const planned = scenePlans.map((k) => ({ visualKeywords: [k], visualPrompt: k }) as unknown as PlannedScene);
+    const director = new MediaDirector(
+      { stock: [genericOnly], image: null, video, logger: createLogger('silent') },
+      { sources: ['assets', 'stock', 'ai'], coverage: 'all', stockVideos: true, maxGeneratedImages: 0, maxGeneratedClips: 2, keywordLanguage: 'en', phraseKeywords: true },
+    );
+    const sb = await director.run(makeStoryboard(), planned, brief, paths, [], () => undefined);
+    const media = sb.scenes.map((s) => s.media!);
+    expect(media.map((m) => m.origin)).toEqual(['ai:veo', 'ai:veo', 'stock:generic', 'stock:generic']);
+    // Still filmed footage after the budget: generic clips, never a photo.
+    expect(media.map((m) => m.type)).toEqual(['video', 'video', 'video', 'video']);
+  });
+
   it('prefers sharp pictures, leaves out alcohol nobody asked for, and finds replacements', async () => {
     const photo = (provider: string, id: string, width: number, height: number, description: string): StockResult => ({
       provider, id, kind: 'photo', downloadUrl: `https://cdn.test/${id}`, width, height, author: id, pageUrl: `https://p/${id}`, extension: 'jpg', description,
