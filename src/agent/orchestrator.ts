@@ -16,6 +16,7 @@ import { buildMusicPrompt } from '../providers/music/prompt';
 import { resolveMusicProvider } from '../providers/music/registry';
 import type { MusicProvider } from '../providers/music/types';
 import { AssetLibrary, importAsset } from '../assets/manager';
+import { fitPictures } from '../media/fit';
 import { placeProductPhotos, type ProductPhoto } from '../media/product-photos';
 import { captureScreen, chooseScreenScenes, deviceFor, findUrls, showScreen } from '../media/screenshots';
 import { researchWeb, sourcesMarkdown, wantsResearch, type Research } from '../planning/research';
@@ -464,6 +465,10 @@ export class VideoAgent {
           sb = { ...sb, scenes: placeProductPhotos(sb.scenes, srcs, planned.map((scene) => scene.productPhoto), preferred) };
         }
         sb = await this.placeScreens(sb, request.prompt, planned, brief, paths, warnings, signal);
+        // Small or differently shaped pictures are shown whole instead of cropped and blown up.
+        const fitted = fitPictures(sb, paths.publicDir);
+        warnings.push(...fitted.warnings);
+        sb = fitted.storyboard;
         // Brand kit logo (uploaded by the customer) wins over the shared assets library.
         if (options.brandLogo && fs.existsSync(options.brandLogo)) {
           return { ...sb, brand: { ...sb.brand, logo: importAsset(options.brandLogo, paths.publicDir, 'brand'), showWatermark: true } };
@@ -666,6 +671,9 @@ export class VideoAgent {
     if (edited.searches.size) {
       storyboard = await step('assets', 'Nouvelles images', (progress) => this.replacePictures(storyboard, edited.searches, brief, paths, warnings, progress, signal), (sb) => `${edited.searches.size} image(s) remplacée(s)`);
     } else skip('assets', 'conservé de la vidéo d’origine');
+    const fitted = fitPictures(storyboard, paths.publicDir);
+    warnings.push(...fitted.warnings);
+    storyboard = fitted.storyboard;
     const voiced = await this.revoiceScenes(storyboard, original, brief, paths, edited.narrationChanged, sourceVoice, request, warnings, step, signal);
     return this.finishCorrection({ ...voiced, original, brief, concept, paths, steps, warnings, signal, planner: `${llm.id}:${llm.model}`, info: { correctionOf: path.basename(path.resolve(request.sourceDir)), instruction: request.instruction } });
   }

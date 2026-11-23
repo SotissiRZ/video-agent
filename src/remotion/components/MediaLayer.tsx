@@ -64,6 +64,18 @@ const PictureLayer: React.FC<Props> = ({ media, kenBurns, style }) => {
   if (media.type === 'video') {
     const video = <OffthreadVideo src={src} muted style={common} />;
     content = media.durationInFrames ? <Loop durationInFrames={media.durationInFrames}>{video}</Loop> : video;
+  } else if (media.fit === 'contain') {
+    // Shown whole (a poster, a small or square photo in a vertical video): over a blurred, darkened
+    // copy of itself that fills the frame, the way social videos show pictures of another shape.
+    const gentle = kenBurnsMove(media.src, kenBurns * 0.5, progress);
+    content = (
+      <>
+        <Img src={src} style={{ ...common, objectFit: 'cover', transform: `scale(${(1.25 * move.scale).toFixed(4)})`, filter: 'blur(40px) brightness(0.55) saturate(1.2)' }} />
+        <AbsoluteFill>
+          <Img src={src} style={{ ...common, transform: `scale(${(gentle.scale * punch).toFixed(4)})`, filter: 'drop-shadow(0 24px 60px rgba(0,0,0,0.55))' }} />
+        </AbsoluteFill>
+      </>
+    );
   } else {
     content = <Img src={src} style={common} />;
   }
