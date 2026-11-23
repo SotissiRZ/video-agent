@@ -35,3 +35,57 @@ describe('AI footage with Veo 3.1 Fast', () => {
     expect(planConfig(config, PROVIDER_DEFAULTS.pro).env.VIDEO_AGENT_MAX_GENERATED_CLIPS).toBe(4);
   });
 });
+
+describe('AI footage through OpenRouter (Wan 3.0)', () => {
+  it('submits a silent vertical clip of the scene length, polls, then downloads it with the key', async () => {
+    const { OpenRouterVideoProvider } = await import('../src/providers/video/openrouter');
+    const { mockFetch, json } = await import('./fetch-mock');
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const { tmpDir } = await import('./helpers');
+    let polls = 0;
+    const m = mockFetch([
+      ['POST', /\/api\/v1\/videos$/, () => json({ id: 'job-1', polling_url: '/api/v1/videos/job-1', status: 'pending' }, { status: 202 })],
+      ['GET', /\/videos\/job-1$/, () => json(++polls < 2 ? { id: 'job-1', status: 'in_progress' } : { id: 'job-1', status: 'completed', unsigned_urls: ['https://openrouter.ai/api/v1/videos/job-1/content?index=0'], usage: { cost: 0.6 } })],
+      ['GET', /\/videos\/job-1\/content\?index=0$/, () => new Response('mp4-bytes')],
+    ]);
+    try {
+      const provider = new OpenRouterVideoProvider({ apiKey: 'sk-or-test', model: 'alibaba/wan-3.0', resolution: '720p', pollMs: 1 });
+      const base = path.join(tmpDir(), 'clip');
+      const out = await provider.generate({ ...request, outFileBase: base });
+      expect(out).toEqual({ file: `${base}.mp4`, seconds: 6 });
+      expect(fs.readFileSync(out.file, 'utf8')).toBe('mp4-bytes');
+      expect(JSON.parse(m.calls[0]!.body as string)).toEqual({ model: 'alibaba/wan-3.0', prompt: request.prompt, duration: 6, resolution: '720p', aspect_ratio: '9:16', generate_audio: false });
+      // Every call, the download included, carries the key (the links are not presigned).
+      expect(m.calls.every((c) => c.headers.authorization === 'Bearer sk-or-test')).toBe(true);
+      expect(provider.model).toBe('alibaba/wan-3.0@720p');
+    } finally {
+      m.restore();
+    }
+  });
+
+  it('reports a failed job', async () => {
+    const { OpenRouterVideoProvider } = await import('../src/providers/video/openrouter');
+    const { mockFetch, json } = await import('./fetch-mock');
+    const m = mockFetch([['POST', /\/videos$/, () => json({ id: 'job-2', status: 'failed', error: 'content policy' })]]);
+    try {
+      const provider = new OpenRouterVideoProvider({ apiKey: 'k', model: 'alibaba/wan-3.0', resolution: '720p', pollMs: 1 });
+      await expect(provider.generate(request)).rejects.toThrow(/video failed: content policy/);
+    } finally {
+      m.restore();
+    }
+  });
+
+  it('fits durations and shapes, prices per resolution and finds the key', async () => {
+    const { openRouterAspect, openRouterDuration } = await import('../src/providers/video/openrouter');
+    expect([openRouterDuration(1), openRouterDuration(5.2), openRouterDuration(5.02), openRouterDuration(45)]).toEqual([2, 6, 5, 30]);
+    expect([openRouterAspect(1080, 1920), openRouterAspect(1920, 1080), openRouterAspect(1080, 1080), openRouterAspect(1080, 1350)]).toEqual(['9:16', '16:9', '1:1', '3:4']);
+    expect(priceLine({ kind: 'video', provider: 'openrouter', model: 'alibaba/wan-3.0@720p', calls: 1, seconds: 6 }).usd).toBeCloseTo(0.6, 5);
+    expect(priceLine({ kind: 'video', provider: 'openrouter', model: 'alibaba/wan-3.0-prime@1080p', calls: 1, seconds: 5 }).usd).toBeCloseTo(1.4, 5);
+    expect(resolveVideoProvider(testConfig({ OPENROUTER_API_KEY: 'sk-or' }))?.id).toBe('openrouter');
+    // The LLM key works too when it is an OpenRouter key.
+    const shared = testConfig({ OPENAI_COMPATIBLE_BASE_URL: 'https://openrouter.ai/api/v1', OPENAI_COMPATIBLE_API_KEY: 'sk-or', OPENAI_COMPATIBLE_MODEL: 'x' });
+    expect(resolveVideoProvider(shared)?.model).toBe('alibaba/wan-3.0@720p');
+    expect(resolveVideoProvider(testConfig({ OPENAI_COMPATIBLE_BASE_URL: 'https://api.groq.com/openai/v1', OPENAI_COMPATIBLE_API_KEY: 'gsk' }))).toBeNull();
+  });
+});

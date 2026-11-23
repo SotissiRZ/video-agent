@@ -13,7 +13,7 @@ import type { LogLevel } from '../core/logger';
 export const LLM_PROVIDER_IDS = ['auto', 'anthropic', 'openai', 'groq', 'openai-compatible', 'ollama', 'local'] as const;
 export const IMAGE_PROVIDER_IDS = ['auto', 'none', 'cloudflare', 'huggingface', 'openai', 'replicate', 'stability'] as const;
 export const VOICE_PROVIDER_IDS = ['auto', 'none', 'openai', 'elevenlabs', 'piper', 'system'] as const;
-export const VIDEO_PROVIDER_IDS = ['none', 'auto', 'replicate'] as const;
+export const VIDEO_PROVIDER_IDS = ['none', 'auto', 'replicate', 'openrouter'] as const;
 export const MUSIC_MODES = ['auto', 'procedural', 'assets', 'none'] as const;
 export const MUSIC_PROVIDER_IDS = ['none', 'auto', 'elevenlabs', 'stability', 'replicate'] as const;
 
@@ -114,6 +114,11 @@ const EnvSchema = z.object({
   VIDEO_AGENT_VIDEO_PROVIDER: enumWithDefault(VIDEO_PROVIDER_IDS, 'auto'),
   REPLICATE_VIDEO_MODEL: z.preprocess(emptyToUndefined, z.string().default('google/veo-3.1-fast')),
   VIDEO_AGENT_MAX_GENERATED_CLIPS: int(2, 0, 20),
+  /** OpenRouter: one key for many video models (Wan, Veo, Kling…). Falls back to OPENAI_COMPATIBLE_API_KEY when that points at OpenRouter. */
+  OPENROUTER_API_KEY: optionalString,
+  OPENROUTER_VIDEO_MODEL: z.preprocess(emptyToUndefined, z.string().default('alibaba/wan-3.0')),
+  /** Price per second grows with it (Wan 3.0: 480p $0.05, 720p $0.10, 1080p $0.20). */
+  OPENROUTER_VIDEO_RESOLUTION: enumWithDefault(['480p', '720p', '1080p'] as const, '720p'),
 
   // --- Music -----------------------------------------------------------
   VIDEO_AGENT_MUSIC: enumWithDefault(MUSIC_MODES, 'auto'),
@@ -338,6 +343,7 @@ export const describeSecrets = (env: Env): Record<string, boolean> => ({
   GROQ_API_KEY: Boolean(env.GROQ_API_KEY),
   OPENAI_COMPATIBLE_BASE_URL: Boolean(env.OPENAI_COMPATIBLE_BASE_URL),
   REPLICATE_API_TOKEN: Boolean(env.REPLICATE_API_TOKEN),
+  OPENROUTER_API_KEY: Boolean(env.OPENROUTER_API_KEY),
   STABILITY_API_KEY: Boolean(env.STABILITY_API_KEY),
   CLOUDFLARE_API_TOKEN: Boolean(env.CLOUDFLARE_API_TOKEN),
   HF_TOKEN: Boolean(env.HF_TOKEN),

@@ -53,6 +53,13 @@ const VIDEO_PER_SECOND: Array<{ prefix: string; price: number; estimate?: boolea
   { prefix: 'google/veo-3.1-fast', price: 0.1 },
   { prefix: 'google/veo-3.1', price: 0.2, estimate: true },
   { prefix: 'google/veo-3', price: 0.2, estimate: true },
+  // OpenRouter (list prices of /api/v1/videos/models, without audio): model@resolution.
+  { prefix: 'alibaba/wan-3.0@480p', price: 0.05 },
+  { prefix: 'alibaba/wan-3.0@720p', price: 0.1 },
+  { prefix: 'alibaba/wan-3.0@1080p', price: 0.2 },
+  { prefix: 'alibaba/wan-3.0-prime@480p', price: 0.068 },
+  { prefix: 'alibaba/wan-3.0-prime@720p', price: 0.14 },
+  { prefix: 'alibaba/wan-3.0-prime@1080p', price: 0.28 },
 ];
 
 /** Generated images, per image. Cloudflare and Hugging Face are counted within their free tiers. */
