@@ -1010,7 +1010,10 @@ export class VideoAgent {
         brief.language = language.base;
       }
     }
-    brief.brand ||= direction.brand;
+    // A name, not a line of the video: the model sometimes returns the hook ("Quelque chose de grand se prépare…").
+    const headline = (s: string) => normalize(s.replace(/\*/g, '')).replace(/[^a-z0-9]+/g, ' ').trim();
+    const isLine = direction.scenes.some((scene) => headline(scene.headline) === headline(direction.brand));
+    if (!isLine && direction.brand.split(/\s+/).length <= 5 && !/[.…!?]$/.test(direction.brand.trim())) brief.brand ||= direction.brand;
     brief.audience ||= direction.audience;
     brief.location ||= direction.location;
     if ((!options.style || options.style === 'auto') && STYLES[direction.style]) {

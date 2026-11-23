@@ -30,6 +30,8 @@ export interface StructuredScript {
 
 const SCENE_HEADER = /^\s*(?:#+\s*)?(?:sc[eè]ne|scene|plan|shot)\s*(\d+)\s*[—–:\-.]*\s*(.*)$/i;
 const TIME_RANGE = /\(\s*(\d+(?:[.,]\d+)?)\s*(?:s|sec)?\s*[–—-]\s*(\d+(?:[.,]\d+)?)\s*(?:s|sec|secondes|seconds)?\s*\)/i;
+/** "0 à 5 secondes", "5–11 s", "de 12 à 20 sec" written in a scene header without parentheses. */
+const BARE_RANGE = /(?:^|[\s—–:(-])(?:de\s+)?(\d+(?:[.,]\d+)?)\s*(?:secondes?|seconds?|sec|s)?\s*(?:[–—-]|à|a|to)\s*(\d+(?:[.,]\d+)?)\s*(?:secondes?|seconds?|sec|s)\b\.?/i;
 const QUOTED = /[«“"]\s*([^»”"]+?)\s*[»”"]/g;
 const LABEL = /^\s*(texte(?:\s+final|\s+[àa]\s+l['’]\s*[ée]cran)?|text(?:\s+on\s+screen)?|on-screen text|voix[\s-]?off|voice[\s-]?over|narration|direction artistique|art direction|dur[ée]e|duration|format|style(?:\s+visuel)?|musique|music)\s*:\s*(.*)$/i;
 
@@ -65,10 +67,10 @@ export const parseStructuredPrompt = (text: string): StructuredScript | undefine
     }
     const header = SCENE_HEADER.exec(line);
     if (header) {
-      const time = TIME_RANGE.exec(line);
+      const time = TIME_RANGE.exec(line) ?? BARE_RANGE.exec(header[2]!);
       current = {
         index: Number(header[1]),
-        title: header[2]!.replace(TIME_RANGE, '').replace(/[—–:\-\s]+$/, '').trim(),
+        title: header[2]!.replace(TIME_RANGE, '').replace(BARE_RANGE, ' ').replace(/^[—–:\-\s]+|[—–:\-\s]+$/g, '').trim(),
         startSec: time ? num(time[1]!) : undefined,
         endSec: time ? num(time[2]!) : undefined,
         texts: [],
@@ -131,7 +133,8 @@ export const parseStructuredPrompt = (text: string): StructuredScript | undefine
   if (scenes.length < 2) return undefined;
   const ends = scenes.map((s) => s.endSec).filter((v): v is number => v !== undefined);
   const voiceText = voice.join(' ').replace(/^[«“"]\s*|\s*[»”"]$/g, '').replace(/\s+/g, ' ').trim();
-  const range = /(\d+)\s*(?:à|a|-|–|to)\s*(\d+)\s*(?:s\b|sec|secondes|seconds)/i.exec(text);
+  // The timings written in the scene headers are not a range for the whole video.
+  const range = /(\d+)\s*(?:à|a|-|–|to)\s*(\d+)\s*(?:s\b|sec|secondes|seconds)/i.exec(lines.filter((l) => !SCENE_HEADER.test(l)).join('\n'));
   return { scenes, voiceover: voiceText || undefined, finalTexts, totalSec: ends.length ? Math.max(...ends) : undefined, minSec: range ? Number(range[1]) : undefined };
 };
 
@@ -266,6 +269,8 @@ const emphasizeLast = (text: string): string => {
   return `${words.slice(0, -1).join(' ')} *${words[words.length - 1]}*`;
 };
 
+/** A call to action: a verb asking to act, or a way to reach the brand (normalized text). */
+const ACTION = /\b(contact|appel|ecri|visit|rendez|inscri|reserv|command|achet|telecharg|decouvr|rejoign|abonn|essay|profit|demand|call|join|book|order|buy|download|sign up|subscribe|try|shop|learn|get|start|commenc)|@|www\.|https?:|\+?\d[\d .]{6,}/;
 const BULLET = /\s*[•·|]\s*/;
 const slug = (s: string) => normalize(s).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'scene';
 
@@ -308,12 +313,13 @@ export const plannedFromStructured = (script: StructuredScript, opts: { brand: s
       const rest = plain.filter((t) => normalize(t) !== normalize(opts.brand));
       headline = rest[0] ?? headline;
       const action = rest[1] ?? '';
-      subheadline = action ? action.replace(/\s+(pour|for|today|maintenant|des maintenant|dès maintenant)\b.*$/i, '').split(/\s+/).slice(0, 3).join(' ').replace(/[.!]+$/, '') : opts.language === 'fr' ? 'Contactez-nous' : 'Contact us';
+      // The button takes a call to action ("Contactez-nous…"), never a slogan ("Plus qu'un événement, …").
+      subheadline = action && !ACTION.test(normalize(action)) ? '' : action ? action.replace(/\s+(pour|for|today|maintenant|des maintenant|dès maintenant)\b.*$/i, '').split(/\s+/).slice(0, 3).join(' ').replace(/[.!]+$/, '') : opts.language === 'fr' ? 'Contactez-nous' : 'Contact us';
       body = action;
     } else if (i === 0) {
       kind = 'title';
+      // The scene's title ("Le mystère", "INTRO") labels the script: it is never shown.
       body = plain[1] ?? '';
-      subheadline = plain.length > 1 ? '' : scene.title;
     } else if (items.length) {
       kind = 'bullets';
     } else if (plain.length >= 2) {
