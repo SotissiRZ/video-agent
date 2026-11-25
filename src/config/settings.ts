@@ -90,6 +90,18 @@ export const SETTING_GROUPS: SettingGroup[] = [
     ],
   },
   {
+    id: 'video',
+    title: 'Plans vidéo IA',
+    description: 'Filmés sur mesure quand aucune vraie vidéo ne correspond à une scène. Nombre par vidéo : réglé par offre (Commerce).',
+    fields: [
+      { key: 'VIDEO_AGENT_VIDEO_PROVIDER', label: 'Fournisseur', options: opt(['auto', 'Automatique (le premier configuré)'], ['openrouter', 'OpenRouter (Wan, Veo, Kling…)'], ['replicate', 'Replicate (Veo)'], ['none', 'Aucun']) },
+      { key: 'OPENROUTER_API_KEY', label: 'Clé OpenRouter', secret: true, link: 'https://openrouter.ai/settings/keys', help: 'Sans elle, la clé « Compatible OpenAI » est utilisée si elle vient d’OpenRouter.' },
+      { key: 'OPENROUTER_VIDEO_MODEL', label: 'Modèle OpenRouter', placeholder: 'alibaba/wan-3.0', link: 'https://openrouter.ai/models?output_modalities=video' },
+      { key: 'OPENROUTER_VIDEO_RESOLUTION', label: 'Résolution OpenRouter', options: opt(['720p', '720p (Wan 3.0 : 0,10 $/s)'], ['480p', '480p (0,05 $/s, moins net)'], ['1080p', '1080p (0,20 $/s)']) },
+      { key: 'REPLICATE_VIDEO_MODEL', label: 'Modèle Replicate', placeholder: 'google/veo-3.1-fast' },
+    ],
+  },
+  {
     id: 'voice',
     title: 'Voix-off',
     description: 'Piper fournit gratuitement des voix naturelles, en local (préinstallé dans Docker).',
@@ -140,6 +152,15 @@ export const SETTING_GROUPS: SettingGroup[] = [
     description: 'Mot de passe facultatif devant tout le site (préproduction) : le navigateur le demande avant même la page de connexion.',
     fields: [
       { key: 'VIDEO_AGENT_WEB_PASSWORD', label: 'Mot de passe de l’interface', secret: true },
+    ],
+  },
+  {
+    id: 'google-login',
+    title: 'Connexion avec Google',
+    description: 'Bouton « Continuer avec Google » sur les pages de connexion et d’inscription. Google Cloud › API et services › Identifiants › ID client OAuth de type « Application Web », URI de redirection autorisée : <PUBLIC_URL>/api/auth/google/callback.',
+    fields: [
+      { key: 'GOOGLE_CLIENT_ID', label: 'Google : Client ID', credential: true, free: true, link: 'https://console.cloud.google.com/apis/credentials' },
+      { key: 'GOOGLE_CLIENT_SECRET', label: 'Google : Client secret', secret: true },
     ],
   },
   {

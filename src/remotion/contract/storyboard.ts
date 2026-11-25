@@ -10,9 +10,23 @@ export const SCENE_KINDS = ['title', 'text', 'bullets', 'stat', 'image', 'quote'
 export const SceneKindSchema = z.enum(SCENE_KINDS);
 export type SceneKind = z.infer<typeof SceneKindSchema>;
 
-export const TRANSITION_TYPES = ['none', 'fade', 'slide', 'wipe', 'flip'] as const;
+/** zoom, whip, iris, clock and push are motion-design cuts (CSS only, safe on a headless render server). */
+export const TRANSITION_TYPES = ['none', 'fade', 'slide', 'wipe', 'flip', 'zoom', 'whip', 'iris', 'clock', 'push'] as const;
 export const TransitionTypeSchema = z.enum(TRANSITION_TYPES);
 export type TransitionType = z.infer<typeof TransitionTypeSchema>;
+
+/** Motion-graphics layers drawn over the picture (components/MotionAccents). */
+export const ACCENTS = ['brackets', 'sweep', 'orbs', 'lines', 'ring'] as const;
+export type Accent = (typeof ACCENTS)[number];
+
+/** The AI director's staging of a scene; "auto" keeps the engine's own rotation. */
+export const StagingSchema = z.object({
+  layout: z.enum(['auto', 'full', 'card']).default('auto'),
+  accent: z.enum(['auto', 'none', ...ACCENTS]).default('auto'),
+  /** Cut to the next scene chosen by the director (else the style rotation). */
+  cut: TransitionTypeSchema.optional(),
+});
+export type Staging = z.infer<typeof StagingSchema>;
 
 export const ENTRANCES = ['rise', 'pop', 'slide', 'blur', 'typewriter'] as const;
 export const EntranceSchema = z.enum(ENTRANCES);
@@ -77,6 +91,8 @@ export const AudioClipSchema = z.object({
   src: z.string().min(1),
   durationInFrames: z.number().int().positive(),
   volume: z.number().min(0).max(1).default(1),
+  /** When each word is spoken, in frames from the start of the file (motion/sync: picture on the voice). */
+  words: z.array(z.object({ text: z.string(), from: z.number().int().min(0), to: z.number().int().min(0) })).optional(),
 });
 export type AudioClip = z.infer<typeof AudioClipSchema>;
 
@@ -102,6 +118,7 @@ export const SceneSchema = z.object({
   /** Transition played between this scene and the next one (ignored on the last scene). */
   transitionOut: TransitionSchema.default({}),
   voiceover: AudioClipSchema.optional(),
+  staging: StagingSchema.default({}),
 });
 export type Scene = z.infer<typeof SceneSchema>;
 export type SceneInput = z.input<typeof SceneSchema>;
@@ -185,6 +202,15 @@ export const StoryboardSchema = z.object({
           volume: z.number().min(0).max(1).default(0.35),
           /** Volume while the voice-over speaks. */
           duckedVolume: z.number().min(0).max(1).default(0.12),
+        })
+        .optional(),
+      /** Sound design (whooshes on cuts, impacts on titles, ticks on bullets); placed by motion/sfx. */
+      sfx: z
+        .object({
+          whoosh: z.string().min(1),
+          impact: z.string().min(1),
+          tick: z.string().min(1),
+          volume: z.number().min(0).max(1).default(0.7),
         })
         .optional(),
     })

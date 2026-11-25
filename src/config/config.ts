@@ -13,7 +13,7 @@ import type { LogLevel } from '../core/logger';
 export const LLM_PROVIDER_IDS = ['auto', 'anthropic', 'openai', 'groq', 'openai-compatible', 'ollama', 'local'] as const;
 export const IMAGE_PROVIDER_IDS = ['auto', 'none', 'cloudflare', 'huggingface', 'openai', 'replicate', 'stability'] as const;
 export const VOICE_PROVIDER_IDS = ['auto', 'none', 'openai', 'elevenlabs', 'piper', 'system'] as const;
-export const VIDEO_PROVIDER_IDS = ['none', 'replicate'] as const;
+export const VIDEO_PROVIDER_IDS = ['none', 'auto', 'replicate', 'openrouter'] as const;
 export const MUSIC_MODES = ['auto', 'procedural', 'assets', 'none'] as const;
 export const MUSIC_PROVIDER_IDS = ['none', 'auto', 'elevenlabs', 'stability', 'replicate'] as const;
 
@@ -63,7 +63,7 @@ const EnvSchema = z.object({
   VIDEO_AGENT_MAX_GENERATED_IMAGES: int(4, 0, 50),
   CLOUDFLARE_ACCOUNT_ID: optionalString,
   CLOUDFLARE_API_TOKEN: optionalString,
-  CLOUDFLARE_IMAGE_MODEL: z.preprocess(emptyToUndefined, z.string().default('@cf/black-forest-labs/flux-1-schnell')),
+  CLOUDFLARE_IMAGE_MODEL: z.preprocess(emptyToUndefined, z.string().default('@cf/leonardo/lucid-origin')),
   HF_TOKEN: optionalString,
   HF_IMAGE_MODEL: z.preprocess(emptyToUndefined, z.string().default('black-forest-labs/FLUX.1-schnell')),
   STABILITY_API_KEY: optionalString,
@@ -110,9 +110,15 @@ const EnvSchema = z.object({
   PIPER_AUTO_DOWNLOAD: bool(true),
 
   // --- Video generation ------------------------------------------------
-  VIDEO_AGENT_VIDEO_PROVIDER: enumWithDefault(VIDEO_PROVIDER_IDS, 'none'),
-  REPLICATE_VIDEO_MODEL: z.preprocess(emptyToUndefined, z.string().default('minimax/video-01')),
+  /** AI video clips for scenes no real footage fits; how many per video is set per plan (Commerce). */
+  VIDEO_AGENT_VIDEO_PROVIDER: enumWithDefault(VIDEO_PROVIDER_IDS, 'auto'),
+  REPLICATE_VIDEO_MODEL: z.preprocess(emptyToUndefined, z.string().default('google/veo-3.1-fast')),
   VIDEO_AGENT_MAX_GENERATED_CLIPS: int(2, 0, 20),
+  /** OpenRouter: one key for many video models (Wan, Veo, Kling…). Falls back to OPENAI_COMPATIBLE_API_KEY when that points at OpenRouter. */
+  OPENROUTER_API_KEY: optionalString,
+  OPENROUTER_VIDEO_MODEL: z.preprocess(emptyToUndefined, z.string().default('alibaba/wan-3.0')),
+  /** Price per second grows with it (Wan 3.0: 480p $0.05, 720p $0.10, 1080p $0.20). */
+  OPENROUTER_VIDEO_RESOLUTION: enumWithDefault(['480p', '720p', '1080p'] as const, '720p'),
 
   // --- Music -----------------------------------------------------------
   VIDEO_AGENT_MUSIC: enumWithDefault(MUSIC_MODES, 'auto'),
@@ -128,6 +134,8 @@ const EnvSchema = z.object({
   VIDEO_AGENT_DEFAULT_OUTPUT_FORMAT: enumWithDefault(OUTPUT_FORMATS, 'mp4'),
   VIDEO_AGENT_LANGUAGE: z.preprocess(emptyToUndefined, z.string().default('auto')),
   VIDEO_AGENT_SUBTITLES: bool(true),
+  /** Sound design: whooshes on cuts, impacts on titles, ticks on bullets (synthesised, free). */
+  VIDEO_AGENT_SFX: bool(true),
 
   // --- Rendering ---------------------------------------------------------
   VIDEO_AGENT_BROWSER_EXECUTABLE: optionalString,
@@ -147,6 +155,10 @@ const EnvSchema = z.object({
   VIDEO_AGENT_PORT: int(3210, 1, 65535),
   /** Password protecting the web interface (HTTP Basic auth). Required when exposed on a network. */
   VIDEO_AGENT_WEB_PASSWORD: optionalString,
+
+  // --- "Continuer avec Google" (Google Cloud OAuth client of type "Web application") -------
+  GOOGLE_CLIENT_ID: optionalString,
+  GOOGLE_CLIENT_SECRET: optionalString,
 
   // --- Social publishing ---------------------------------------------------
   YOUTUBE_CLIENT_ID: optionalString,
@@ -331,6 +343,7 @@ export const describeSecrets = (env: Env): Record<string, boolean> => ({
   GROQ_API_KEY: Boolean(env.GROQ_API_KEY),
   OPENAI_COMPATIBLE_BASE_URL: Boolean(env.OPENAI_COMPATIBLE_BASE_URL),
   REPLICATE_API_TOKEN: Boolean(env.REPLICATE_API_TOKEN),
+  OPENROUTER_API_KEY: Boolean(env.OPENROUTER_API_KEY),
   STABILITY_API_KEY: Boolean(env.STABILITY_API_KEY),
   CLOUDFLARE_API_TOKEN: Boolean(env.CLOUDFLARE_API_TOKEN),
   HF_TOKEN: Boolean(env.HF_TOKEN),

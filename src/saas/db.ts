@@ -303,6 +303,17 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE users ADD COLUMN terms_version text;
   ALTER TABLE users ADD COLUMN terms_accepted_at timestamptz;
   `,
+  // 13 — "Continuer avec Google": the Google account (OpenID "sub") linked to the user
+  `
+  ALTER TABLE users ADD COLUMN google_sub text;
+  CREATE UNIQUE INDEX users_google_sub ON users(google_sub);
+  `,
+  // 14 — song versions: a lyrics correction keeps the previous audio; same seed / reference for the same sound
+  `
+  ALTER TABLE songs ADD COLUMN seed integer;
+  ALTER TABLE songs ADD COLUMN provider_song_id text;
+  ALTER TABLE songs ADD COLUMN versions jsonb NOT NULL DEFAULT '[]'::jsonb;
+  `,
 ];
 
 /** Apply pending migrations (serialized with an advisory lock: several containers may start together). */

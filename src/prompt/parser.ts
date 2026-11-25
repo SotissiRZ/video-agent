@@ -131,8 +131,19 @@ export const parseLocation = (text: string): ParsedLocation | undefined => {
 const SHOP_NOUNS = "restaurant|maquis|boutique|magasin|salon(?:\\s+de\\s+(?:coiffure|beaut[ée]))?|boulangerie|p[âa]tisserie|caf[ée]|traiteur|pharmacie|garage|h[ôo]tel|pressing|supermarch[ée]|auto-[ée]cole|atelier(?:\\s+de\\s+couture)?|shop|bakery";
 
 export const parseBrand = (text: string, location?: string): string | undefined => {
-  const quoted = /["«“]\s*([^"»”]{2,40}?)\s*["»”]/.exec(text);
-  if (quoted) return quoted[1]!.trim();
+  // A quoted name ("« Sirago »"), not a quoted sentence: the texts of a script ("Texte : « Quelque chose
+  // de grand se prépare… »", a line made of a quote alone) are what the video shows, not the brand.
+  for (const quoted of text.matchAll(/["«“]\s*([^"»”\n]{2,40}?)\s*["»”]/g)) {
+    const name = quoted[1]!.trim();
+    const lineStart = text.lastIndexOf('\n', quoted.index) + 1;
+    const lineEnd = text.indexOf('\n', quoted.index);
+    const line = text.slice(lineStart, lineEnd < 0 ? undefined : lineEnd);
+    const before = text.slice(lineStart, quoted.index);
+    if (name.split(/\s+/).length > 4 || /[.…!?]$/.test(name)) continue;
+    if (/(?:texte|text|voix|voice|narration|slogan|accroche|tagline|titre|title|afficher)[^:]*:\s*$/i.test(before)) continue;
+    if (line.trim() === quoted[0].trim()) continue;
+    return name;
+  }
   // After an intent verb: "promouvoir Sirago", "présenter Acme Pay", "launch of Zeta".
   const verbs = '(?:promouvoir|promotion\\s+de|pub(?:licit[ée])?\\s+(?:pour|de|du|des)|pr[ée]senter|pr[ée]sentation\\s+de|lancer|lancement\\s+de|annoncer|faire\\s+conna[iî]tre|vanter|valoriser|promote|present|presenting|introduce|introducing|launch|launching|announce|advertise|advertising|showcase|for|pour|about|sur)';
   const afterVerb = new RegExp(`${verbs}\\s+(?:l'|le\\s+|la\\s+|les\\s+|the\\s+|our\\s+|my\\s+|notre\\s+|nos\\s+|mon\\s+|ma\\s+|l’)?(?:(?:application|app|marque|brand|produit|product|service|plateforme|platform|startup|entreprise|company|solution|logiciel|software|${SHOP_NOUNS})\\s+)?(${CAP_GROUP})`, 'g');
@@ -142,7 +153,10 @@ export const parseBrand = (text: string, location?: string): string | undefined 
     if (location && candidate === location) continue;
     // "AI API", "SaaS": generic words, not a brand.
     if (candidate.split(/\s+/).every((w) => NOT_BRANDS.has(normalize(w)))) continue;
-    if (!NOT_BRANDS.has(normalize(candidate))) return candidate;
+    if (NOT_BRANDS.has(normalize(candidate))) continue;
+    // "le Carrefour Marocain de l’Étudiant Burkinabè (CAMEB)": the acronym is the name people use.
+    const acronym = /^[^()\n.;]{0,80}?\(\s*([A-ZÀ-Þ][A-ZÀ-Þ0-9&-]{1,11})\s*\)/.exec(text.slice(m.index + m[0].length));
+    return acronym ? acronym[1]! : candidate;
   }
   // "le restaurant Chez Awa", "salon de coiffure Belle Dame": the name follows the kind of shop.
   const shop = new RegExp(`\\b(?:${SHOP_NOUNS})\\s+(${CAP_GROUP})`).exec(text);

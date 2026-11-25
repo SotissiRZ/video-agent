@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { pcm16ToWav, wavDurationSec } from '../../audio/wav';
-import { httpBuffer } from '../http';
+import { httpJson } from '../http';
 import { getLanguage } from '../../core/languages';
 import type { VoiceProvider, VoiceRequest, VoiceResult } from './types';
 
@@ -28,11 +28,13 @@ export class ElevenLabsVoiceProvider implements VoiceProvider {
   }
 
   async synthesize(req: VoiceRequest): Promise<VoiceResult> {
-    const pcm = await httpBuffer(
-      `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(this.voiceFor(req))}?output_format=pcm_${SAMPLE_RATE}`,
+    // With timestamps (same price): the audio plus when each character is spoken, so the picture
+    // can follow the voice (bullets appearing on their word, the highlighted word drawn when said).
+    const res = await httpJson<{ audio_base64: string; alignment?: VoiceResult['alignment'] | null }>(
+      `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(this.voiceFor(req))}/with-timestamps?output_format=pcm_${SAMPLE_RATE}`,
       {
         provider: this.id,
-        headers: { 'xi-api-key': this.opts.apiKey, accept: 'audio/pcm' },
+        headers: { 'xi-api-key': this.opts.apiKey },
         // The language of the video: without it, an English voice drifts into English on short or
         // anglicism-heavy sentences ("Machine Learning, Computer Vision").
         body: { text: req.text, model_id: this.opts.model, ...(languageCode(req.language) ? { language_code: languageCode(req.language) } : {}) },
@@ -40,8 +42,8 @@ export class ElevenLabsVoiceProvider implements VoiceProvider {
         signal: req.signal,
       },
     );
-    const wav = pcm16ToWav(pcm, SAMPLE_RATE);
+    const wav = pcm16ToWav(Buffer.from(res.audio_base64, 'base64'), SAMPLE_RATE);
     fs.writeFileSync(req.outFile, wav);
-    return { file: req.outFile, durationSec: wavDurationSec(wav) };
+    return { file: req.outFile, durationSec: wavDurationSec(wav), alignment: res.alignment ?? undefined };
   }
 }

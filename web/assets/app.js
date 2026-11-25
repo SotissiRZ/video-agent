@@ -12,7 +12,7 @@ const PROVIDER_INFO = {
   linkedin: { name: 'LinkedIn', icon: 'linkedin', setupUrl: 'https://www.linkedin.com/developers/apps' },
   meta: { name: 'Facebook + Instagram', icon: 'meta', setupUrl: 'https://developers.facebook.com/apps/' },
 };
-const PAGES = ['create', 'songs', 'library', 'schedule', 'connections', 'brand', 'billing', 'account', 'admin'];
+const PAGES = ['create', 'songs', 'mysongs', 'library', 'schedule', 'connections', 'brand', 'billing', 'account', 'admin'];
 
 const state = { voice: null, me: null, publicConfig: null, options: null, connections: null, job: null, source: null, publishJobId: null, brand: null, song: null, songPoll: null, productImages: [] };
 
@@ -54,6 +54,9 @@ const go = (hash) => {
 
 const onRoute = () => {
   const { page, params } = route();
+  // A new page starts at the top (the previous page's scroll position is meaningless here).
+  if (page !== state.lastPage) window.scrollTo(0, 0);
+  state.lastPage = page;
   clearTimeout(state.songPoll);
   state.songPoll = null;
   if (!state.me) return showAuth(['login', 'signup', 'forgot', 'reset'].includes(page) ? page : 'login');
@@ -67,9 +70,9 @@ const onRoute = () => {
   document.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === `page-${name}`));
   document.querySelectorAll('.nav a[data-page]').forEach((a) => a.classList.toggle('active', a.dataset.page === name));
   $('topTitle').textContent = t(name === 'schedule' ? 'nav.schedule' : `nav.${name}`);
-  $('newVideoBtn').hidden = name === 'create' || name === 'songs';
+  $('newVideoBtn').hidden = name === 'songs' || name === 'mysongs' || (name === 'create' && !state.job);
   $('appView').classList.remove('menu-open');
-  ({ create: () => openJobFromParams(params), songs: loadSongs, library: loadLibrary, schedule: loadSchedule, connections: () => loadConnections(params), brand: loadBrand, billing: () => loadBilling(params), account: loadAccount, admin: loadAdmin })[name]?.();
+  ({ create: () => openJobFromParams(params), songs: () => openSongFromParams(params), mysongs: loadSongs, library: loadLibrary, schedule: loadSchedule, connections: () => loadConnections(params), brand: loadBrand, billing: () => loadBilling(params), account: loadAccount, admin: loadAdmin })[name]?.();
 };
 window.addEventListener('hashchange', onRoute);
 
@@ -83,6 +86,14 @@ const showAuth = (mode) => {
   $('firstUserNote').hidden = !cfg?.firstUser;
   $('signupClosed').hidden = cfg?.signupOpen !== false;
   $('signupForm').querySelector('button[type=submit]').disabled = cfg?.signupOpen === false;
+  document.querySelectorAll('[data-google]').forEach((el) => (el.hidden = !cfg?.features?.googleLogin));
+  // Back from Google with an error (see finishGoogle on the server).
+  const googleError = route().params.get('google');
+  if (googleError && $(`${mode}Form`)) {
+    const error = $(`${mode}Form`).querySelector('[data-error]');
+    error.textContent = t(`auth.google.${googleError}`);
+    error.hidden = false;
+  }
   document.title = `${t({ login: 'auth.login', signup: 'auth.signup', forgot: 'auth.forgot.title', reset: 'auth.reset.title' }[mode])} · SOVID AI`;
 };
 
@@ -120,6 +131,28 @@ const bindAuthForm = (form, path, extra = () => ({})) =>
     }
   });
 bindAuthForm($('loginForm'), '/api/auth/login');
+// "Continuer avec Google": a full-page navigation through the server (OpenID Connect).
+document.querySelectorAll('[data-google-intent]').forEach((link) =>
+  link.addEventListener('click', (e) => {
+    e.preventDefault();
+    const intent = link.dataset.googleIntent;
+    const form = link.closest('form');
+    const error = form.querySelector('[data-error]');
+    error.hidden = true;
+    const terms = form.elements.namedItem('acceptTerms');
+    if (intent === 'signup' && !terms?.checked) {
+      error.textContent = t('auth.acceptTermsRequired');
+      error.hidden = false;
+      terms?.focus();
+      return;
+    }
+    const params = new URLSearchParams({ intent, lang: getLang() });
+    if (intent === 'signup' || terms?.checked) params.set('terms', '1');
+    const plan = route().params.get('plan');
+    if (plan) params.set('plan', plan);
+    location.href = `/api/auth/google?${params}`;
+  }),
+);
 bindAuthForm($('signupForm'), '/api/auth/signup', () => ({ locale: getLang() }));
 bindAuthForm($('resetForm'), '/api/auth/reset', () => ({ token: route().params.get('token') ?? '' }));
 
@@ -179,6 +212,7 @@ const renderShell = () => {
     $('scheduleLink').hidden = !features.publish?.length && !admin;
     $('connectionsLink').hidden = !features.publish?.length && !admin;
     $('songsLink').hidden = !features.songs && !admin;
+    $('mySongsLink').hidden = $('songsLink').hidden;
   }
   $('userName').textContent = user.name || user.email.split('@')[0];
   $('userEmail').textContent = user.email;
@@ -233,6 +267,7 @@ const showSong = (song) => {
   $('songEditorCard').hidden = false;
   $('songTitle').value = song.title;
   $('songLyrics').value = song.lyrics;
+  countLyrics();
   const running = song.status === 'queued' || song.status === 'running';
   const correctionLimit = state.me.commerce?.correctionsPerSong ?? 1;
   const editable = !running && (song.status !== 'completed' || song.correctionsUsed < correctionLimit);
@@ -248,7 +283,10 @@ const showSong = (song) => {
   $('songAudioResult').hidden = song.status !== 'completed' || !song.audioUrl;
   $('songDownload').hidden = state.me.plan.id === 'free' && !song.exportPaid;
   $('songPreviewNote').hidden = state.me.plan.id !== 'free' || song.exportPaid;
+  // Free plan: say plainly that the player holds an excerpt, and how long the real song is.
+  $('songPreviewNoteText').textContent = t('songs.previewNote', { n: Math.min(state.me.commerce?.songPreviewSec ?? 30, song.durationSec ?? 30), total: song.durationSec ?? 30 });
   renderExportActions($('songExportPay'), 'song', song.id, song.exportPaid);
+  renderSongVersions(song);
   if (song.audioUrl) {
     // Reload when the excerpt becomes the full song (payment) or a corrected version is generated.
     const audioKey = `${song.id}:${song.exportPaid}:${song.finishedAt ?? ''}`;
@@ -260,6 +298,59 @@ const showSong = (song) => {
     $('songDownload').setAttribute('download', `${song.title.replace(/[^\p{L}\p{N}-]+/gu, '-').replace(/^-|-$/g, '') || 'song'}.mp3`);
   }
 };
+
+/** Earlier versions kept after a lyrics correction: each one can still be played (and downloaded when unlocked). */
+const renderSongVersions = (song) => {
+  const versions = song.versions ?? [];
+  const canDownload = state.me.plan.id !== 'free' || song.exportPaid;
+  $('songVersions').hidden = !versions.length;
+  // Shown even while the new version is a draft: the previous audio is never lost.
+  if (versions.length) $('songAudioResult').hidden = false;
+  $('songAudio').hidden = !song.audioUrl;
+  // New version still a draft: the current player and its download/excerpt note have nothing to show yet.
+  if (!song.audioUrl) {
+    $('songDownload').hidden = true;
+    $('songPreviewNote').hidden = true;
+  }
+  $('songVersions').innerHTML = versions.length
+    ? `<h3>${escapeHtml(t('songs.versions'))}</h3>` +
+      versions
+        .map(
+          (v) =>
+            `<div class="song-version"><div class="song-version-head"><b>${escapeHtml(t('songs.version', { n: v.number }))}</b><span class="hint">${escapeHtml(v.title)}${v.finishedAt ? ` · ${escapeHtml(formatDate(v.finishedAt))}` : ''}</span>${canDownload ? `<a class="btn btn-ghost btn-sm" href="${escapeHtml(v.downloadUrl)}" download>${icon('download', 15)}<span>${escapeHtml(t('songs.download'))}</span></a>` : ''}</div><audio controls preload="none" src="${escapeHtml(`${v.audioUrl}&v=${song.exportPaid}`)}"></audio></div>`,
+        )
+        .join('')
+    : '';
+};
+
+/**
+ * Live count under the lyrics. The music generator takes each section ([Couplet], [Refrain]… or, without
+ * labels, each stanza) separately, up to 30 lines of 200 characters: the longest section is what matters.
+ */
+const countLyrics = () => {
+  const all = $('songLyrics').value.split(/\r?\n/).map((line) => line.trim());
+  const labelled = all.some((line) => /^\[[^\]]+\]$/.test(line));
+  const sections = [];
+  let current = null;
+  for (const line of all) {
+    if (/^\[[^\]]+\]$/.test(line)) {
+      current = sections.push(0) - 1;
+      continue;
+    }
+    if (!line) {
+      if (!labelled) current = null;
+      continue;
+    }
+    if (current === null) current = sections.push(0) - 1;
+    sections[current]++;
+  }
+  const lines = sections.reduce((a, b) => a + b, 0);
+  const longest = Math.max(0, ...sections);
+  const longLine = all.some((line) => line.length > 200);
+  $('songLyricsCount').textContent = t(longLine ? 'songs.lyricsCountLong' : 'songs.lyricsCount', { n: lines, sections: sections.filter(Boolean).length, longest, max: 30 });
+  $('songLyricsCount').classList.toggle('over', longest > 30 || lines > 80 || longLine);
+};
+$('songLyrics').addEventListener('input', countLyrics);
 
 /** Free plan: only the song lengths it allows (the server caps them anyway). */
 const applySongDurationLimit = () => {
@@ -283,6 +374,29 @@ const loadSongs = async () => {
     if (latest) showSong(latest);
   }
   if (state.song && ['queued', 'running'].includes(state.song.status)) pollSong(state.song.id);
+};
+
+/** #songs?song=ID opens a song from "Mes chansons"; #songs?new=1 starts a new one. */
+const openSongFromParams = async (params) => {
+  await loadSongs();
+  if (params.get('new')) {
+    clearTimeout(state.songPoll);
+    state.song = null;
+    $('songEditorCard').hidden = true;
+    $('songAudio').pause();
+    $('songAudio').removeAttribute('src');
+    history.replaceState(null, '', '#songs');
+    $('songPrompt').focus({ preventScroll: true });
+    return;
+  }
+  const id = params.get('song');
+  if (!id || state.song?.id === id) return;
+  try {
+    showSong(await api(`/api/songs/${encodeURIComponent(id)}`));
+    if (['queued', 'running'].includes(state.song.status)) pollSong(state.song.id);
+  } catch {
+    /* unknown song: stay on the form */
+  }
 };
 
 const pollSong = (id) => {
@@ -325,6 +439,12 @@ $('songBriefForm').addEventListener('submit', async (e) => {
 $('songSaveLyrics').addEventListener('click', async () => {
   if (!state.song) return;
   $('songGenerateError').hidden = true;
+  if ($('songTitle').value.trim() === state.song.title.trim() && $('songLyrics').value.trim() === state.song.lyrics.trim()) {
+    toast(t('songs.noChange'), 'info');
+    return;
+  }
+  // On a finished song this is a correction: say it before, the current audio is kept as a version.
+  if (state.song.status === 'completed' && !confirm(t('songs.correctionConfirm'))) return;
   try {
     const song = await api(`/api/songs/${encodeURIComponent(state.song.id)}/lyrics`, {
       method: 'PUT',
@@ -381,12 +501,7 @@ $('songHistory').addEventListener('click', async (e) => {
   }
   const card = e.target.closest('[data-song-id]');
   if (!card) return;
-  try {
-    showSong(await api(`/api/songs/${encodeURIComponent(card.dataset.songId)}`));
-    if (['queued', 'running'].includes(state.song.status)) pollSong(state.song.id);
-  } catch (err) {
-    toast(errorText(err), 'error');
-  }
+  go(`songs?song=${encodeURIComponent(card.dataset.songId)}`);
 });
 $('songHistory').addEventListener('keydown', (e) => {
   if ((e.key === 'Enter' || e.key === ' ') && e.target.closest('[data-song-id]') && !e.target.closest('[data-song-delete]')) {
@@ -611,6 +726,8 @@ $('createForm').addEventListener('submit', async (e) => {
     history.replaceState(null, '', `#create?job=${job.id}`);
     showJob(job);
     follow(job.id);
+    // One column (phone, tablet): the progress card is now above the form, bring it into view.
+    if (narrow()) $('jobCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
     refreshMe().catch(() => undefined);
   } catch (err) {
     $('createError').innerHTML = `${icon('alert', 16)}<span>${escapeHtml(errorText(err))}</span>${err instanceof ApiError && err.status === 402 ? ` <a href="#billing">${escapeHtml(t('common.upgrade'))}</a>` : ''}`;
@@ -622,6 +739,27 @@ $('createForm').addEventListener('submit', async (e) => {
 
 // ---- Job view ---------------------------------------------------------------------------------
 const STATUS_BADGE = { queued: 'info', running: 'primary', completed: 'success', failed: 'danger', cancelled: '' };
+
+const narrow = () => window.matchMedia('(max-width: 1100px)').matches;
+
+/** "Nouvelle vidéo": close the open video and go back to an empty form. */
+const closeJob = () => {
+  state.source?.close();
+  state.source = null;
+  state.job = null;
+  $('jobCard').hidden = true;
+  $('emptyJob').hidden = false;
+};
+$('newVideoBtn').addEventListener('click', (e) => {
+  e.preventDefault();
+  closeJob();
+  if (route().page === 'create') {
+    history.replaceState(null, '', '#create');
+    $('newVideoBtn').hidden = true;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } else go('create');
+  $('prompt')?.focus({ preventScroll: true });
+});
 
 const openJobFromParams = async (params) => {
   const id = params.get('job');
@@ -643,6 +781,7 @@ const showJob = (job) => {
   state.job = job;
   $('emptyJob').hidden = true;
   $('jobCard').hidden = false;
+  if (route().page === 'create') $('newVideoBtn').hidden = false;
   const running = job.status === 'queued' || job.status === 'running';
   $('jobBadge').innerHTML = `<span class="badge ${STATUS_BADGE[job.status] ?? ''}">${running ? '<span class="spinner" style="width:10px;height:10px;border-width:1.5px"></span>' : '<span class="dot"></span>'}${escapeHtml(t(`job.status.${job.status}`))}</span>`;
   $('jobQueue').textContent = job.status === 'queued' && job.queuePosition ? t('job.queue', { n: job.queuePosition }) : job.createdAt ? formatDate(job.createdAt) : '';
@@ -1428,6 +1567,14 @@ const loadAccount = () => {
   f.email.value = state.me.user.email;
   f.locale.value = getLang();
   f.theme.value = getTheme();
+  // Accounts created with Google start without a password: the first one needs no current password.
+  const hasPassword = state.me.user.hasPassword !== false;
+  const pf = $('passwordForm');
+  $('noPasswordNote').hidden = hasPassword;
+  $('currentPasswordField').hidden = !hasPassword;
+  pf.current.required = hasPassword;
+  $('passwordSubmit').dataset.i18n = hasPassword ? 'account.change' : 'account.setPassword';
+  $('passwordSubmit').textContent = t($('passwordSubmit').dataset.i18n);
 };
 $('profileForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1448,13 +1595,15 @@ $('passwordForm').addEventListener('submit', async (e) => {
   try {
     await post('/api/me/password', { current: f.current.value, next: f.next.value });
     f.reset();
+    await refreshMe();
+    if (route().page === 'account') loadAccount();
     toast(t('account.changed'), 'success');
   } catch (err) {
     toast(errorText(err), 'error');
   }
 });
 $('deleteAccount').addEventListener('click', async () => {
-  const password = prompt(t('account.deleteConfirm'));
+  const password = prompt(t(state.me.user.hasPassword === false ? 'account.deleteConfirmEmail' : 'account.deleteConfirm'));
   if (!password) return;
   try {
     await api('/api/me', { method: 'DELETE', body: JSON.stringify({ password }) });
@@ -1613,7 +1762,7 @@ const renderAdminProviders = (result) => {
     <div class="card-header"><div><h2>${escapeHtml(t('admin.providers.title'))}</h2><p>${escapeHtml(t('admin.providers.subtitle'))}</p></div></div>
     <div class="card-body" style="padding: 8px 6px 6px"><div class="table-wrap"><table class="table">
       <thead><tr><th></th>${PLAN_COLUMNS.map((plan) => `<th>${escapeHtml(t(`plan.${plan}`))}</th>`).join('')}</tr></thead>
-      <tbody>${PROVIDER_FIELDS.map(([field, values]) => `<tr><td><b>${escapeHtml(t(`admin.providers.${field}`))}</b></td>${PLAN_COLUMNS.map((plan) => `<td><select class="select" name="${plan}.${field}">${values.map((v) => `<option value="${escapeHtml(v)}" ${providers[plan][field] === v ? 'selected' : ''}>${escapeHtml(optionLabel(v))}</option>`).join('')}</select></td>`).join('')}</tr>`).join('')}</tbody>
+      <tbody>${PROVIDER_FIELDS.map(([field, values]) => `<tr><td><b>${escapeHtml(t(`admin.providers.${field}`))}</b></td>${PLAN_COLUMNS.map((plan) => `<td><select class="select" name="${plan}.${field}">${values.map((v) => `<option value="${escapeHtml(v)}" ${String(providers[plan][field]) === v ? 'selected' : ''}>${escapeHtml(optionLabel(v))}</option>`).join('')}</select></td>`).join('')}</tr>`).join('')}</tbody>
     </table></div></div>
     <div class="card-footer"><button class="btn btn-primary" type="submit">${escapeHtml(t('common.save'))}</button></div>
   </form>`;

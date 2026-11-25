@@ -125,6 +125,12 @@ describe('media director', () => {
     expect(isRelevant({ description: 'cloud computing server room' }, 'cloud computing')).toBe(true);
     expect(isRelevant({ description: 'green python snake on a branch' }, 'python programming')).toBe(false);
     expect(isRelevant({}, 'laptop desk')).toBe(true);
+    // A place or a person alone never proves relevance (seen in a Sirago moto-taxi ad).
+    expect(isRelevant({ description: 'namibia, nature, africa, drone, desert, sand, dune' }, 'smiling passenger on motorbike taxi africa')).toBe(false);
+    expect(isRelevant({ description: 'a person taking a picture of a field through a car' }, 'person booking ride on phone africa')).toBe(false);
+    expect(isRelevant({ description: 'a man and a woman riding a motorcycle' }, 'motorcycle taxi driver and passenger road')).toBe(true);
+    expect(isRelevant({ description: 'cars, street, traffic, city, entertainment' }, 'ouagadougou street motorbike traffic')).toBe(true);
+    expect(isRelevant({ description: 'busy african city at night' }, 'african city')).toBe(true); // only generic words asked
     expect(parseAvoidTerms('Éviter les robots futuristes, les faux logos. Montrer des ordinateurs.')).toEqual(expect.arrayContaining(['robot', 'logo']));
     expect(parseAvoidTerms('Une vidéo sur le transport et les ordinateurs.')).toEqual([]);
   });
@@ -151,7 +157,7 @@ describe('media director', () => {
         return [1, 2, 3, 4, 5].map((i) => ({ provider: 'fake', id: `${q.kind}-${i}`, kind: q.kind, downloadUrl: `https://cdn.test/${q.kind}-${i}`, width: 1080, height: 1920, durationSec: q.kind === 'video' ? 10 : undefined, author: `A${i}`, pageUrl: `https://fake/${i}`, extension: q.kind === 'video' ? 'mp4' : 'jpg' }));
       },
     };
-    const broken: StockProvider = { id: 'broken', supports: ['photo'], search: async () => { throw new Error('boom'); } };
+    const broken: StockProvider = { id: 'broken', supports: ['photo', 'video'], search: async () => { throw new Error('boom'); } };
     const m = mockFetch([['GET', /cdn\.test/, () => new Response('bytes')]]);
     restore = m.restore;
     const paths = jobPaths(path.join(tmpDir(), 'job'));
@@ -166,12 +172,81 @@ describe('media director', () => {
     expect(media.every(Boolean)).toBe(true);
     expect(new Set(media.map((m) => m.src)).size).toBe(4);
     expect(media[0]).toMatchObject({ type: 'video', origin: 'stock:fake', durationInFrames: 299, credit: { author: 'A1', source: 'fake' } });
-    expect(media[1]!.type).toBe('image');
+    // Filmed footage everywhere: every scene gets a clip when one exists, not a photo every other scene.
+    expect(media.map((m) => m.type)).toEqual(['video', 'video', 'video', 'video']);
     expect(fs.existsSync(path.join(paths.publicDir, media[0]!.src))).toBe(true);
     expect(fs.readFileSync(path.join(paths.dir, 'credits.md'), 'utf8')).toContain('A1');
     expect(director.credits).toHaveLength(4);
     expect(warnings.some((w) => w.includes('broken'))).toBe(true);
     expect(n).toBeGreaterThan(0);
+  });
+
+  it('films what stock cannot: an AI clip before a still photo, within the clip budget', async () => {
+    // Stock has photos only: no real footage for these scenes.
+    const photosOnly: StockProvider = {
+      id: 'photos',
+      supports: ['photo', 'video'],
+      async search(q): Promise<StockResult[]> {
+        return q.kind === 'photo' ? [1, 2, 3, 4, 5].map((i) => ({ provider: 'photos', id: `p-${q.query}-${i}`, kind: 'photo', downloadUrl: `https://cdn.test/p-${i}`, width: 1080, height: 1920, author: `A${i}`, pageUrl: `https://photos/${q.query}/${i}`, extension: 'jpg' })) : [];
+      },
+    };
+    const prompts: string[] = [];
+    const video = {
+      id: 'veo',
+      async generate(req: { prompt: string; outFileBase: string }) {
+        prompts.push(req.prompt);
+        fs.writeFileSync(`${req.outFileBase}.mp4`, 'clip');
+        return { file: `${req.outFileBase}.mp4`, seconds: 4 };
+      },
+    };
+    restore = mockFetch([['GET', /cdn\.test/, () => new Response('bytes')]]).restore;
+    const paths = jobPaths(path.join(tmpDir(), 'job'));
+    ensureJobDirs(paths);
+    const warnings: string[] = [];
+    const director = new MediaDirector(
+      { stock: [photosOnly], image: null, video, logger: createLogger('silent') },
+      { sources: ['assets', 'stock', 'ai'], coverage: 'all', stockVideos: true, maxGeneratedImages: 0, maxGeneratedClips: 2, keywordLanguage: 'en' },
+    );
+    const sb = await director.run(makeStoryboard(), [], brief, paths, warnings, () => undefined);
+    const origins = sb.scenes.map((s) => s.media!.origin);
+    // Two clips filmed to order (the budget), then photos for the rest.
+    expect(origins.filter((o) => o === 'ai:veo')).toHaveLength(2);
+    expect(origins.slice(0, 2)).toEqual(['ai:veo', 'ai:veo']);
+    expect(origins.slice(2).every((o) => o.startsWith('stock:'))).toBe(true);
+    expect(prompts[0]).toMatch(/Realistic documentary footage.*no text/);
+  });
+
+  it('films the scene with AI rather than use a generic industry clip, and keeps generic clips once the budget is spent', async () => {
+    const scenePlans = ['students campus morocco', 'students graduation morocco', 'students library morocco', 'students debate morocco'];
+    // Stock has clips, but only for broad industry searches: none shows what the scenes are about.
+    const genericOnly: StockProvider = {
+      id: 'generic',
+      supports: ['photo', 'video'],
+      async search(q): Promise<StockResult[]> {
+        if (scenePlans.includes(q.query)) return [];
+        return [1, 2, 3, 4, 5].map((i) => ({ provider: 'generic', id: `${q.kind}-${q.query}-${i}`, kind: q.kind, downloadUrl: `https://cdn.test/g-${i}`, width: 1080, height: 1920, durationSec: 10, author: `A${i}`, pageUrl: `https://generic/${q.query}/${i}`, extension: q.kind === 'video' ? 'mp4' : 'jpg', description: q.query }));
+      },
+    };
+    const video = {
+      id: 'veo',
+      async generate(req: { outFileBase: string }) {
+        fs.writeFileSync(`${req.outFileBase}.mp4`, 'clip');
+        return { file: `${req.outFileBase}.mp4`, seconds: 4 };
+      },
+    };
+    restore = mockFetch([['GET', /cdn\.test/, () => new Response('bytes')]]).restore;
+    const paths = jobPaths(path.join(tmpDir(), 'job'));
+    ensureJobDirs(paths);
+    const planned = scenePlans.map((k) => ({ visualKeywords: [k], visualPrompt: k }) as unknown as PlannedScene);
+    const director = new MediaDirector(
+      { stock: [genericOnly], image: null, video, logger: createLogger('silent') },
+      { sources: ['assets', 'stock', 'ai'], coverage: 'all', stockVideos: true, maxGeneratedImages: 0, maxGeneratedClips: 2, keywordLanguage: 'en', phraseKeywords: true },
+    );
+    const sb = await director.run(makeStoryboard(), planned, brief, paths, [], () => undefined);
+    const media = sb.scenes.map((s) => s.media!);
+    expect(media.map((m) => m.origin)).toEqual(['ai:veo', 'ai:veo', 'stock:generic', 'stock:generic']);
+    // Still filmed footage after the budget: generic clips, never a photo.
+    expect(media.map((m) => m.type)).toEqual(['video', 'video', 'video', 'video']);
   });
 
   it('prefers sharp pictures, leaves out alcohol nobody asked for, and finds replacements', async () => {

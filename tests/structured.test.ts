@@ -82,3 +82,33 @@ describe('detailed scripts (SCÈNE 1 — … (0–5 s))', () => {
     expect(luminance(theme.palette.background)).toBeLessThan(0.08);
   });
 });
+
+describe('script with timings written in words (CAMEB teaser)', () => {
+  const prompt = fs.readFileSync(path.resolve('tests/fixtures/cameb-teaser-script.txt'), 'utf8');
+
+  it('reads "Scène 1 — 0 à 5 secondes : Le mystère" as a timed scene titled "Le mystère"', () => {
+    const script = parseStructuredPrompt(prompt)!;
+    expect(script.scenes.map((s) => [s.title, s.startSec, s.endSec])).toEqual([
+      ['Le mystère', 0, 5],
+      ['Une jeunesse ambitieuse', 5, 11],
+      ['La révélation', 11, 17],
+      ['Le suspense', 17, 21],
+      ['Le final', 21, 25],
+    ]);
+    expect(script.totalSec).toBe(25);
+    // The scene timings are not a "45 à 60 s" range for the whole video.
+    expect(script.minSec).toBeUndefined();
+  });
+
+  it('never shows the script labels, and keeps a slogan whole instead of cutting it into a button', () => {
+    const planned = plannedFromStructured(parseStructuredPrompt(prompt)!, { brand: 'CAMEB', totalSec: 25, language: 'fr' });
+    expect(planned.map((p) => p.subheadline)).toEqual(['', '', '', '', '']);
+    expect(JSON.stringify(planned.map((p) => [p.headline, p.body]))).not.toMatch(/secondes|Le mystère|Le final/);
+    expect(planned[4]).toMatchObject({ kind: 'cta', headline: 'COMING *SOON*', body: "PLUS QU'UN ÉVÉNEMENT, UNE GÉNÉRATION QUI CONSTRUIT." });
+    expect(planned.map((p) => p.weight)).toEqual([5, 6, 6, 4, 4]);
+  });
+
+  it('takes the acronym as the brand, never a quoted line of the video', () => {
+    expect(parsePrompt(prompt).brand).toBe('CAMEB');
+  });
+});

@@ -59,6 +59,42 @@ const fixWavSizes = (wav: Buffer): Buffer => {
 };
 
 /** Short, faded-out, lower-bitrate MP3 excerpt used as the free listening preview of a song. */
+const runFfmpeg = (args: string[]): Promise<string> => {
+  const bin = findFfmpeg();
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, args, {
+      stdio: ['ignore', 'ignore', 'pipe'],
+      env: { ...process.env, LD_LIBRARY_PATH: [path.dirname(bin), process.env.LD_LIBRARY_PATH].filter(Boolean).join(':') },
+    });
+    let err = '';
+    child.stderr.on('data', (d) => (err += d));
+    child.on('error', reject);
+    child.on('close', (code) => (code === 0 ? resolve(err) : reject(new Error(`ffmpeg exited with ${code}: ${err.slice(0, 300)}`))));
+  });
+};
+
+/** Duration of an audio file in seconds (read from ffmpeg's own report). */
+export const audioDurationSec = async (input: string): Promise<number> => {
+  // "-f null" decodes without writing anything; ffmpeg prints "Duration: 00:01:00.05".
+  const report = await runFfmpeg(['-hide_banner', '-i', input, '-f', 'null', '-']);
+  const m = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(report);
+  if (!m) throw new Error('ffmpeg did not report a duration');
+  return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
+};
+
+/**
+ * A song never starts or stops dead: a short fade-in (no click) and a long, smooth fade-out (eased,
+ * like a mix engineer pulling the fader). Time-based volume expression: Remotion's ffmpeg has no afade.
+ */
+export const softenSongEdges = async (input: string, output: string, opts: { fadeInSec?: number; fadeOutSec?: number } = {}): Promise<void> => {
+  const duration = await audioDurationSec(input);
+  const fadeIn = Math.min(opts.fadeInSec ?? 0.4, duration / 10);
+  const fadeOut = Math.min(opts.fadeOutSec ?? 4, duration / 4);
+  const outStart = duration - fadeOut;
+  const gain = `if(lt(t,${fadeIn}),t/${fadeIn},if(gt(t,${outStart}),pow(max(0,(${duration}-t)/${fadeOut}),1.7),1))`;
+  await runFfmpeg(['-hide_banner', '-loglevel', 'error', '-y', '-i', input, '-af', `volume='${gain}':eval=frame`, '-vn', '-ac', '2', '-b:a', '192k', '-f', 'mp3', output]);
+};
+
 export const makeAudioPreview = (input: string, output: string, seconds: number): Promise<void> => {
   const bin = findFfmpeg();
   const fade = Math.min(3, seconds / 4);

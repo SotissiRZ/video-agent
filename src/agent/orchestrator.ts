@@ -9,11 +9,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { synthesizeMusic } from '../audio/music';
+import { synthesizeSfx } from '../audio/sfx';
+import { estimateWordTimings, wordsFromAlignment } from '../remotion/motion/sync';
 import { getLanguage, LANGUAGE_CODES } from '../core/languages';
 import { buildMusicPrompt } from '../providers/music/prompt';
 import { resolveMusicProvider } from '../providers/music/registry';
 import type { MusicProvider } from '../providers/music/types';
 import { AssetLibrary, importAsset } from '../assets/manager';
+import { fitPictures } from '../media/fit';
 import { placeProductPhotos, type ProductPhoto } from '../media/product-photos';
 import { captureScreen, chooseScreenScenes, deviceFor, findUrls, showScreen } from '../media/screenshots';
 import { researchWeb, sourcesMarkdown, wantsResearch, type Research } from '../planning/research';
@@ -55,7 +58,7 @@ import { applyAnimations } from '../storyboard/animations';
 import { buildStoryboard } from '../storyboard/builder';
 import { refineScenes } from '../storyboard/scenes';
 import { matchTargetDuration, paceScenesToVoiceover, recomputeDuration } from '../storyboard/timing';
-import { trimWavSilence, wavDurationSec } from '../audio/wav';
+import { leadingSilenceSec, trimWavSilence, wavDurationSec } from '../audio/wav';
 import { parseStructuredPrompt, plannedFromStructured, type StructuredScript } from '../prompt/structured';
 import { applyBrandColors, parseHexColors } from '../storyboard/brand-colors';
 import { validateStoryboard } from '../storyboard/validator';
@@ -425,7 +428,8 @@ export class VideoAgent {
 
     // ---- 6. Assets (local library → stock photos/videos → AI generation) -------------
     const imageProvider = this.meteredImage(options.generateImages === false ? null : this.deps.image !== undefined ? this.deps.image : safeResolve(() => resolveImageProvider(this.config), warnings));
-    const videoProvider = options.generateVideo ? (this.deps.video !== undefined ? this.deps.video : safeResolve(() => resolveVideoProvider(this.config), warnings)) : null;
+    const rawVideo = options.generateVideo ? (this.deps.video !== undefined ? this.deps.video : safeResolve(() => resolveVideoProvider(this.config), warnings)) : null;
+    const videoProvider = rawVideo && this.deps.meter ? this.deps.meter.video(rawVideo) : rawVideo;
     const stockProviders = options.stock === false ? [] : this.deps.stock ?? safeResolve(() => resolveStockProviders(this.config), warnings) ?? [];
     let library: AssetLibrary | undefined;
     try {
@@ -461,6 +465,10 @@ export class VideoAgent {
           sb = { ...sb, scenes: placeProductPhotos(sb.scenes, srcs, planned.map((scene) => scene.productPhoto), preferred) };
         }
         sb = await this.placeScreens(sb, request.prompt, planned, brief, paths, warnings, signal);
+        // Small or differently shaped pictures are shown whole instead of cropped and blown up.
+        const fitted = fitPictures(sb, paths.publicDir);
+        warnings.push(...fitted.warnings);
+        sb = fitted.storyboard;
         // Brand kit logo (uploaded by the customer) wins over the shared assets library.
         if (options.brandLogo && fs.existsSync(options.brandLogo)) {
           return { ...sb, brand: { ...sb.brand, logo: importAsset(options.brandLogo, paths.publicDir, 'brand'), showWatermark: true } };
@@ -533,6 +541,12 @@ export class VideoAgent {
             musicSource = music.source;
             sb = { ...sb, audio: { music: { src: music.src, volume: voiceProvider ? 0.3 : 0.45, duckedVolume: 0.1 } } };
           }
+        }
+        if (this.config.env.VIDEO_AGENT_SFX) {
+          // Sound design files next to the music; the composition places them on cuts, titles and bullets.
+          fs.mkdirSync(path.join(paths.publicDir, 'sfx'), { recursive: true });
+          for (const [kind, wav] of Object.entries(synthesizeSfx())) fs.writeFileSync(path.join(paths.publicDir, 'sfx', `${kind}.wav`), wav);
+          sb = { ...sb, audio: { ...sb.audio, sfx: { whoosh: 'sfx/whoosh.wav', impact: 'sfx/impact.wav', tick: 'sfx/tick.wav', volume: voiceProvider ? 0.6 : 0.75 } } };
         }
         sb = recomputeDuration(sb);
         if (brief.subtitles) sb = { ...sb, subtitles: { ...sb.subtitles, cues: buildSubtitleCues(sb) } };
@@ -657,6 +671,9 @@ export class VideoAgent {
     if (edited.searches.size) {
       storyboard = await step('assets', 'Nouvelles images', (progress) => this.replacePictures(storyboard, edited.searches, brief, paths, warnings, progress, signal), (sb) => `${edited.searches.size} image(s) remplacée(s)`);
     } else skip('assets', 'conservé de la vidéo d’origine');
+    const fitted = fitPictures(storyboard, paths.publicDir);
+    warnings.push(...fitted.warnings);
+    storyboard = fitted.storyboard;
     const voiced = await this.revoiceScenes(storyboard, original, brief, paths, edited.narrationChanged, sourceVoice, request, warnings, step, signal);
     return this.finishCorrection({ ...voiced, original, brief, concept, paths, steps, warnings, signal, planner: `${llm.id}:${llm.model}`, info: { correctionOf: path.basename(path.resolve(request.sourceDir)), instruction: request.instruction } });
   }
@@ -941,14 +958,20 @@ export class VideoAgent {
       progress(i / scenes.length, `Voix-off ${i + 1}/${scenes.length}`);
       const outFile = path.join(paths.publicDir, 'voice', `${scene.id}.wav`);
       try {
-        let { durationSec } = await voice.synthesize({ text, language: brief.locale, outFile, signal, gender: opts.gender, voiceId: voice === provider ? opts.voiceId : undefined });
+        const spoken = await voice.synthesize({ text, language: brief.locale, outFile, signal, gender: opts.gender, voiceId: voice === provider ? opts.voiceId : undefined });
+        let { durationSec } = spoken;
+        let shiftSec = 0;
         // TTS engines pad sentences with silence: trim it so the voice starts right on cue.
         if (fs.existsSync(outFile)) {
-          const trimmed = trimWavSilence(fs.readFileSync(outFile));
+          const raw = fs.readFileSync(outFile);
+          shiftSec = leadingSilenceSec(raw);
+          const trimmed = trimWavSilence(raw);
           fs.writeFileSync(outFile, trimmed);
           durationSec = wavDurationSec(trimmed);
         }
-        scenes[i] = { ...scene, voiceover: { src: `voice/${scene.id}.wav`, durationInFrames: Math.max(1, Math.ceil(durationSec * fps)), volume: 1 } };
+        // When each word is spoken: the provider's alignment, else an estimate from the syllables.
+        const words = spoken.alignment ? wordsFromAlignment(spoken.alignment, fps, shiftSec) : estimateWordTimings(text, durationSec, fps);
+        scenes[i] = { ...scene, voiceover: { src: `voice/${scene.id}.wav`, durationInFrames: Math.max(1, Math.ceil(durationSec * fps)), volume: 1, words } };
       } catch (err) {
         if (signal?.aborted) throw err;
         warnings.push(`voice-over failed for ${scene.id} (${voice.id}): ${errorMessage(err)}`);
@@ -995,7 +1018,10 @@ export class VideoAgent {
         brief.language = language.base;
       }
     }
-    brief.brand ||= direction.brand;
+    // A name, not a line of the video: the model sometimes returns the hook ("Quelque chose de grand se prépare…").
+    const headline = (s: string) => normalize(s.replace(/\*/g, '')).replace(/[^a-z0-9]+/g, ' ').trim();
+    const isLine = direction.scenes.some((scene) => headline(scene.headline) === headline(direction.brand));
+    if (!isLine && direction.brand.split(/\s+/).length <= 5 && !/[.…!?]$/.test(direction.brand.trim())) brief.brand ||= direction.brand;
     brief.audience ||= direction.audience;
     brief.location ||= direction.location;
     if ((!options.style || options.style === 'auto') && STYLES[direction.style]) {

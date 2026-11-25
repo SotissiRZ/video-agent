@@ -144,6 +144,8 @@ export const friendlyText = (value) => {
   if (!message) return t('common.error');
   const lower = message.toLowerCase();
   const paidPlan = /paid_plan_required|payment_required|paid plan|required.*subscription|http\s*402/.test(lower);
+  const photo = /^photo \S+ \((\d+)×(\d+)\) is small .*at least (\d+) px wide/.exec(message);
+  if (photo) return t('job.warn.photoSmall', { size: `${photo[1]}×${photo[2]}`, min: photo[3] });
   if (/voice-over disabled/.test(lower)) return t('job.warn.voiceDisabled');
   if (/voice-over failed/.test(lower)) return t(paidPlan ? 'job.warn.voicePaid' : 'job.warn.voiceFailed');
   if (/ai music unavailable/.test(lower)) return t(paidPlan ? 'job.warn.musicPaid' : 'job.warn.musicFallback');

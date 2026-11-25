@@ -18,6 +18,10 @@ const text = (fallback = '') => z.preprocess((v) => (Array.isArray(v) ? v.join('
 const texts = () => z.preprocess((v) => (typeof v === 'string' ? v.split(/\s*[•,;]\s*/).filter(Boolean) : v ?? []), z.array(z.string())).catch([]);
 const number = (fallback: number, min: number, max: number) => z.preprocess((v) => (typeof v === 'string' ? Number.parseFloat(v) : v), z.number().min(min).max(max)).catch(fallback);
 
+const FRAMINGS = ['full', 'card'] as const;
+const DIRECTOR_ACCENTS = ['brackets', 'sweep', 'orbs', 'lines', 'ring', 'none'] as const;
+const DIRECTOR_CUTS = ['whip', 'push', 'zoom', 'iris', 'clock', 'fade', 'slide', 'wipe'] as const;
+
 const DirectionSceneSchema = z.object({
   role: text('scene'),
   kind: z.enum(SCENE_KINDS).catch('text'),
@@ -36,6 +40,10 @@ const DirectionSceneSchema = z.object({
   /** English prompt for an AI image when stock has nothing suitable. */
   visualPrompt: text(),
   productPhoto: z.preprocess((v) => (typeof v === 'string' ? Number.parseInt(v, 10) : v), z.number().int().min(0)).catch(0),
+  /** Staging chosen for the meaning of the scene ("" = let the engine decide). */
+  framing: z.enum(['', ...FRAMINGS]).catch(''),
+  accent: z.enum(['', ...DIRECTOR_ACCENTS]).catch(''),
+  cut: z.enum(['', ...DIRECTOR_CUTS]).catch(''),
 });
 
 export const DirectionSchema = z.object({
@@ -73,10 +81,11 @@ const DIRECTION_JSON_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['role', 'kind', 'seconds', 'headline', 'subheadline', 'body', 'items', 'statValue', 'statLabel', 'narration', 'visual', 'visualQueries', 'visualPrompt', 'productPhoto'],
+        required: ['role', 'kind', 'seconds', 'headline', 'subheadline', 'body', 'items', 'statValue', 'statLabel', 'narration', 'visual', 'visualQueries', 'visualPrompt', 'productPhoto', 'framing', 'accent', 'cut'],
         properties: {
           role: str, kind: { type: 'string', enum: [...SCENE_KINDS] }, seconds: { type: 'number' }, headline: str, subheadline: str, body: str,
           items: strArray, statValue: str, statLabel: str, narration: str, visual: str, visualQueries: strArray, visualPrompt: str, productPhoto: { type: 'integer' },
+          framing: { type: 'string', enum: ['', ...FRAMINGS] }, accent: { type: 'string', enum: ['', ...DIRECTOR_ACCENTS] }, cut: { type: 'string', enum: ['', ...DIRECTOR_CUTS] },
         },
       },
     },
@@ -121,6 +130,14 @@ Each scene:
   For a closing montage, search the subjects of the previous scenes again.
 - visualPrompt: one English sentence for an AI image of the same subject, realistic, no text in the image.
 - productPhoto: number of the customer's product photo to show in this scene (1..N), 0 for none; show every photo at least once.
+- Staging, as a motion designer and editor would choose it for what the scene says (vary it across the video):
+  framing: "full" (full-bleed picture: places, people, action) or "card" (the picture floats in a tilted 3D card over the
+  brand colours: a product, an app screen, a detail to highlight).
+  accent (motion graphics over the picture): "brackets" (focus, precision), "sweep" (premium, shine), "orbs" (warm,
+  emotional), "lines" (speed, energy, transport), "ring" (a key idea or number), "none" (a calm moment).
+  cut (transition to the NEXT scene): "whip" or "push" (energy, a new idea), "zoom" (going deeper, a reveal), "iris"
+  (focus on a detail), "clock" (time passing, before/after), "fade" (calm, emotion), "slide" or "wipe" (a list, a
+  sequence); "" on the last scene.
 
 Video level: title, idea (one sentence), tone (2 to 4 adjectives), keyMessage, callToAction, tagline (max 6 words),
 language (code of the language the customer wants the texts in), durationSec (what they asked, 0 if nothing),
@@ -209,6 +226,7 @@ export const fromDirection = (direction: Direction): { concept: VideoConcept; sc
     visualKeywords: scene.visualQueries.map((q) => q.trim()).filter(Boolean).slice(0, 4),
     visualPrompt: scene.visualPrompt || scene.visual,
     productPhoto: scene.productPhoto || undefined,
+    staging: { framing: scene.framing || undefined, accent: scene.accent || undefined, cut: scene.cut || undefined },
     weight: Math.max(1, scene.seconds),
   })),
 });

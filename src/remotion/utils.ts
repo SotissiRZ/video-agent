@@ -26,6 +26,24 @@ export const withAlpha = (color: string, alpha: number): string => {
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
 };
 
+/**
+ * Neutral veil that keeps text readable over a photo or a clip: black under light text, white under
+ * dark text. Never a theme colour: a saffron or pink veil tints the whole picture and flattens it.
+ */
+export const scrim = (textColor: string, alpha: number): string => {
+  const m = /^#([0-9a-f]{6})$/i.exec(textColor);
+  const n = m ? parseInt(m[1]!, 16) : 0xffffff;
+  const luminance = (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255;
+  return luminance > 0.5 ? `rgba(0, 0, 0, ${alpha})` : `rgba(255, 255, 255, ${alpha})`;
+};
+
+/** Frame of the first list item (bullets, steps): the headline lands first. */
+export const REVEAL_START = 15;
+/** Bullets appear across the first 60 % of the scene. */
+export const bulletSpacing = (durationInFrames: number, count: number): number => Math.max(6, Math.floor((durationInFrames * 0.6 - REVEAL_START) / Math.max(1, count)));
+/** Steps light up one by one across the first 75 % of the scene. */
+export const stepSpacing = (durationInFrames: number, count: number): number => Math.max(8, Math.floor((durationInFrames * 0.75 - REVEAL_START) / Math.max(1, count)));
+
 export interface Layout {
   width: number;
   height: number;

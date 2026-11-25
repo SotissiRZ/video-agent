@@ -109,8 +109,10 @@ export const renderStoryboard = async (opts: RenderOptions): Promise<RenderResul
   let posterFile: string | undefined;
   if (opts.posterFile) {
     report({ stage: 'poster', progress: 0 });
-    // A frame from the first scene, after its entrance animation.
-    const frame = Math.min(composition.durationInFrames - 1, Math.round(composition.fps * 1.6));
+    // A frame from the first scene once its texts are all in place (they appear with the voice).
+    const first = opts.storyboard.scenes[0]?.durationInFrames ?? 0;
+    const settled = Math.max(Math.round(composition.fps * 1.6), Math.min(Math.round(first * 0.8), first - Math.round(composition.fps * 0.4)));
+    const frame = Math.min(composition.durationInFrames - 1, settled);
     await renderStill({ ...common, composition, output: opts.posterFile, frame, imageFormat: 'jpeg', jpegQuality: 85 });
     posterFile = opts.posterFile;
   }

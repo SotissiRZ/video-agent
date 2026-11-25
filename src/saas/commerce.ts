@@ -16,6 +16,8 @@ const PlanProvidersSchema = z.object({
   elevenLabsModel: z.enum(ELEVENLABS_MODELS),
   /** AI-composed background music for videos ("none" = music library / synthesis, free). */
   music: z.enum(PLAN_MUSIC),
+  /** AI video clips per video, for scenes no real footage fits (each ~0.40–0.80 $ with Veo 3.1 Fast). */
+  aiVideoClips: z.preprocess((v) => (typeof v === 'string' ? Number.parseInt(v, 10) : v), z.number().int().min(0).max(10)).catch(0),
 });
 export type PlanProviders = z.infer<typeof PlanProvidersSchema>;
 
@@ -24,9 +26,9 @@ export type PlanProviders = z.infer<typeof PlanProvidersSchema>;
  * Haiku when Claude answers, Piper voice, synthesized music); paid plans get Sonnet and ElevenLabs.
  */
 export const PROVIDER_DEFAULTS: Record<'free' | 'creator' | 'pro', PlanProviders> = {
-  free: { llm: 'groq', claudeModel: 'claude-haiku-4-5', voice: 'piper', elevenLabsModel: 'env', music: 'none' },
-  creator: { llm: 'env', claudeModel: 'claude-sonnet-5-5', voice: 'env', elevenLabsModel: 'eleven_flash_v2_5', music: 'none' },
-  pro: { llm: 'env', claudeModel: 'claude-sonnet-5-5', voice: 'env', elevenLabsModel: 'env', music: 'none' },
+  free: { llm: 'groq', claudeModel: 'claude-haiku-4-5', voice: 'piper', elevenLabsModel: 'env', music: 'none', aiVideoClips: 0 },
+  creator: { llm: 'env', claudeModel: 'claude-sonnet-5-5', voice: 'env', elevenLabsModel: 'eleven_flash_v2_5', music: 'none', aiVideoClips: 2 },
+  pro: { llm: 'env', claudeModel: 'claude-sonnet-5-5', voice: 'env', elevenLabsModel: 'env', music: 'none', aiVideoClips: 4 },
 };
 
 /**

@@ -103,6 +103,9 @@ beforeAll(async () => {
         removedVoices.push(voiceId);
       },
     },
+    songMaster: async (input, output) => {
+      fs.copyFileSync(input, output);
+    },
     songPreviewer: async (input, output) => {
       fs.writeFileSync(output, `preview of ${fs.readFileSync(input, 'utf8')}`);
     },
@@ -499,9 +502,20 @@ describe('songs', () => {
     expect((await singer.req('GET', `${finished.audioUrl}?download=1`)).status).toBe(200);
     expect(await (await singer.req('GET', finished.audioUrl)).text()).toBe('fake mp3');
 
+    // Saving unchanged lyrics is not a correction: the song and its audio stay as they are.
+    const unchanged = await singer.json('PUT', `/api/songs/${draft.body.id}/lyrics`, { title: finished.title, lyrics: finished.lyrics });
+    expect(unchanged.body).toMatchObject({ status: 'completed', correctionsUsed: 0, versions: [] });
+    expect(unchanged.body.audioUrl).toBe(finished.audioUrl);
+
     const corrected = await singer.json('PUT', `/api/songs/${draft.body.id}/lyrics`, { title: 'Pour Aïcha, version corrigée', lyrics: '[Verse 1]\nPour toi encore' });
     expect(corrected.status).toBe(200);
     expect(corrected.body).toMatchObject({ status: 'draft', correctionsUsed: 1, exportPaid: true });
+    // The first audio is kept as version 1, still playable and downloadable.
+    expect(corrected.body.versions).toMatchObject([{ number: 1, title: finished.title, lyrics: finished.lyrics }]);
+    expect(await (await singer.req('GET', corrected.body.versions[0].audioUrl)).text()).toBe('fake mp3');
+    expect((await singer.req('GET', corrected.body.versions[0].downloadUrl)).status).toBe(200);
+    expect((await singer.req('GET', `/api/songs/${draft.body.id}/audio?version=2`)).status).toBe(404);
+    expect((await new Client(base).req('GET', corrected.body.versions[0].audioUrl)).status).toBe(401);
     expect((await singer.json('POST', `/api/songs/${draft.body.id}/generate`)).status).toBe(202);
     const correctedSong = await waitFor(async () => {
       const result = await singer.json('GET', `/api/songs/${draft.body.id}`);

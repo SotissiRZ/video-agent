@@ -36,6 +36,8 @@ export const planConfig = (config: AppConfig, providers: PlanProviders, warn: (m
     const music = providers.music;
     attempt(`music "${music}"`, (e) => (e.VIDEO_AGENT_MUSIC_PROVIDER = music), (c) => music === 'none' || resolveMusicProvider(c));
   }
+  // AI footage budget of the plan (0 = real stock clips and photos only, nothing paid per video).
+  env.VIDEO_AGENT_MAX_GENERATED_CLIPS = providers.aiVideoClips ?? 0;
   return { ...config, env };
 };
 

@@ -15,6 +15,8 @@ export type VoiceGender = 'female' | 'male';
 export interface VoiceResult {
   file: string;
   durationSec: number;
+  /** Character timings of the speech (seconds from the start of the file), when the provider knows them. */
+  alignment?: { characters: string[]; character_start_times_seconds: number[]; character_end_times_seconds: number[] };
 }
 
 /** Text-to-speech provider. Implementations must write a 16-bit PCM WAV file. */

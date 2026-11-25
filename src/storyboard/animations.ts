@@ -15,14 +15,16 @@ export const applyAnimations = (storyboard: Storyboard, style: StyleDefinition):
     // Never let a transition eat more than a third of the shorter neighbour.
     const next = storyboard.scenes[i + 1];
     const maxTransition = next ? Math.floor(Math.min(scene.durationInFrames, next.durationInFrames) / 3) : 0;
-    const type = isLast ? 'none' : style.transitions[i % style.transitions.length]!;
+    // The AI director's cut for this moment, else the style's own rotation.
+    const type = isLast ? 'none' : scene.staging?.cut ?? style.transitions[i % style.transitions.length]!;
     return {
       ...scene,
       background: { ...scene.background, variant: scene.media && scene.kind !== 'image' ? 'media' : background },
       animation: {
         entrance: scene.kind === 'quote' ? 'blur' : style.entrances[i % style.entrances.length]!,
         stagger,
-        kenBurns: scene.media ? 0.025 : 0.04,
+        // Real camera moves: a 3 % zoom over a scene read as a still picture.
+        kenBurns: scene.media ? 0.12 : 0.08,
       },
       transitionOut: {
         type,

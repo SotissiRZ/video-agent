@@ -24,8 +24,8 @@ const AUTHORITIES = {
 };
 
 const PURPOSES = {
-  fr: { ai_text: 'rédaction des scripts, paroles et légendes', voice_music: 'voix-off, voix clonées et chansons', ai_images: 'génération d’images', stock: 'recherche de photos et vidéos libres de droits', payment: 'paiement', email: 'envoi des e-mails de service' },
-  en: { ai_text: 'writing scripts, lyrics and captions', voice_music: 'voice-over, cloned voices and songs', ai_images: 'image generation', stock: 'royalty-free photo and video search', payment: 'payment', email: 'service e-mails' },
+  fr: { ai_text: 'rédaction des scripts, paroles et légendes', voice_music: 'voix-off, voix clonées et chansons', ai_images: 'génération d’images', stock: 'recherche de photos et vidéos libres de droits', payment: 'paiement', email: 'envoi des e-mails de service', auth: 'connexion avec un compte Google' },
+  en: { ai_text: 'writing scripts, lyrics and captions', voice_music: 'voice-over, cloned voices and songs', ai_images: 'image generation', stock: 'royalty-free photo and video search', payment: 'payment', email: 'service e-mails', auth: 'sign-in with a Google account' },
 };
 
 const UPDATED = { fr: '7 octobre 2026', en: 'October 7, 2026' };

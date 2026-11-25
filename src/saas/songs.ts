@@ -5,8 +5,22 @@ import path from 'node:path';
 import type { AppConfig } from '../config/config';
 import type { Db } from './db';
 import { mergeUsage, type UsageLine } from '../core/usage';
+import { lyricSections, lyricsProblem, MAX_LINE_CHARS, MAX_SECTION_LINES, MAX_SONG_LINES } from '../providers/music/lyrics';
 
 export type SongStatus = 'draft' | 'queued' | 'running' | 'completed' | 'failed';
+
+export interface SongVersion {
+  file: string;
+  title: string;
+  lyrics: string;
+  finishedAt: string | null;
+}
+
+/** jsonb comes back parsed from PostgreSQL and PGlite; a string is tolerated. */
+export const songVersions = (song: Pick<SongRow, 'versions'>): SongVersion[] => {
+  const raw = typeof song.versions === 'string' ? (JSON.parse(song.versions) as unknown) : song.versions;
+  return Array.isArray(raw) ? (raw as SongVersion[]) : [];
+};
 
 export interface SongRow {
   id: string;
@@ -26,6 +40,10 @@ export interface SongRow {
   created_at: Date | string;
   updated_at: Date | string;
   finished_at: Date | string | null;
+  seed: number | null;
+  provider_song_id: string | null;
+  /** Earlier audio versions, oldest first (kept when the lyrics are corrected). */
+  versions: SongVersion[] | string | null;
 }
 
 const iso = (date: Date | string | null) => (date ? new Date(date).toISOString() : undefined);
@@ -46,6 +64,10 @@ export const publicSong = (song: SongRow) => ({
   finishedAt: iso(song.finished_at),
   audioUrl: song.audio_file ? `/api/songs/${song.id}/audio` : undefined,
   downloadUrl: song.audio_file ? `/api/songs/${song.id}/audio?download=1` : undefined,
+  // Earlier versions, newest first, each with its own player and download link.
+  versions: songVersions(song)
+    .map((v, i) => ({ number: i + 1, title: v.title, lyrics: v.lyrics, finishedAt: v.finishedAt ?? undefined, audioUrl: `/api/songs/${song.id}/audio?version=${i + 1}`, downloadUrl: `/api/songs/${song.id}/audio?version=${i + 1}&download=1` }))
+    .reverse(),
 });
 
 export const songErrorCode = (message: string): string => {
@@ -58,6 +80,41 @@ export const songErrorCode = (message: string): string => {
 };
 
 export const SONG_ID = /^[a-f0-9-]{36}$/;
+
+/** Limits of the music generator, per lyric section (see providers/music/lyrics). */
+export { MAX_LINE_CHARS, MAX_SECTION_LINES, MAX_SONG_LINES } from '../providers/music/lyrics';
+
+export const lyricsTooLong = (lyrics: string): boolean => lyricsProblem(lyrics) !== null;
+
+/** About one sung line every 4 s, in more sections for longer songs (each section stays well under 30 lines). */
+export const lyricLineBudget = (durationSec: number): { sung: number; sections: number } => {
+  const sections = durationSec <= 45 ? 2 : durationSec <= 75 ? 3 : durationSec <= 100 ? 4 : 5;
+  return { sung: Math.min(MAX_SONG_LINES, Math.max(6, Math.round(durationSec / 4))), sections };
+};
+
+/**
+ * Safety net for AI drafts: over-long lines are shortened at a word boundary, a section over 30 lines
+ * keeps its first 30, and a song over the total cap drops whole trailing sections (never a cut verse).
+ * Lyrics already within the limits are returned unchanged.
+ */
+export const fitLyrics = (lyrics: string): string => {
+  if (!lyricsProblem(lyrics)) return lyrics.trim();
+  const shorten = (line: string) => {
+    if (line.length <= MAX_LINE_CHARS) return line;
+    const cut = line.slice(0, MAX_LINE_CHARS);
+    return cut.slice(0, Math.max(cut.lastIndexOf(' '), MAX_LINE_CHARS * 0.6)).trimEnd();
+  };
+  const labelled = /^\s*\[[^\]]+\]\s*$/m.test(lyrics);
+  const kept: string[] = [];
+  let total = 0;
+  for (const section of lyricSections(lyrics)) {
+    const lines = section.lines.map(shorten).slice(0, MAX_SECTION_LINES);
+    if (total + lines.length > MAX_SONG_LINES) break;
+    total += lines.length;
+    kept.push([...(labelled ? [`[${section.name}]`] : []), ...lines].join('\n'));
+  }
+  return kept.join('\n\n');
+};
 
 export const songDirectory = (config: AppConfig, userId: string, songId: string): string =>
   path.join(config.paths.output, 'users', userId, 'songs', songId);
@@ -91,12 +148,20 @@ export const getSong = (db: Db, userId: string, id: string): Promise<SongRow | u
 export const listSongs = (db: Db, userId: string): Promise<SongRow[]> =>
   db.query<SongRow>('SELECT * FROM songs WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100', [userId]);
 
-export const updateSongLyrics = async (db: Db, userId: string, id: string, title: string, lyrics: string, correctionLimit = 0): Promise<SongRow | undefined> =>
+/**
+ * New lyrics. A completed song is not lost: its audio, title and lyrics become a version
+ * (archivedFile: where the caller moved the audio), the song goes back to draft for the new version.
+ */
+export const updateSongLyrics = async (db: Db, userId: string, id: string, title: string, lyrics: string, correctionLimit = 0, archivedFile: string | null = null): Promise<SongRow | undefined> =>
   db.one<SongRow>(
-    `UPDATE songs SET title = $3, lyrics = $4, status = 'draft', error = NULL, audio_file = NULL,
+    `UPDATE songs SET
+       versions = CASE WHEN status = 'completed' AND $6::text IS NOT NULL
+         THEN versions || jsonb_build_array(jsonb_build_object('file', $6::text, 'title', title, 'lyrics', lyrics, 'finishedAt', finished_at))
+         ELSE versions END,
+       title = $3, lyrics = $4, status = 'draft', error = NULL, audio_file = NULL,
        corrections_used = corrections_used + CASE WHEN status = 'completed' THEN 1 ELSE 0 END, updated_at = now()
      WHERE id = $1 AND user_id = $2 AND (status IN ('draft', 'failed') OR (status = 'completed' AND corrections_used < $5)) RETURNING *`,
-    [id, userId, title, lyrics, correctionLimit],
+    [id, userId, title, lyrics, correctionLimit, archivedFile],
   );
 
 /** Add the paid services a song step used (lyrics, audio) to its running total. */

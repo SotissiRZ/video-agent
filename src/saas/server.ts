@@ -22,7 +22,8 @@ import { PLATFORM_IDS, type Captions, type PlatformId } from '../publish/types';
 import { STYLES } from '../remotion/contract/styles';
 import { listTemplates } from '../templates/registry';
 import { TERMS_VERSION } from './auth';
-import { AuthError, changePassword, consumeEmailToken, createEmailToken, createSession, destroySession, findUserByEmail, getUser, login, markEmailVerified, parseCookies, RateLimiter, resetPassword, SESSION_COOKIE, sessionCookie, signup, userForSession, type User } from './auth';
+import { defaultGoogleExchange, flowCookie, GOOGLE_FLOW_COOKIE, GoogleAuthError, googleClient, googleRedirectUri, openFlow, sealFlow, startGoogleFlow, verifyIdToken, type GoogleTokenExchange } from './google-auth';
+import { AuthError, changePassword, consumeEmailToken, createEmailToken, createSession, destroySession, findUserByEmail, getUser, login, markEmailVerified, parseCookies, RateLimiter, resetPassword, SESSION_COOKIE, sessionCookie, signInWithGoogle, signup, userForSession, hasPassword, type User } from './auth';
 import { buildEmail, createMailer, type Mailer } from './mail';
 import { createPayment, CURRENCY, enabledProviders, handleGeniusPayWebhook, handleYouCanPayWebhook, listPayments, localPrices, PAYMENT_PROVIDERS, publicPayment, refreshPayment, creditPack } from './payments';
 import { billingEnabled, createCheckout, createPortal, handleStripeEvent, stripeClient, verifyStripeSignature, type StripeFetch } from './billing';
@@ -52,8 +53,8 @@ import { deleteProductImage, describeProductImage, listProductImages, productIma
 import { ensureCleanVideoExport } from './export';
 import { cancelPublication, createPublication, listPublications, publicPublication } from './publications';
 import { Worker } from './worker';
-import { addSongUsage, createSongDraft, deleteSong, getSong, listSongs, publicSong, removeSongPreviews, SONG_ID, songDirectory, songPreviewFile, updateSongLyrics, type SongRow } from './songs';
-import { makeAudioPreview } from '../audio/ffmpeg';
+import { addSongUsage, createSongDraft, fitLyrics, songVersions, lyricLineBudget, lyricsTooLong, MAX_LINE_CHARS, MAX_SECTION_LINES, deleteSong, getSong, listSongs, publicSong, removeSongPreviews, SONG_ID, songDirectory, songPreviewFile, updateSongLyrics, type SongRow } from './songs';
+import { makeAudioPreview, softenSongEdges } from '../audio/ffmpeg';
 import { UsageMeter } from '../core/usage';
 import { planConfig, planLLM } from './plan-providers';
 import { costReport } from './costs';
@@ -139,6 +140,8 @@ export interface SaasOptions {
   /** Test seams. */
   stripe?: StripeFetch;
   exchanger?: CodeExchanger;
+  /** Google sign-in: authorization code → ID token. */
+  googleExchange?: GoogleTokenExchange;
   mailer?: Mailer;
   /** Hourly pass expiry reminders (default: on). */
   reminders?: boolean;
@@ -153,6 +156,8 @@ export interface SaasOptions {
   elevenLabsAccess?: () => Promise<{ songs: boolean; voiceClone: boolean }>;
   /** Test seam: builds the free-listening excerpt of a song (ffmpeg by default). */
   songPreviewer?: (input: string, output: string, seconds: number) => Promise<void>;
+  /** Song mastering (fade in/out); default: ffmpeg. */
+  songMaster?: (input: string, output: string) => Promise<void>;
   songLyricsGenerator?: (request: { prompt: string; style: string; mood: string }) => Promise<{ title: string; lyrics: string }>;
   workerOptions?: Partial<ConstructorParameters<typeof Worker>[0]>;
 }
@@ -170,13 +175,15 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
   let config = initialConfig;
   const logger = options.logger ?? createLogger(config.logLevel);
   const db = options.db ?? (await connectDatabase(config));
-  const vault = new Vault(resolveAppSecret(config));
+  const appSecret = resolveAppSecret(config);
+  const vault = new Vault(appSecret);
   const envFile = options.envFile ?? path.join(process.cwd(), '.env');
   const reloadConfig = options.reloadConfig ?? (() => loadConfig({ packageRoot: initialConfig.paths.root }));
   const webRoot = path.resolve(options.webRoot);
   const stripe = () => options.stripe ?? stripeClient(config);
   const exchanger = () => options.exchanger ?? defaultExchanger(config);
   const loginLimiter = new RateLimiter(10, 15 * 60_000);
+  const googleLimiter = new RateLimiter(30, 15 * 60_000);
   // Mobile carriers put many customers behind one IP (CGNAT): generous per-IP sign-up limit.
   const signupLimiter = new RateLimiter(60, 60 * 60_000);
   const mailLimiter = new RateLimiter(5, 60 * 60_000);
@@ -249,6 +256,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       songs: eleven.songs,
       aiImages: e.VIDEO_AGENT_IMAGE_PROVIDER !== 'none' && Boolean(e.CLOUDFLARE_API_TOKEN || e.HF_TOKEN || e.REPLICATE_API_TOKEN || e.STABILITY_API_KEY || e.OPENAI_API_KEY),
       stock: Boolean(e.PEXELS_API_KEY || e.PIXABAY_API_KEY || e.UNSPLASH_ACCESS_KEY),
+      googleLogin: Boolean(googleClient(config)),
     };
   };
 
@@ -273,6 +281,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     add(payments.includes('youcanpay'), 'YouCan Pay', 'payment');
     add(billingEnabled(config), 'Stripe', 'payment');
     add(config.env.SMTP_URL, 'SMTP', 'email');
+    add(googleClient(config), 'Google', 'auth');
     return list;
   };
 
@@ -311,11 +320,61 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
     json(res, 200, { user: userView(user) }, { 'set-cookie': sessionCookie(token, maxAgeSec, baseUrl(req).startsWith('https://')) });
   };
 
+  const redirectWith = (res: http.ServerResponse, location: string, cookies: string[]) => {
+    res.writeHead(302, { ...SECURITY_HEADERS, location, 'cache-control': 'no-store', 'set-cookie': cookies });
+    res.end();
+  };
+
+  /** /api/auth/google?intent=login|signup&terms=1&lang=fr&plan=creator → Google's consent screen. */
+  const startGoogle = (req: http.IncomingMessage, res: http.ServerResponse, url: URL, ip: string) => {
+    const client = googleClient(config);
+    if (!client) throw new HttpError(404, 'Connexion avec Google non configurée', 'google_disabled');
+    if (!googleLimiter.take(ip)) return redirect(res, '/app#login?google=too_many_attempts');
+    const plan = url.searchParams.get('plan') ?? '';
+    const { flow, url: consent } = startGoogleFlow(client, googleRedirectUri(baseUrl(req)), {
+      intent: url.searchParams.get('intent') === 'signup' ? 'signup' : 'login',
+      terms: url.searchParams.get('terms') === '1',
+      locale: url.searchParams.get('lang') === 'en' ? 'en' : 'fr',
+      plan: (PLAN_IDS as readonly string[]).includes(plan) ? plan : undefined,
+    });
+    return redirectWith(res, consent, [flowCookie(sealFlow(flow, appSecret), baseUrl(req).startsWith('https://'))]);
+  };
+
+  /** Google's redirect back: check the flow, exchange the code, sign in (or link, or create) the account. */
+  const finishGoogle = async (req: http.IncomingMessage, res: http.ServerResponse, url: URL) => {
+    const secure = baseUrl(req).startsWith('https://');
+    const clear = flowCookie('', secure);
+    const flow = openFlow(parseCookies(req.headers.cookie)[GOOGLE_FLOW_COOKIE], appSecret);
+    const back = (code: string) =>
+      redirectWith(res, `/app#${flow?.intent === 'signup' || code === 'terms_required' ? 'signup' : 'login'}?google=${code}${flow?.plan ? `&plan=${flow.plan}` : ''}`, [clear]);
+    const client = googleClient(config);
+    if (!client) return back('failed');
+    if (url.searchParams.get('error')) return back('cancelled');
+    const code = url.searchParams.get('code');
+    if (!flow || !code || url.searchParams.get('state') !== flow.state) return back('expired');
+    try {
+      const tokens = await (options.googleExchange ?? defaultGoogleExchange)({ code, verifier: flow.verifier, redirectUri: googleRedirectUri(baseUrl(req)), client });
+      const profile = verifyIdToken(tokens.id_token, client.id, flow.nonce);
+      const { user } = await signInWithGoogle(db, config, profile, { terms: flow.terms, locale: flow.locale });
+      const { token, maxAgeSec } = await createSession(db, user.id, req.headers['user-agent']);
+      // Signed up from a paid plan on the pricing page: the app continues to checkout (startApp).
+      return redirectWith(res, flow.plan && flow.plan !== 'free' ? `/app#login?plan=${flow.plan}` : '/app#create', [clear, sessionCookie(token, maxAgeSec, secure)]);
+    } catch (err) {
+      if (err instanceof AuthError && ['terms_required', 'signup_closed', 'google_mismatch', 'invalid_email'].includes(err.code)) return back(err.code);
+      if (err instanceof GoogleAuthError) {
+        logger.warn(`Google sign-in: ${err.message}`);
+        return back(err.code);
+      }
+      logger.warn(`Google sign-in failed: ${errorMessage(err)}`);
+      return back('failed');
+    }
+  };
+
   const accountSummary = async (user: User) => {
     const commerce = await getCommerceSettings(db);
     const plan = applyCommerceLimits(planOfUser(config, user), commerce);
     const usage = await getUsage(db, user.id);
-    return { user: userView(user), plan, usage, commerce: publicCommerce(commerce), billing: billingEnabled(config), paymentProviders: enabledProviders(config).map((p) => ({ id: p, currency: CURRENCY[p] })), requireVerification: config.env.REQUIRE_EMAIL_VERIFICATION, mail: mailer.kind };
+    return { user: { ...userView(user), hasPassword: await hasPassword(db, user.id) }, plan, usage, commerce: publicCommerce(commerce), billing: billingEnabled(config), paymentProviders: enabledProviders(config).map((p) => ({ id: p, currency: CURRENCY[p] })), requireVerification: config.env.REQUIRE_EMAIL_VERIFICATION, mail: mailer.kind };
   };
 
   const capabilities = () => {
@@ -370,10 +429,18 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
 
   const generateSong = async (song: SongRow, plan: string): Promise<void> => {
     const currentConfig = config;
-    const generate = options.songGenerator ?? (currentConfig.env.ELEVENLABS_API_KEY
-      ? (input: { lyrics: string; style: string; mood: string; durationSec: number }) =>
-          new ElevenLabsSongProvider(currentConfig.env.ELEVENLABS_API_KEY!).generate(input)
-      : undefined);
+    // A correction keeps the sound of the previous version: same seed, conditioned on its audio.
+    const generate = options.songGenerator
+      ? async (input: { lyrics: string; style: string; mood: string; durationSec: number }) => ({ audio: await options.songGenerator!(input), songId: undefined as string | undefined })
+      : currentConfig.env.ELEVENLABS_API_KEY
+        ? (input: { lyrics: string; style: string; mood: string; durationSec: number }) =>
+            new ElevenLabsSongProvider(currentConfig.env.ELEVENLABS_API_KEY!).compose({
+              ...input,
+              seed: song.seed ?? undefined,
+              previousSongId: song.provider_song_id ?? undefined,
+              previousDurationSec: song.duration_sec,
+            })
+        : undefined;
     if (!generate) {
       await db.query("UPDATE songs SET status = 'failed', error = $2, finished_at = now(), updated_at = now() WHERE id = $1", [song.id, 'La clé ElevenLabs Music n’est pas configurée.']);
       return;
@@ -385,17 +452,28 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       void db.query("UPDATE songs SET heartbeat_at = now() WHERE id = $1 AND status = 'running'", [song.id]).catch((err) => logger.warn(`song ${song.id} heartbeat failed: ${errorMessage(err)}`));
     }, 30_000);
     try {
-      const audio = await generate({ lyrics: song.lyrics, style: song.style, mood: song.mood, durationSec: song.duration_sec });
+      const { audio, songId } = await generate({ lyrics: song.lyrics, style: song.style, mood: song.mood, durationSec: song.duration_sec });
       if (!audio.length) throw new Error('ElevenLabs a renvoyé un fichier audio vide.');
       await addSongUsage(db, song.id, [{ kind: 'music', provider: 'elevenlabs', model: 'music', calls: 1, seconds: song.duration_sec }], plan);
       fs.mkdirSync(dir, { recursive: true });
       removeSongPreviews(dir);
       fs.rmSync(temporaryFile, { force: true });
       fs.writeFileSync(temporaryFile, audio, { flag: 'wx' });
-      fs.renameSync(temporaryFile, audioFile);
+      // Mastering: a short fade-in and a smooth fade-out, so the song never stops dead.
+      // If it fails, the song is kept as delivered rather than lost.
+      const mastered = `${audioFile}.master.tmp`;
+      try {
+        await (options.songMaster ?? softenSongEdges)(temporaryFile, mastered);
+        fs.renameSync(mastered, audioFile);
+        fs.rmSync(temporaryFile, { force: true });
+      } catch (err) {
+        fs.rmSync(mastered, { force: true });
+        logger.warn(`song ${song.id} mastering skipped: ${errorMessage(err)}`);
+        fs.renameSync(temporaryFile, audioFile);
+      }
       const saved = await db.query<{ id: string }>(
-        "UPDATE songs SET status = 'completed', audio_file = $2, error = NULL, finished_at = now(), updated_at = now() WHERE id = $1 RETURNING id",
-        [song.id, audioFile],
+        "UPDATE songs SET status = 'completed', audio_file = $2, provider_song_id = coalesce($3, provider_song_id), error = NULL, finished_at = now(), updated_at = now() WHERE id = $1 RETURNING id",
+        [song.id, audioFile, songId ?? null],
       );
       if (!saved.length) fs.rmSync(dir, { recursive: true, force: true });
     } catch (err) {
@@ -410,13 +488,15 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
   };
 
   const songPreviews = new Map<string, Promise<string>>();
-  const ensureSongPreview = (song: SongRow, seconds: number): Promise<string> => {
-    const target = songPreviewFile(song, seconds);
+  /** Excerpt of the current audio, or of an earlier version (version: 1-based number). */
+  const ensureSongPreview = (song: SongRow, seconds: number, version?: { number: number; file: string }): Promise<string> => {
+    const source = version?.file ?? song.audio_file!;
+    const target = version ? path.join(path.dirname(source), `preview-v${version.number}-${seconds}s.mp3`) : songPreviewFile(song, seconds);
     if (fs.existsSync(target)) return Promise.resolve(target);
     const existing = songPreviews.get(target);
     if (existing) return existing;
     const temporary = `${target}.tmp`;
-    const task = (options.songPreviewer ?? makeAudioPreview)(song.audio_file!, temporary, seconds)
+    const task = (options.songPreviewer ?? makeAudioPreview)(source, temporary, seconds)
       .then(() => {
         fs.renameSync(temporary, target);
         return target;
@@ -524,6 +604,9 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         loginLimiter.reset(key);
         return startSession(req, res, user);
       }
+      // "Continuer avec Google": top-level navigations, answered with redirects into the app.
+      if (id === 'google' && !sub && method === 'GET') return startGoogle(req, res, url, ip);
+      if (id === 'google' && sub === 'callback' && method === 'GET') return finishGoogle(req, res, url);
       if (id === 'logout' && method === 'POST') {
         await destroySession(db, parseCookies(req.headers.cookie)[SESSION_COOKIE]);
         return json(res, 200, { ok: true }, { 'set-cookie': sessionCookie('', 0, baseUrl(req).startsWith('https://')) });
@@ -582,7 +665,9 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       if (!id && method === 'DELETE') {
         const body = parse(z.object({ password: z.string().max(200) }), await readJson(req));
         const row = await db.one<{ password_hash: string }>('SELECT password_hash FROM users WHERE id = $1', [user.id]);
-        if (!row || !(await verifyPassword(body.password, row.password_hash))) throw new AuthError('invalid_credentials', 'Mot de passe incorrect');
+        // Accounts created with Google have no password: they confirm by typing their e-mail address.
+        const confirmed = row && (row.password_hash ? await verifyPassword(body.password, row.password_hash) : body.password.trim().toLowerCase() === user.email);
+        if (!confirmed) throw new AuthError('invalid_credentials', row?.password_hash ? 'Mot de passe incorrect' : 'Adresse e-mail incorrecte');
         if (user.role === 'admin' && Number((await db.one<{ n: string | number }>("SELECT count(*) AS n FROM users WHERE role = 'admin'"))?.n ?? 0) <= 1) {
           throw new HttpError(409, 'Le dernier administrateur ne peut pas supprimer son compte', 'last_admin');
         }
@@ -622,6 +707,7 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         if (!options.songLyricsGenerator && !lyricProvider) throw new HttpError(503, 'Configurez un fournisseur de rédaction IA pour créer les paroles.', 'song_lyrics_unavailable');
         if (!songDraftLimiter.take(user.id)) throw new HttpError(429, 'Trop de brouillons de chanson, réessayez plus tard', 'too_many_song_drafts');
         let lyrics: z.infer<typeof SongLyricsSchema>;
+        const budget = lyricLineBudget(body.durationSec ?? 90);
         if (options.songLyricsGenerator) {
           try {
             lyrics = SongLyricsSchema.parse(await options.songLyricsGenerator(body));
@@ -633,8 +719,15 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
           let generated: Awaited<ReturnType<NonNullable<typeof lyricProvider>['generate']>>;
           try {
             generated = await lyricProvider!.generate({
-              system: 'You are a professional songwriter. Write original, singable lyrics based only on the user brief. Return valid JSON with title and lyrics. Use clear section labels such as [Verse 1], [Chorus], [Verse 2], [Bridge]. Keep the lyrics in the language requested or used by the user. Do not mention that these are AI-generated.',
-              messages: [{ role: 'user', content: `Brief: ${body.prompt}\nMusical style: ${body.style}\nMood: ${body.mood}` }],
+              system:
+                'You are a professional songwriter. Write original, singable lyrics based only on the user brief. Return valid JSON with title and lyrics. Use clear section labels such as [Verse 1], [Chorus], [Verse 2], [Bridge]. Keep the lyrics in the language requested or used by the user. Do not mention that these are AI-generated. ' +
+                `Each section label goes on its own line. Hard limits of the music generator: at most ${MAX_SECTION_LINES} lines per section, each under ${MAX_LINE_CHARS} characters. Fit the song length: about one sung line every 4 seconds.`,
+              messages: [
+                {
+                  role: 'user',
+                  content: `Brief: ${body.prompt}\nMusical style: ${body.style}\nMood: ${body.mood}\nSong length: ${body.durationSec ?? 90} seconds. Write about ${budget.sung} sung lines in ${budget.sections} sections (for example a verse and a chorus), no more.`,
+                },
+              ],
               maxTokens: 1600,
               temperature: 0.8,
               json: { name: 'song_lyrics', schema: { type: 'object', properties: { title: { type: 'string' }, lyrics: { type: 'string' } }, required: ['title', 'lyrics'], additionalProperties: false } },
@@ -649,6 +742,8 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
             throw new HttpError(502, 'Le fournisseur IA a renvoyé des paroles invalides. Réessayez.', 'song_lyrics_invalid');
           }
         }
+        // Safety net: an over-long draft would only fail later, at generation time.
+        lyrics = { ...lyrics, lyrics: fitLyrics(lyrics.lyrics) };
         const song = await createSongDraft(db, config, user.id, { ...body, ...lyrics, durationSec: body.durationSec ?? 90 });
         await addSongUsage(db, song.id, lyricsMeter.lines, songPlan);
         return json(res, 201, publicSong(song));
@@ -666,16 +761,27 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
       }
       if (sub === 'lyrics' && method === 'PUT') {
         const body = parse(SongUpdateSchema, await readJson(req));
+        // Saving unchanged lyrics is not a correction: nothing happens, nothing is used up.
+        if (body.title.trim() === song.title.trim() && body.lyrics.trim() === song.lyrics.trim()) return json(res, 200, publicSong(song));
         const settings = await getCommerceSettings(db);
-        const updated = await updateSongLyrics(db, user.id, song.id, body.title, body.lyrics, settings.correctionsPerSong);
-        if (!updated) throw new HttpError(409, 'Les paroles ne peuvent plus être modifiées pendant ou après la génération.', 'song_not_editable');
+        // A finished song is never lost: its audio becomes version N (song-vN.mp3) before the new draft.
+        let archived: string | null = null;
+        if (song.status === 'completed' && song.audio_file && fs.existsSync(song.audio_file)) {
+          archived = path.join(path.dirname(song.audio_file), `song-v${songVersions(song).length + 1}.mp3`);
+          fs.renameSync(song.audio_file, archived);
+        }
+        const updated = await updateSongLyrics(db, user.id, song.id, body.title, body.lyrics, settings.correctionsPerSong, archived);
+        if (!updated) {
+          if (archived) fs.renameSync(archived, song.audio_file!);
+          throw new HttpError(409, 'Les paroles ne peuvent plus être modifiées pendant ou après la génération.', 'song_not_editable');
+        }
         return json(res, 200, publicSong(updated));
       }
       if (sub === 'generate' && method === 'POST') {
         if (config.env.REQUIRE_EMAIL_VERIFICATION && !user.email_verified_at) throw new HttpError(403, 'Confirmez votre adresse e-mail pour générer des chansons', 'email_unverified');
         if (!options.songGenerator && !config.env.ELEVENLABS_API_KEY) throw new HttpError(503, 'La génération de chansons ElevenLabs n’est pas configurée.', 'song_provider_unavailable');
-        if (song.lyrics.split(/\r?\n/).filter((line) => line.trim()).length > 30 || song.lyrics.split(/\r?\n/).some((line) => line.length > 200)) {
-          throw new HttpError(400, 'ElevenLabs accepte au maximum 30 lignes de 200 caractères par chanson.', 'song_lyrics_too_long');
+        if (lyricsTooLong(song.lyrics)) {
+          throw new HttpError(400, `Paroles trop longues : ${MAX_SECTION_LINES} lignes au maximum par section ([Couplet], [Refrain]…) et ${MAX_LINE_CHARS} caractères par ligne.`, 'song_lyrics_too_long');
         }
         const updated = await db.tx(async (tx) => {
           await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [user.id]);
@@ -686,9 +792,11 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
           // The free plan's songs are shorter: ElevenLabs Music is billed per minute.
           const maxSec = plan.id === 'free' ? commerce.freeSongMaxSec : 120;
           return tx.one<SongRow>(
-            `UPDATE songs SET status = 'running', error = NULL, finished_at = NULL, heartbeat_at = now(), updated_at = now(), duration_sec = LEAST(duration_sec, $3)
+            // The seed is drawn once per song and reused by every later version.
+            `UPDATE songs SET status = 'running', error = NULL, finished_at = NULL, heartbeat_at = now(), updated_at = now(), duration_sec = LEAST(duration_sec, $3),
+               seed = coalesce(seed, $4)
              WHERE id = $1 AND user_id = $2 AND status IN ('draft', 'failed') RETURNING *`,
-            [song.id, user.id, maxSec],
+            [song.id, user.id, maxSec, crypto.randomInt(0, 2_147_483_647)],
           );
         });
         if (!updated) throw new HttpError(409, 'Cette chanson est déjà en cours ou a déjà été générée.', 'song_not_ready');
@@ -696,13 +804,19 @@ export const createSaasApp = async (initialConfig: AppConfig, options: SaasOptio
         songTasks.add(task);
         return json(res, 202, publicSong(updated));
       }
-      if (sub === 'audio' && song.audio_file && method === 'GET') {
+      if (sub === 'audio' && method === 'GET') {
+        // ?version=N: an earlier version kept after a lyrics correction (same rights as the song).
+        const n = url.searchParams.get('version');
+        const kept = n ? songVersions(song)[Number(n) - 1] : undefined;
+        if (n && (!kept || !/^\d+$/.test(n))) throw new HttpError(404, 'not found', 'not_found');
+        const file = kept?.file ?? song.audio_file;
+        if (!file || !fs.existsSync(file)) throw new HttpError(404, 'not found', 'not_found');
         const download = url.searchParams.get('download') === '1';
         const entitled = planOfUser(config, user).id !== 'free' || song.export_paid;
         if (download && !entitled) throw new HttpError(402, 'Débloquez cet export pour télécharger la chanson.', 'export_payment_required', { product: 'song', targetId: song.id });
-        if (entitled) return sendFile(req, res, song.audio_file, { download, cache: 'private, no-cache' });
+        if (entitled) return sendFile(req, res, file, { download, cache: 'private, no-cache' });
         // Not unlocked: listening on the platform only gets a short excerpt, never the full master.
-        const preview = await ensureSongPreview(song, (await getCommerceSettings(db)).songPreviewSec);
+        const preview = await ensureSongPreview(song, (await getCommerceSettings(db)).songPreviewSec, kept ? { number: Number(n), file } : undefined);
         return sendFile(req, res, preview, { cache: 'no-store' });
       }
       throw new HttpError(404, 'not found', 'not_found');

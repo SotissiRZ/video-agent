@@ -134,6 +134,8 @@ export interface PlannedScene {
   visualPrompt: string;
   /** Customer product photo to show (1-based), when the script asked for one. */
   productPhoto?: number;
+  /** Staging chosen by the AI director (framing, motion graphics, cut to the next scene). */
+  staging?: { framing?: 'full' | 'card'; accent?: 'brackets' | 'sweep' | 'orbs' | 'lines' | 'ring' | 'none'; cut?: 'whip' | 'push' | 'zoom' | 'iris' | 'clock' | 'fade' | 'slide' | 'wipe' };
   /** Relative weight used to split the total duration. */
   weight: number;
 }

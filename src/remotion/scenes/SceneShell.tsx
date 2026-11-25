@@ -3,7 +3,8 @@ import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } fr
 import type { Scene, Storyboard } from '../contract/storyboard';
 import { Background } from '../components/Background';
 import { MediaStack } from '../components/MediaLayer';
-import { springFor, useLayout, withAlpha } from '../utils';
+import { MotionAccents } from '../components/MotionAccents';
+import { scrim, springFor, useLayout, withAlpha } from '../utils';
 
 export interface SceneProps {
   scene: Scene;
@@ -23,25 +24,58 @@ export const SceneShell: React.FC<SceneProps & { children: React.ReactNode; just
   justify = 'center',
 }) => {
   const layout = useLayout();
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
   const { theme } = storyboard;
   const align = scene.layout === 'left' ? 'flex-start' : 'center';
   const mediaBackdrop = scene.media && scene.kind !== 'image';
+  // Not every scene is a full-bleed photo: every third one shows it as a floating 3D card.
+  // The AI director decides; otherwise every third media scene.
+  const card = Boolean(mediaBackdrop) && (scene.staging.layout === 'card' || (scene.staging.layout === 'auto' && index % 3 === 1));
+  const cardIn = spring({ frame: frame - 2, fps, config: { damping: 14, stiffness: 90 } });
+  const media = scene.media ? [scene.media, ...(scene.shots ?? [])] : [];
   return (
     <AbsoluteFill style={{ backgroundColor: theme.palette.background }}>
+      {card ? (
+        <>
+          <Background spec={{ variant: 'gradient' }} theme={theme} seed={index + 1} />
+          <AbsoluteFill style={{ alignItems: 'center', justifyContent: 'center', perspective: layout.unit * 2.4 }}>
+            <div
+              style={{
+                position: 'relative',
+                width: '86%',
+                height: layout.isPortrait ? '74%' : '80%',
+                borderRadius: layout.unit * 0.04,
+                overflow: 'hidden',
+                boxShadow: `0 ${layout.unit * 0.04}px ${layout.unit * 0.12}px rgba(0, 0, 0, 0.45)`,
+                // Swings in from the side, then keeps rocking gently.
+                transform: `translateY(${((1 - cardIn) * 12).toFixed(2)}%) rotateY(${(interpolate(cardIn, [0, 1], [-28, -5]) + Math.sin(frame / 30) * 3).toFixed(2)}deg) rotateX(${(Math.cos(frame / 34) * 2.5).toFixed(2)}deg) scale(${interpolate(cardIn, [0, 1], [0.8, 1]).toFixed(4)})`,
+                opacity: interpolate(cardIn, [0, 0.4], [0, 1], { extrapolateRight: 'clamp' }),
+              }}
+            >
+              <MediaStack media={media} kenBurns={scene.animation.kenBurns} />
+            </div>
+          </AbsoluteFill>
+        </>
+      ) : null}
       {mediaBackdrop && scene.media ? (
         <>
-          <MediaStack media={[scene.media, ...(scene.shots ?? [])]} kenBurns={scene.animation.kenBurns} />
+          {card ? null : <MediaStack media={media} kenBurns={scene.animation.kenBurns} />}
           <AbsoluteFill
             style={{
-              // Strong enough for white text over a bright photo (a white desk, a silver laptop),
-              // darkest behind the headline and the subtitles.
-              background: `linear-gradient(180deg, ${withAlpha(theme.palette.backgroundAlt, 0.38)} 0%, ${withAlpha(theme.palette.backgroundAlt, 0.64)} 35%, ${withAlpha(theme.palette.backgroundAlt, 0.64)} 65%, ${withAlpha(theme.palette.backgroundAlt, 0.82)} 100%)`,
+              // Neutral and local: darker only behind the centred text and the subtitles at the
+              // bottom, so the picture keeps its own colours and contrast everywhere else.
+              background: [
+                `radial-gradient(ellipse 90% 50% at 50% 50%, ${scrim(theme.palette.text, 0.42)} 0%, ${scrim(theme.palette.text, 0.2)} 65%, ${scrim(theme.palette.text, 0.08)} 100%)`,
+                `linear-gradient(180deg, ${scrim(theme.palette.text, 0.18)} 0%, transparent 22%, transparent 62%, ${scrim(theme.palette.text, 0.6)} 100%)`,
+              ].join(', '),
             }}
           />
         </>
       ) : (
         <Background spec={scene.background} theme={theme} seed={index + 1} />
       )}
+      {scene.staging.accent === 'none' ? null : <MotionAccents theme={theme} index={index} variant={scene.staging.accent === 'auto' ? undefined : scene.staging.accent} />}
       <AbsoluteFill
         style={{
           padding: `${layout.padY}px ${layout.padX}px`,
@@ -54,7 +88,7 @@ export const SceneShell: React.FC<SceneProps & { children: React.ReactNode; just
           textShadow: theme.glow
             ? `0 0 ${layout.unit * 0.012}px ${withAlpha(theme.palette.primary, 0.75)}, 0 0 ${layout.unit * 0.035}px ${withAlpha(theme.palette.primary, 0.35)}`
             : mediaBackdrop
-              ? `0 ${layout.unit * 0.003}px ${layout.unit * 0.018}px ${withAlpha(theme.palette.backgroundAlt, 0.7)}`
+              ? `0 ${layout.unit * 0.003}px ${layout.unit * 0.02}px ${scrim(theme.palette.text, 0.65)}, 0 0 ${layout.unit * 0.006}px ${scrim(theme.palette.text, 0.5)}`
               : undefined,
         }}
       >

@@ -3,7 +3,8 @@ import { AbsoluteFill, interpolate, useCurrentFrame, useVideoConfig } from 'remo
 import { AnimatedText } from '../components/AnimatedText';
 import { Background } from '../components/Background';
 import { MediaStack } from '../components/MediaLayer';
-import { bodyFontSize, fitFontSize, useLayout, withAlpha } from '../utils';
+import { MotionAccents } from '../components/MotionAccents';
+import { bodyFontSize, fitFontSize, scrim, useLayout, withAlpha } from '../utils';
 import { FadeUp, type SceneProps } from './SceneShell';
 
 /**
@@ -57,11 +58,12 @@ export const ImageScene: React.FC<SceneProps> = ({ scene, storyboard, index }) =
       )}
       <AbsoluteFill
         style={{
-          // The headline sits in the lower third: dark enough there for white text over a bright photo.
-          background: `linear-gradient(180deg, transparent 25%, ${withAlpha(palette.backgroundAlt, 0.6)} 52%, ${withAlpha(palette.backgroundAlt, 0.88)} 100%)`,
+          // The headline sits in the lower third: a neutral veil there only, the photo stays untouched above.
+          background: `linear-gradient(180deg, transparent 42%, ${scrim(palette.text, 0.42)} 62%, ${scrim(palette.text, 0.78)} 100%)`,
           opacity: interpolate(frame, [0, durationInFrames * 0.2], [0.6, 1], { extrapolateRight: 'clamp' }),
         }}
       />
+      {scene.staging.accent === 'none' ? null : <MotionAccents theme={theme} index={index} variant={scene.staging.accent === 'auto' ? undefined : scene.staging.accent} />}
       <AbsoluteFill
         style={{
           justifyContent: 'flex-end',
